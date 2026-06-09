@@ -56,6 +56,16 @@ def test_runner_tab_repairs_mojibake_text():
     assert clean_display_text("Р¦С–РЅР°") == "Ціна"
 
 
+def test_runner_status_guards():
+    from gui.runner_tab import RunnerStatus, can_start_runner, can_stop_runner
+
+    assert can_start_runner(RunnerStatus.IDLE, "DEMO") == (True, "")
+    assert can_start_runner(RunnerStatus.RUNNING, "DEMO")[0] is False
+    assert can_start_runner(RunnerStatus.IDLE, "REAL")[0] is False
+    assert can_stop_runner(RunnerStatus.RUNNING) == (True, "")
+    assert can_stop_runner(RunnerStatus.IDLE)[0] is False
+
+
 def test_gui_tab_modules_import():
     from gui.analytics_tab import AnalyticsTab
     from gui.backtest_tab import BacktestTab

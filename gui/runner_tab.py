@@ -1,4 +1,5 @@
 from datetime import datetime
+from enum import Enum
 import traceback
 
 from PySide6.QtCore import QObject, QThread, QTimer, Signal, Slot
@@ -29,6 +30,28 @@ def clean_display_text(value) -> str:
 
 def _mojibake_score(text: str) -> int:
     return sum(text.count(marker) for marker in MOJIBAKE_MARKERS)
+
+
+class RunnerStatus(str, Enum):
+    IDLE = "IDLE"
+    RUNNING = "RUNNING"
+    STOPPING = "STOPPING"
+    FINISHED = "FINISHED"
+    ERROR = "ERROR"
+
+
+def can_start_runner(status: RunnerStatus, mode: str) -> tuple[bool, str]:
+    if status in {RunnerStatus.RUNNING, RunnerStatus.STOPPING}:
+        return False, "Runner is already active."
+    if mode.upper() == "REAL":
+        return False, "Start Demo Runner is blocked in REAL mode."
+    return True, ""
+
+
+def can_stop_runner(status: RunnerStatus) -> tuple[bool, str]:
+    if status != RunnerStatus.RUNNING:
+        return False, "Runner is not running."
+    return True, ""
 
 
 class _SignalWriter:
@@ -98,12 +121,15 @@ class DemoRunnerWorker(QObject):
 
 
 class RunnerTab(QWidget):
-    def __init__(self, config, database: DatabaseManager) -> None:
+    def __init__(self, config, database: DatabaseManager, dashboard_refresh_callback=None) -> None:
         super().__init__()
         self.config = config
         self.database = database
+        self.dashboard_refresh_callback = dashboard_refresh_callback
         self.thread: QThread | None = None
         self.worker: DemoRunnerWorker | None = None
+        self.status = RunnerStatus.IDLE
+        self.stopped_by_user = False
 
         self.iterations_input = QLineEdit(str(getattr(self.config, "max_runner_iterations", 5)))
         self.interval_input = QLineEdit(str(getattr(self.config, "runner_interval_seconds", 10)))
@@ -118,6 +144,12 @@ class RunnerTab(QWidget):
         self.status_output = QTextEdit()
         self.status_output.setReadOnly(True)
         self.status_output.setMaximumHeight(170)
+
+        self.status_label = QLabel(f"Runner status: {self.status.value}")
+
+        self.summary_output = QTextEdit()
+        self.summary_output.setReadOnly(True)
+        self.summary_output.setMaximumHeight(105)
 
         self.output = QTextEdit()
         self.output.setReadOnly(True)
@@ -147,16 +179,26 @@ class RunnerTab(QWidget):
 
         layout = QVBoxLayout()
         layout.addLayout(controls)
+        layout.addWidget(self.status_label)
         layout.addWidget(QLabel("Status:"))
         layout.addWidget(self.status_output)
+        layout.addWidget(QLabel("Last run summary:"))
+        layout.addWidget(self.summary_output)
         layout.addLayout(actions)
         layout.addWidget(QLabel("Monitor:"))
         layout.addWidget(self.output)
         self.setLayout(layout)
 
+        self._update_last_run_summary()
+        self._set_status(RunnerStatus.IDLE)
         self.refresh()
 
     def start_demo_runner(self) -> None:
+        can_start, reason = can_start_runner(self.status, str(getattr(self.config, "mode", "")))
+        if not can_start:
+            self._append_status(f"WARNING: {reason}")
+            return
+
         iterations = self._read_positive_int(self.iterations_input.text(), "Iterations")
         if iterations is None:
             return
@@ -169,7 +211,10 @@ class RunnerTab(QWidget):
         self._append_status(
             f"Starting demo runner: iterations={iterations}, interval_seconds={interval_seconds}"
         )
-        self._set_running_state(True)
+        self.stopped_by_user = False
+        self._set_status(RunnerStatus.RUNNING)
+        self._update_last_run_summary()
+        self._save_system_event("INFO", "runner started from GUI")
 
         self.thread = QThread(self)
         self.worker = DemoRunnerWorker(iterations=iterations, interval_seconds=interval_seconds)
@@ -188,12 +233,16 @@ class RunnerTab(QWidget):
         self.thread.start()
 
     def stop_runner(self) -> None:
-        if self.worker is None:
-            self._append_status("No runner is currently active.")
+        can_stop, reason = can_stop_runner(self.status)
+        if not can_stop or self.worker is None:
+            self._append_status(f"WARNING: {reason}")
             return
 
+        self.stopped_by_user = True
+        self._set_status(RunnerStatus.STOPPING)
         self.stop_button.setEnabled(False)
         self._append_status("Stop requested by user.")
+        self._save_system_event("WARNING", "runner stop requested from GUI")
         self.worker.request_stop()
 
     def refresh(self) -> None:
@@ -240,11 +289,21 @@ class RunnerTab(QWidget):
 
         return value
 
-    def _set_running_state(self, running: bool) -> None:
-        self.start_button.setEnabled(not running)
-        self.stop_button.setEnabled(running)
-        self.iterations_input.setEnabled(not running)
-        self.interval_input.setEnabled(not running)
+    def _set_status(self, status: RunnerStatus) -> None:
+        self.status = status
+        self.status_label.setText(f"Runner status: {self.status.value}")
+
+        mode_is_real = str(getattr(self.config, "mode", "")).upper() == "REAL"
+        active = status in {RunnerStatus.RUNNING, RunnerStatus.STOPPING}
+        self.start_button.setEnabled(not active and not mode_is_real)
+        self.stop_button.setEnabled(status == RunnerStatus.RUNNING)
+        self.iterations_input.setEnabled(not active)
+        self.interval_input.setEnabled(not active)
+
+        if mode_is_real:
+            self.start_button.setToolTip("Start Demo Runner is blocked in REAL mode.")
+        else:
+            self.start_button.setToolTip("")
 
     def _append_status(self, message: str) -> None:
         if not message:
@@ -255,25 +314,77 @@ class RunnerTab(QWidget):
         self.status_output.verticalScrollBar().setValue(self.status_output.verticalScrollBar().maximum())
 
     def _handle_runner_finished(self, iterations_completed: int, stopped_by_limit: bool) -> None:
+        self._set_status(RunnerStatus.FINISHED)
         self._append_status(
             "Demo runner completed. "
             f"Iterations: {iterations_completed}. Stopped by limit: {stopped_by_limit}."
         )
-        self._set_running_state(False)
-        self.refresh()
+        self._update_last_run_summary(
+            iterations_completed=iterations_completed,
+            stopped_by_limit=stopped_by_limit,
+            stopped_by_user=self.stopped_by_user,
+        )
+        self._save_system_event(
+            "INFO",
+            (
+                "runner finished from GUI: "
+                f"iterations={iterations_completed}, "
+                f"stopped_by_limit={stopped_by_limit}, "
+                f"stopped_by_user={self.stopped_by_user}"
+            ),
+        )
+        self._refresh_after_runner()
 
     def _handle_runner_error(self, message: str) -> None:
+        self._set_status(RunnerStatus.ERROR)
         self._append_status(f"ERROR:\n{message}")
-        try:
-            self.database.save_system_event("ERROR", "RunnerTab", message)
-        except Exception:
-            pass
-        self._set_running_state(False)
-        self.refresh()
+        self._update_last_run_summary(
+            iterations_completed=0,
+            stopped_by_limit=False,
+            stopped_by_user=self.stopped_by_user,
+            error_message=message,
+        )
+        self._save_system_event("ERROR", f"runner error from GUI: {message}")
+        self._refresh_after_runner()
 
     def _clear_runner_thread(self) -> None:
         self.thread = None
         self.worker = None
+
+    def _update_last_run_summary(
+        self,
+        iterations_completed: int | None = None,
+        stopped_by_limit: bool | None = None,
+        stopped_by_user: bool | None = None,
+        error_message: str | None = None,
+    ) -> None:
+        lines = [
+            f"Iterations completed: {iterations_completed if iterations_completed is not None else 'N/A'}",
+            f"Stopped by limit: {stopped_by_limit if stopped_by_limit is not None else 'N/A'}",
+            f"Stopped by user: {stopped_by_user if stopped_by_user is not None else 'N/A'}",
+            f"Error message: {clean_display_text(error_message) if error_message else 'N/A'}",
+        ]
+        self.summary_output.setPlainText("\n".join(lines))
+
+    def _save_system_event(self, level: str, message: str) -> None:
+        try:
+            self.database.save_system_event(level, "RunnerTab", message)
+        except Exception:
+            pass
+
+    def _refresh_after_runner(self) -> None:
+        try:
+            self.refresh()
+        except Exception:
+            pass
+
+        if self.dashboard_refresh_callback is None:
+            return
+
+        try:
+            self.dashboard_refresh_callback()
+        except Exception:
+            pass
 
     def _safe_count(self, table_name: str) -> int:
         try:

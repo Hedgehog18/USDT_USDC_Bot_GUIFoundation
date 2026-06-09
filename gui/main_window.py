@@ -23,12 +23,13 @@ class MainWindow(QMainWindow):
         self.resize(1000, 700)
 
         tabs = QTabWidget()
-        tabs.addTab(DashboardTab(self.config, self.database), "Dashboard")
+        dashboard_tab = DashboardTab(self.config, self.database)
+        tabs.addTab(dashboard_tab, "Dashboard")
         tabs.addTab(HealthTab(self.config, self.database), "Health")
         tabs.addTab(BacktestTab(self.config, self.database), "Backtest")
         tabs.addTab(PaperTradingTab(self.config, self.database), "Paper Trading")
         tabs.addTab(AnalyticsTab(self.database), "Analytics")
-        tabs.addTab(RunnerTab(self.config, self.database), "Runner")
+        tabs.addTab(RunnerTab(self.config, self.database, dashboard_tab.refresh), "Runner")
         tabs.addTab(LogsTab(self.config.log_file_path, self.database), "Logs")
         tabs.addTab(SettingsTab(), "Settings")
 
