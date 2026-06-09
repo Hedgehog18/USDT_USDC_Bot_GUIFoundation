@@ -40,3 +40,6 @@ def test_database_saves_backtest_result(tmp_path: Path):
     assert run_id > 0
     assert database.count_rows("backtest_runs") == 1
     assert database.count_rows("backtest_trades") == 1
+    assert database.load_backtest_trades(run_id) == [
+        (10, "BUY_USDC", 1.0, 1.001, 10.0, 0.01, 0.002, 0.008)
+    ]

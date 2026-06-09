@@ -886,6 +886,19 @@ class DatabaseManager:
                 (run_id,),
             ).fetchall()
 
+    def load_backtest_trades(self, run_id: int) -> list[tuple]:
+        with self.connect() as conn:
+            return conn.execute(
+                """
+                SELECT trade_index, action, entry_price, exit_price,
+                       quantity, gross_profit, fees, net_profit
+                FROM backtest_trades
+                WHERE run_id = ?
+                ORDER BY trade_index ASC
+                """,
+                (run_id,),
+            ).fetchall()
+
 
     def save_walk_forward_result(self, result, windows: list) -> int:
         from datetime import datetime
