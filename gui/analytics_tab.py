@@ -1,6 +1,6 @@
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
-from PySide6.QtWidgets import QLabel, QPushButton, QTextEdit, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QLabel, QPushButton, QScrollArea, QSizePolicy, QTextEdit, QVBoxLayout, QWidget
 
 from storage.database_manager import DatabaseManager
 
@@ -21,29 +21,43 @@ class AnalyticsTab(QWidget):
 
         self.summary = QTextEdit()
         self.summary.setReadOnly(True)
+        self.summary.setMaximumHeight(125)
 
-        self.equity_figure = Figure(figsize=(6, 3))
+        self.equity_figure = Figure(figsize=(8, 3.6), constrained_layout=True)
         self.equity_canvas = FigureCanvas(self.equity_figure)
 
-        self.drawdown_figure = Figure(figsize=(6, 3))
+        self.drawdown_figure = Figure(figsize=(8, 3.6), constrained_layout=True)
         self.drawdown_canvas = FigureCanvas(self.drawdown_figure)
 
-        self.pnl_figure = Figure(figsize=(6, 3))
+        self.pnl_figure = Figure(figsize=(8, 3.6), constrained_layout=True)
         self.pnl_canvas = FigureCanvas(self.pnl_figure)
+        for canvas in (self.equity_canvas, self.drawdown_canvas, self.pnl_canvas):
+            canvas.setMinimumHeight(330)
+            canvas.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
         self.refresh_button = QPushButton("Refresh Analytics")
         self.refresh_button.clicked.connect(self.refresh)
 
+        content = QWidget()
+        content_layout = QVBoxLayout()
+        content_layout.addWidget(QLabel("Summary:"))
+        content_layout.addWidget(self.summary)
+        content_layout.addWidget(QLabel("Equity Curve:"))
+        content_layout.addWidget(self.equity_canvas)
+        content_layout.addWidget(QLabel("Drawdown Curve:"))
+        content_layout.addWidget(self.drawdown_canvas)
+        content_layout.addWidget(QLabel("Trade PnL Distribution:"))
+        content_layout.addWidget(self.pnl_canvas)
+        content_layout.addStretch()
+        content.setLayout(content_layout)
+
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setWidget(content)
+
         layout = QVBoxLayout()
         layout.addWidget(self.refresh_button)
-        layout.addWidget(QLabel("Summary:"))
-        layout.addWidget(self.summary)
-        layout.addWidget(QLabel("Equity Curve:"))
-        layout.addWidget(self.equity_canvas)
-        layout.addWidget(QLabel("Drawdown Curve:"))
-        layout.addWidget(self.drawdown_canvas)
-        layout.addWidget(QLabel("Trade PnL Distribution:"))
-        layout.addWidget(self.pnl_canvas)
+        layout.addWidget(scroll_area)
         self.setLayout(layout)
 
         self.refresh()
@@ -120,7 +134,6 @@ class AnalyticsTab(QWidget):
         axes.set_xlabel("Point")
         axes.set_ylabel("Portfolio value")
         axes.grid(True, alpha=0.3)
-        self.equity_figure.tight_layout()
         self.equity_canvas.draw()
 
     def _draw_drawdown_curve(self, indexes: list[int], drawdowns: list[float], run_id: int) -> None:
@@ -132,7 +145,6 @@ class AnalyticsTab(QWidget):
         axes.set_xlabel("Point")
         axes.set_ylabel("Drawdown (%)")
         axes.grid(True, alpha=0.3)
-        self.drawdown_figure.tight_layout()
         self.drawdown_canvas.draw()
 
     def _draw_trade_pnl_distribution(self, net_profits: list[float], run_id: int) -> None:
@@ -146,7 +158,6 @@ class AnalyticsTab(QWidget):
         axes.set_xlabel("Net profit")
         axes.set_ylabel("Trades")
         axes.grid(True, alpha=0.3)
-        self.pnl_figure.tight_layout()
         self.pnl_canvas.draw()
 
     def _draw_empty_charts(self, message: str) -> None:
@@ -160,5 +171,4 @@ class AnalyticsTab(QWidget):
         axes = figure.add_subplot(111)
         axes.text(0.5, 0.5, message, ha="center", va="center", transform=axes.transAxes)
         axes.set_axis_off()
-        figure.tight_layout()
         canvas.draw()
