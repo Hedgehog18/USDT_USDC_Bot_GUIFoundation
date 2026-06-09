@@ -870,6 +870,22 @@ class DatabaseManager:
                 (limit,),
             ).fetchall()
 
+    def load_latest_backtest_run(self):
+        rows = self.load_recent_backtest_runs(limit=1)
+        return rows[0] if rows else None
+
+    def load_backtest_equity_points(self, run_id: int) -> list[tuple]:
+        with self.connect() as conn:
+            return conn.execute(
+                """
+                SELECT point_index, value
+                FROM backtest_equity_points
+                WHERE run_id = ?
+                ORDER BY point_index ASC
+                """,
+                (run_id,),
+            ).fetchall()
+
 
     def save_walk_forward_result(self, result, windows: list) -> int:
         from datetime import datetime

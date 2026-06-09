@@ -35,3 +35,6 @@ def test_database_saves_equity_and_periods(tmp_path: Path):
 
     assert database.count_rows("backtest_equity_points") == 2
     assert database.count_rows("backtest_period_analytics") == 1
+
+    assert database.load_latest_backtest_run()[0] == run_id
+    assert database.load_backtest_equity_points(run_id) == [(0, 100.0), (1, 101.0)]

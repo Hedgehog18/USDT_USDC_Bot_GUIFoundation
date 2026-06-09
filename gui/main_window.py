@@ -1,6 +1,7 @@
 from PySide6.QtWidgets import QMainWindow, QTabWidget
 
 from config.config_manager import ConfigManager
+from gui.analytics_tab import AnalyticsTab
 from gui.backtest_tab import BacktestTab
 from gui.dashboard_tab import DashboardTab
 from gui.health_tab import HealthTab
@@ -25,6 +26,7 @@ class MainWindow(QMainWindow):
         tabs.addTab(HealthTab(self.config, self.database), "Health")
         tabs.addTab(BacktestTab(self.config, self.database), "Backtest")
         tabs.addTab(PaperTradingTab(self.config, self.database), "Paper Trading")
+        tabs.addTab(AnalyticsTab(self.database), "Analytics")
         tabs.addTab(LogsTab(self.config.log_file_path, self.database), "Logs")
         tabs.addTab(SettingsTab(), "Settings")
 

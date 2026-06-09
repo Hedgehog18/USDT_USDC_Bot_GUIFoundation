@@ -34,7 +34,16 @@ def test_settings_tab_imports():
     assert SettingsTab is not None
 
 
+def test_analytics_tab_imports():
+    from gui.analytics_tab import AnalyticsTab
+    from gui.main_window import AnalyticsTab as MainWindowAnalyticsTab
+
+    assert AnalyticsTab is not None
+    assert MainWindowAnalyticsTab is AnalyticsTab
+
+
 def test_gui_tab_modules_import():
+    from gui.analytics_tab import AnalyticsTab
     from gui.backtest_tab import BacktestTab
     from gui.dashboard_tab import DashboardTab
     from gui.health_tab import HealthTab
@@ -42,6 +51,7 @@ def test_gui_tab_modules_import():
     from gui.paper_trading_tab import PaperTradingTab
     from gui.settings_tab import SettingsTab
 
+    assert AnalyticsTab is not None
     assert BacktestTab is not None
     assert DashboardTab is not None
     assert HealthTab is not None
