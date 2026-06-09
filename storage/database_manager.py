@@ -527,6 +527,18 @@ class DatabaseManager:
             conn.commit()
             return int(cursor.lastrowid)
 
+    def load_recent_system_events(self, limit: int = 200) -> list[tuple]:
+        with self.connect() as conn:
+            return conn.execute(
+                """
+                SELECT timestamp, level, module, message
+                FROM system_events
+                ORDER BY timestamp DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+
     def count_rows(self, table: str) -> int:
         allowed_tables = {"cycles", "trade_signals", "market_snapshots", "system_events", "bot_budget_events", "notifications", "decision_audit", "backtest_runs", "backtest_trades", "walk_forward_runs", "walk_forward_windows", "backtest_equity_points", "backtest_period_analytics", "paper_orders", "paper_cycles", "paper_safety_events", "paper_state_transitions", "paper_runs"}
         if table not in allowed_tables:

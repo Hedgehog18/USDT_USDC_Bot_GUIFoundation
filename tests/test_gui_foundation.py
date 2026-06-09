@@ -20,3 +20,9 @@ def test_backtest_tab_imports():
     from gui.main_window import BacktestTab
 
     assert BacktestTab is not None
+
+
+def test_logs_tab_imports():
+    from gui.main_window import LogsTab
+
+    assert LogsTab is not None
