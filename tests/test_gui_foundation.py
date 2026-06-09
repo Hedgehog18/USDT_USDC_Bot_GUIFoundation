@@ -26,3 +26,9 @@ def test_logs_tab_imports():
     from gui.main_window import LogsTab
 
     assert LogsTab is not None
+
+
+def test_settings_tab_imports():
+    from gui.main_window import SettingsTab
+
+    assert SettingsTab is not None
