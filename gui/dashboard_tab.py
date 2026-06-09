@@ -1,5 +1,6 @@
 from PySide6.QtWidgets import QLabel, QPushButton, QTextEdit, QVBoxLayout, QWidget
 
+from app.version import VERSION
 from storage.database_manager import DatabaseManager
 
 
@@ -16,7 +17,7 @@ class DashboardTab(QWidget):
         self.refresh_button.clicked.connect(self.refresh)
 
         layout = QVBoxLayout()
-        layout.addWidget(QLabel("USDT/USDC Bot MVP"))
+        layout.addWidget(QLabel(f"USDT/USDC Bot MVP - v{VERSION}"))
         layout.addWidget(self.refresh_button)
         layout.addWidget(self.output)
         self.setLayout(layout)
@@ -26,6 +27,7 @@ class DashboardTab(QWidget):
     def refresh(self) -> None:
         lines = [
             "=== System ===",
+            f"Version: {VERSION}",
             "Config: OK",
             "Database: OK",
             f"Mode: {self.config.mode}",

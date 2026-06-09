@@ -1,94 +1,72 @@
-# USDT/USDC Market-Making Bot MVP
+# USDT/USDC Bot GUI Foundation
 
-Поточний етап:
-- Demo execution через bid/ask;
-- SQLite;
-- RecoveryManager;
-- read-only Binance market data через REST API.
+USDT/USDC Bot GUI Foundation is an MVP trading-bot workspace for DEMO, paper trading, backtesting, diagnostics, and analytics around the USDCUSDT pair.
 
-## Запуск
+The current GUI MVP is focused on safe observation and simulation:
+
+- no real trading is enabled;
+- Binance is used only for read-only market data;
+- Demo Runner uses the existing `BotRunner` / `BotEngine` flow;
+- backtest and paper trading results are stored in SQLite;
+- reports are exported to `reports/`;
+- logs are written to `logs/bot.log`.
+
+## Install
+
+Create and activate a virtual environment:
 
 ```bash
-pip install -r requirements.txt
-python main.py
+python -m venv .venv
+.venv\Scripts\Activate.ps1
 ```
 
-Увага: на цьому етапі бот не створює реальні ордери.
+Install dependencies:
 
-- PortfolioAnalytics: realized profit, win rate, ROI.
+```bash
+python -m pip install -r requirements.txt
+```
 
-- StatisticsEngine: агрегована статистика по циклах і сигналах.
+## Run GUI
 
-- BotStateManager: формальні стани INIT / RECOVERY / READY / RUNNING_DEMO / SAFE_WAIT / ERROR.
+```bash
+python gui_app.py
+```
 
-- NotificationEngine: центр повідомлень INFO / IMPORTANT / WARNING / CRITICAL.
+Or through the CLI entrypoint:
 
-- AuditEngine: збереження пояснень рішень у decision_audit.
+```bash
+python manage.py gui
+```
 
-- ConfigManager: завантаження параметрів із config/settings.json.
+## Run Tests
 
-- ExchangeRulesEngine: tick size, step size, min notional, profitability after rounding.
+```bash
+python -m pytest
+```
 
-- FeeEngine: gross profit, fees, net profit.
+## GUI Tabs
 
-- MarketDataCache: TTL-кеш для Binance REST market data.
+- Dashboard: system summary, database counters, latest backtest and paper results.
+- Health: config, SQLite, and market-data readiness checks.
+- Backtest: run historical backtests from the GUI and view recent runs.
+- Paper Trading: run paper simulation and inspect paper runs/cycles.
+- Analytics: equity curve, drawdown curve, and trade PnL distribution for the latest backtest.
+- Runner: monitor and control the Demo Runner with guarded Start/Stop controls.
+- Logs: file log and system event diagnostics with filters.
+- Settings: read-only config view.
 
-- BotRunner: періодичний запуск Demo-аналізу кожні N секунд із max_iterations.
+## Useful CLI Commands
 
-- OrderBookEngine: аналіз bid/ask liquidity imbalance.
-- TradeHistoryEngine: аналіз останніх угод і micro trend.
-- VolatilityEngine: оцінка режиму волатильності.
+```bash
+python manage.py health
+python manage.py run --iterations 3 --interval 10
+python manage.py backtest --interval 1m --limit 500
+python manage.py paper-cycle-sim --iterations 5
+python manage.py paper-runs --limit 20
+python manage.py paper-stats --limit 100
+python manage.py paper-safety --limit 20
+```
 
-- DecisionEngine now uses order book pressure, micro trend and volatility filters.
+## Safety Notice
 
-- MarketHealthEngine: spread/liquidity/volatility health gate before decisions.
-
-- DatabaseMigrationManager: безпечне додавання нових колонок у SQLite через легкі міграції.
-
-- HealthCheck: стартова перевірка config / SQLite / Binance read-only.
-
-- AppLogger: файлові логи logs/bot.log з ротацією.
-
-- manage.py: CLI для run / health / migrate / stats / notifications / audit.
-
-- BacktestEngine: історичний read-only backtest на Binance klines.
-
-- BacktestReportExporter: збереження backtest summary/trades у CSV.
-- Backtest results storage: backtest_runs і backtest_trades у SQLite.
-
-- BacktestComparisonEngine: рейтинг і порівняння історичних backtest-запусків.
-- BacktestComparisonExporter: CSV-експорт порівняння запусків.
-
-- ParameterSweepEngine: серійний backtest для підбору target_profit і trade_size_percent.
-- ParameterSweepExporter: CSV-експорт parameter sweep.
-
-- WalkForwardEngine: train/test перевірка параметрів проти overfitting.
-- WalkForwardExporter: CSV-експорт walk-forward результатів.
-
-- Walk-forward storage: walk_forward_runs і walk_forward_windows у SQLite.
-
-- BacktestMetricsEngine: equity returns, Sharpe, Sortino, Profit Factor, Expectancy.
-
-- EquityAnalyticsEngine: equity curve і period analytics для backtest.
-- Backtest equity/period storage: backtest_equity_points і backtest_period_analytics.
-
-- BacktestInsightsEngine: автоматичні висновки по backtest результату.
-- BacktestInsightsExporter: TXT-звіт з сильними/слабкими сторонами і next steps.
-
-- PaperExchange / PaperOrderManager / PaperPortfolioManager: перший шар paper trading без реальних коштів.
-
-- PaperCycleManager: paper open/close цикли з PnL і збереженням у SQLite.
-
-- PaperAnalyticsEngine: статистика paper cycles.
-- PaperSafetyEngine: paper kill-switch правила drawdown/loss streak/min portfolio value.
-
-- PaperTradingEngine: orchestrator paper-режиму для CLI/GUI.
-- PaperReportExporter: CSV-звіти по paper cycles, safety і summary.
-
-- PaperStateManager: формальні стани paper режиму INIT/READY/RUNNING/SAFE_STOP/STOPPED/ERROR.
-- PaperRecoveryManager: відновлення snapshot portfolio/open cycles після перезапуску.
-
-- PaperInsightsEngine: автоматичні висновки по paper-run.
-- Paper run storage: paper_runs у SQLite та paper-runs CLI.
-
-- PySide6 GUI foundation: Dashboard / Health / Backtest / Paper Trading / Logs.
+Real trading is not enabled in this GUI MVP checkpoint. Do not use this project for live order placement without a separate real-trading implementation, dedicated risk controls, API-key management, and review.

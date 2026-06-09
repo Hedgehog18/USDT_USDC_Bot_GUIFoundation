@@ -1,5 +1,6 @@
 from PySide6.QtWidgets import QMainWindow, QTabWidget
 
+from app.version import VERSION
 from config.config_manager import ConfigManager
 from gui.analytics_tab import AnalyticsTab
 from gui.backtest_tab import BacktestTab
@@ -19,7 +20,7 @@ class MainWindow(QMainWindow):
         self.config = ConfigManager().config
         self.database = DatabaseManager(self.config.database_path)
 
-        self.setWindowTitle("USDT/USDC Bot MVP")
+        self.setWindowTitle(f"USDT/USDC Bot MVP - v{VERSION}")
         self.resize(1000, 700)
 
         tabs = QTabWidget()
