@@ -160,7 +160,7 @@ def command_audit(args) -> None:
 
 
 def command_backtest(args) -> None:
-    config, logger, _database = build_context()
+    config, logger, database = build_context()
     provider = BinanceMarketDataProvider(base_url=config.binance_base_url)
     historical = HistoricalDataProvider(provider)
 

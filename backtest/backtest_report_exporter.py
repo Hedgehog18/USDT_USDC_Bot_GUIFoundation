@@ -100,41 +100,40 @@ class BacktestReportExporter:
 
         return path
 
+    def export_equity_csv(self, run_id: int, equity_points: list) -> Path:
+        path = self.reports_dir / f"backtest_run_{run_id}_equity.csv"
 
-def export_equity_csv(self, run_id: int, equity_points: list) -> Path:
-    path = self.reports_dir / f"backtest_run_{run_id}_equity.csv"
+        with path.open("w", newline="", encoding="utf-8") as file:
+            writer = csv.writer(file)
+            writer.writerow(["run_id", "point_index", "value"])
+            for point in equity_points:
+                writer.writerow([run_id, point.index, point.value])
 
-    with path.open("w", newline="", encoding="utf-8") as file:
-        writer = csv.writer(file)
-        writer.writerow(["run_id", "point_index", "value"])
-        for point in equity_points:
-            writer.writerow([run_id, point.index, point.value])
+        return path
 
-    return path
+    def export_period_analytics_csv(self, run_id: int, periods: list) -> Path:
+        path = self.reports_dir / f"backtest_run_{run_id}_periods.csv"
 
-def export_period_analytics_csv(self, run_id: int, periods: list) -> Path:
-    path = self.reports_dir / f"backtest_run_{run_id}_periods.csv"
-
-    with path.open("w", newline="", encoding="utf-8") as file:
-        writer = csv.writer(file)
-        writer.writerow([
-            "run_id",
-            "period",
-            "start_value",
-            "end_value",
-            "profit",
-            "roi",
-            "trades",
-        ])
-        for period in periods:
+        with path.open("w", newline="", encoding="utf-8") as file:
+            writer = csv.writer(file)
             writer.writerow([
-                run_id,
-                period.period,
-                period.start_value,
-                period.end_value,
-                period.profit,
-                period.roi,
-                period.trades,
+                "run_id",
+                "period",
+                "start_value",
+                "end_value",
+                "profit",
+                "roi",
+                "trades",
             ])
+            for period in periods:
+                writer.writerow([
+                    run_id,
+                    period.period,
+                    period.start_value,
+                    period.end_value,
+                    period.profit,
+                    period.roi,
+                    period.trades,
+                ])
 
-    return path
+        return path
