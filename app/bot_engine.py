@@ -181,7 +181,6 @@ class BotEngine:
         print(f"System events Сѓ Р‘Р”: {self.database.count_rows('system_events')}")
 
         stats = self.portfolio_analytics.calculate_stats(
-            total_deposits=budget.total_value,
             current_portfolio_value=budget.total_value + self.database.sum_realized_profit(),
         )
 
