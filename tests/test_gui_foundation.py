@@ -4,6 +4,12 @@ def test_gui_main_window_imports():
     assert MainWindow is not None
 
 
+def test_dashboard_tab_imports():
+    from gui.main_window import DashboardTab
+
+    assert DashboardTab is not None
+
+
 def test_paper_trading_tab_imports():
     from gui.main_window import PaperTradingTab
 
