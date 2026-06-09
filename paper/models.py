@@ -34,8 +34,20 @@ class PaperPortfolio:
     usdc_price: float = 1.0
 
     @property
+    def usdt_budget(self) -> float:
+        return self.usdt
+
+    @property
+    def usdc_budget(self) -> float:
+        return self.usdc
+
+    @property
+    def usdc_value(self) -> float:
+        return self.usdc * self.usdc_price
+
+    @property
     def total_value(self) -> float:
-        return self.usdt + self.usdc * self.usdc_price
+        return self.usdt + self.usdc_value
 
 
 @dataclass(frozen=True)

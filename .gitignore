@@ -21,3 +21,4 @@ Thumbs.db
 
 # Generated reports
 reports/*.csv
+reports/*.txt
