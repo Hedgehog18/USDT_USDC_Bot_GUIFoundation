@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 from PySide6.QtWidgets import QLabel, QPushButton, QScrollArea, QSizePolicy, QTextEdit, QVBoxLayout, QWidget
@@ -23,6 +25,10 @@ class AnalyticsTab(QWidget):
         self.summary.setReadOnly(True)
         self.summary.setMaximumHeight(125)
 
+        self.insights = QTextEdit()
+        self.insights.setReadOnly(True)
+        self.insights.setMaximumHeight(170)
+
         self.equity_figure = Figure(figsize=(8, 3.6), constrained_layout=True)
         self.equity_canvas = FigureCanvas(self.equity_figure)
 
@@ -42,6 +48,8 @@ class AnalyticsTab(QWidget):
         content_layout = QVBoxLayout()
         content_layout.addWidget(QLabel("Summary:"))
         content_layout.addWidget(self.summary)
+        content_layout.addWidget(QLabel("Latest Backtest Insights:"))
+        content_layout.addWidget(self.insights)
         content_layout.addWidget(QLabel("Equity Curve:"))
         content_layout.addWidget(self.equity_canvas)
         content_layout.addWidget(QLabel("Drawdown Curve:"))
@@ -66,6 +74,7 @@ class AnalyticsTab(QWidget):
         run = self._load_latest_backtest_run()
         if run is None:
             self.summary.setPlainText("No backtest runs yet.")
+            self.insights.setPlainText("No backtest insights yet.")
             self._draw_empty_charts("No backtest runs yet.")
             return
 
@@ -84,6 +93,7 @@ class AnalyticsTab(QWidget):
                 f"Max drawdown: {max_drawdown * 100:.4f}%",
             ])
         )
+        self.insights.setPlainText("\n".join(self._load_backtest_insights_lines(run_id)))
 
         points = self._load_equity_points(run_id)
         if not points:
@@ -125,6 +135,14 @@ class AnalyticsTab(QWidget):
             return self.database.load_backtest_trades(run_id)
         except Exception:
             return []
+
+    def _load_backtest_insights_lines(self, run_id: int) -> list[str]:
+        path = Path("reports") / f"backtest_run_{run_id}_insights.txt"
+        if not path.exists():
+            return ["No insights TXT for latest backtest yet."]
+
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        return [f"Insights TXT: {path}", *lines]
 
     def _draw_equity_curve(self, indexes: list[int], values: list[float], run_id: int) -> None:
         self.equity_figure.clear()

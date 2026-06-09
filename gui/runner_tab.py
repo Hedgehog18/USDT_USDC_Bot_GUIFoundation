@@ -146,6 +146,7 @@ class RunnerTab(QWidget):
         self.status_output.setMaximumHeight(170)
 
         self.status_label = QLabel(f"Runner status: {self.status.value}")
+        self.safety_label = QLabel("Real trading disabled. Demo/Paper mode only.")
 
         self.summary_output = QTextEdit()
         self.summary_output.setReadOnly(True)
@@ -179,6 +180,7 @@ class RunnerTab(QWidget):
 
         layout = QVBoxLayout()
         layout.addLayout(controls)
+        layout.addWidget(self.safety_label)
         layout.addWidget(self.status_label)
         layout.addWidget(QLabel("Status:"))
         layout.addWidget(self.status_output)
