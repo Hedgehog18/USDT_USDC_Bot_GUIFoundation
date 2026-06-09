@@ -1,0 +1,89 @@
+from pathlib import Path
+
+from paper.paper_trading_engine import PaperTradingEngine
+from storage.database_manager import DatabaseManager
+
+
+class FakeMarketAnalyzer:
+    def analyze_market(self):
+        from datetime import datetime
+        from market.models import MarketState
+
+        return MarketState(
+            symbol="USDCUSDT",
+            price=1.0,
+            bid=0.99999,
+            ask=1.00001,
+            spread=0.00002,
+            work_low=0.9999,
+            work_high=1.0001,
+            work_center=1.0,
+            work_position=50.0,
+            short_low=0.9998,
+            short_high=1.0002,
+            short_center=1.0,
+            short_position=50.0,
+            long_low=0.9995,
+            long_high=1.0005,
+            long_center=1.0,
+            long_position=50.0,
+            center_confidence="HIGH",
+            center_alignment="FLAT",
+            tick_activity_score=80.0,
+            center_crossing_score=80.0,
+            mean_reversion_score=80.0,
+            spread_stability_score=90.0,
+            corridor_quality_score=80.0,
+            market_activity_score=80.0,
+            market_regime="ACTIVE",
+            order_book_imbalance=0.0,
+            order_book_pressure="BALANCED",
+            trade_volume_delta=0.0,
+            micro_trend="NEUTRAL",
+            relative_volatility=0.0,
+            volatility_regime="NORMAL",
+            market_health_score=100.0,
+            market_health_status="HEALTHY",
+            market_health_reason="test",
+            created_at=datetime.utcnow(),
+        )
+
+
+class FakeDecisionEngine:
+    def make_decision(self, market_state):
+        from datetime import datetime
+        from strategy.models import TradeDecision
+
+        return TradeDecision(
+            action="WAIT",
+            reason="test",
+            confidence="LOW",
+            cycle_prediction_score=0.0,
+            recommended_trade_size=0.0,
+            target_profit=0.0002,
+            created_at=datetime.utcnow(),
+        )
+
+
+class FakeRiskManager:
+    def validate_decision(self, decision, portfolio, current_price=1.0):
+        from strategy.models import RiskResult
+
+        return RiskResult(False, "wait", "LOW")
+
+
+class FakeBot:
+    def __init__(self):
+        self.market_analyzer = FakeMarketAnalyzer()
+        self.decision_engine = FakeDecisionEngine()
+        self.risk_manager = FakeRiskManager()
+
+
+def test_paper_trading_engine_runs(test_config, tmp_path: Path):
+    database = DatabaseManager(str(tmp_path / "bot.sqlite"))
+    result = PaperTradingEngine(test_config, database, bot=FakeBot()).run(2)
+
+    assert result.iterations == 2
+    assert result.opened_cycles == 0
+    assert result.final_portfolio.total_value > 0
+    assert database.count_rows("paper_safety_events") == 2

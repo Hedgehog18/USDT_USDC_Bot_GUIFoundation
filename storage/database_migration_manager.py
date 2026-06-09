@@ -1,0 +1,78 @@
+import sqlite3
+from dataclasses import dataclass
+from pathlib import Path
+
+
+@dataclass(frozen=True)
+class ColumnDefinition:
+    name: str
+    definition: str
+
+
+class DatabaseMigrationManager:
+    """Легкі SQLite-міграції для MVP.
+
+    Для нашого поточного етапу достатньо:
+    - перевірити, які колонки вже є;
+    - додати відсутні через ALTER TABLE;
+    - не ламати існуючу БД при оновленні проєкту.
+    """
+
+    REQUIRED_COLUMNS: dict[str, list[ColumnDefinition]] = {
+        "backtest_runs": [
+            ColumnDefinition("sharpe_ratio", "REAL DEFAULT 0"),
+            ColumnDefinition("sortino_ratio", "REAL DEFAULT 0"),
+            ColumnDefinition("profit_factor", "REAL DEFAULT 0"),
+            ColumnDefinition("expectancy", "REAL DEFAULT 0"),
+        ],
+        "market_snapshots": [
+            ColumnDefinition("order_book_imbalance", "REAL DEFAULT 0"),
+            ColumnDefinition("order_book_pressure", "TEXT DEFAULT 'UNKNOWN'"),
+            ColumnDefinition("trade_volume_delta", "REAL DEFAULT 0"),
+            ColumnDefinition("micro_trend", "TEXT DEFAULT 'UNKNOWN'"),
+            ColumnDefinition("relative_volatility", "REAL DEFAULT 0"),
+            ColumnDefinition("volatility_regime", "TEXT DEFAULT 'UNKNOWN'"),
+            ColumnDefinition("market_health_score", "REAL DEFAULT 0"),
+            ColumnDefinition("market_health_status", "TEXT DEFAULT 'UNKNOWN'"),
+            ColumnDefinition("market_health_reason", "TEXT DEFAULT ''"),
+        ],
+    }
+
+    def __init__(self, db_path: str | Path) -> None:
+        self.db_path = Path(db_path)
+
+    def run(self) -> list[str]:
+        applied: list[str] = []
+
+        with sqlite3.connect(self.db_path) as conn:
+            for table_name, columns in self.REQUIRED_COLUMNS.items():
+                if not self._table_exists(conn, table_name):
+                    continue
+
+                existing_columns = self._get_existing_columns(conn, table_name)
+
+                for column in columns:
+                    if column.name in existing_columns:
+                        continue
+
+                    conn.execute(
+                        f"ALTER TABLE {table_name} ADD COLUMN {column.name} {column.definition}"
+                    )
+                    applied.append(f"{table_name}.{column.name}")
+
+            conn.commit()
+
+        return applied
+
+    @staticmethod
+    def _table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
+        row = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name = ?",
+            (table_name,),
+        ).fetchone()
+        return row is not None
+
+    @staticmethod
+    def _get_existing_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
+        rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+        return {row[1] for row in rows}

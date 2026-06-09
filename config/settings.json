@@ -1,0 +1,56 @@
+{
+  "symbol": "USDCUSDT",
+  "mode": "DEMO",
+  "market_data_source": "BINANCE_REST",
+  "binance_base_url": "https://api.binance.com",
+
+  "target_profit": 0.0002,
+  "trade_size_percent": 0.10,
+  "max_active_cycles": 1,
+
+  "work_window_minutes": 15,
+  "short_window_minutes": 60,
+  "long_window_minutes": 1440,
+
+  "min_market_activity_score": 40.0,
+  "min_cycle_prediction_score": 60.0,
+  "buy_zone_max": 20.0,
+  "sell_zone_min": 80.0,
+
+  "min_usdt_reserve_percent": 0.20,
+  "min_usdc_reserve_percent": 0.20,
+
+  "database_path": "database/bot.sqlite",
+  "use_real_market_data": true,
+
+  "price_tick_size": 0.00001,
+  "quantity_step_size": 0.0001,
+  "min_notional": 5.0,
+  "maker_fee_percent": 0.001,
+  "taker_fee_percent": 0.001,
+
+  "market_data_cache_ttl_seconds": 5,
+
+  "runner_interval_seconds": 10,
+  "max_runner_iterations": 3,
+
+  "order_book_limit": 20,
+  "trade_history_limit": 50,
+  "volatility_window": 30,
+
+  "max_allowed_spread": 0.0002,
+  "min_liquidity_score": 5.0,
+  "min_market_health_score": 50.0,
+
+  "log_file_path": "logs/bot.log",
+  "log_level": "INFO",
+
+  "backtest_interval": "1m",
+  "backtest_limit": 500,
+  "backtest_initial_usdt": 50.0,
+  "backtest_initial_usdc": 50.0,
+
+  "paper_max_drawdown": 0.05,
+  "paper_max_losing_cycles": 3,
+  "paper_min_portfolio_value": 80.0
+}
