@@ -50,6 +50,12 @@ def test_runner_tab_imports():
     assert MainWindowRunnerTab is RunnerTab
 
 
+def test_runner_tab_repairs_mojibake_text():
+    from gui.runner_tab import clean_display_text
+
+    assert clean_display_text("Р¦С–РЅР°") == "Ціна"
+
+
 def test_gui_tab_modules_import():
     from gui.analytics_tab import AnalyticsTab
     from gui.backtest_tab import BacktestTab

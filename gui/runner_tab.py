@@ -9,6 +9,28 @@ from runner.bot_runner import BotRunner
 from storage.database_manager import DatabaseManager
 
 
+MOJIBAKE_MARKERS = ("Р", "СЃ", "С–", "С€", "Ð", "Ñ", "Ò")
+
+
+def clean_display_text(value) -> str:
+    text = str(value)
+    if not any(marker in text for marker in MOJIBAKE_MARKERS):
+        return text
+
+    candidates = [text]
+    for source_encoding, target_encoding in (("cp1251", "utf-8"), ("cp1252", "cp1251")):
+        try:
+            candidates.append(text.encode(source_encoding).decode(target_encoding))
+        except UnicodeError:
+            pass
+
+    return min(candidates, key=_mojibake_score)
+
+
+def _mojibake_score(text: str) -> int:
+    return sum(text.count(marker) for marker in MOJIBAKE_MARKERS)
+
+
 class _SignalWriter:
     def __init__(self, signal: Signal) -> None:
         self.signal = signal
@@ -228,7 +250,7 @@ class RunnerTab(QWidget):
         if not message:
             return
         current = self.status_output.toPlainText()
-        line = f"{datetime.now().isoformat(timespec='seconds')} | {message}"
+        line = f"{datetime.now().isoformat(timespec='seconds')} | {clean_display_text(message)}"
         self.status_output.setPlainText(f"{current}\n{line}".strip())
         self.status_output.verticalScrollBar().setValue(self.status_output.verticalScrollBar().maximum())
 
@@ -274,9 +296,9 @@ class RunnerTab(QWidget):
         timestamp, decision, confidence, reason = row
         lines.extend([
             f"Timestamp: {timestamp}",
-            f"Decision: {decision}",
-            f"Confidence: {confidence}",
-            f"Reason: {reason}",
+            f"Decision: {clean_display_text(decision)}",
+            f"Confidence: {clean_display_text(confidence)}",
+            f"Reason: {clean_display_text(reason)}",
         ])
 
     def _append_latest_cycle(self, lines: list[str]) -> None:
@@ -316,9 +338,9 @@ class RunnerTab(QWidget):
         timestamp, level, module, message = row
         lines.extend([
             f"Timestamp: {timestamp}",
-            f"Level: {level}",
-            f"Module: {module}",
-            f"Message: {message}",
+            f"Level: {clean_display_text(level)}",
+            f"Module: {clean_display_text(module)}",
+            f"Message: {clean_display_text(message)}",
         ])
 
     def _format_optional_float(self, value) -> str:

@@ -68,29 +68,29 @@ class BotEngine:
             return
 
         self.logger.info("Iteration started")
-        self.database.save_system_event("INFO", "BotEngine", "USDT/USDC Bot MVP С–С‚РµСЂР°С†С–СЏ Р·Р°РїСѓС‰РµРЅР°.")
-        self.notification_engine.info("Р†С‚РµСЂР°С†С–СЏ Р±РѕС‚Р°", "USDT/USDC Bot MVP С–С‚РµСЂР°С†С–СЏ Р·Р°РїСѓС‰РµРЅР°.")
+        self.database.save_system_event("INFO", "BotEngine", "USDT/USDC Bot MVP iteration started.")
+        self.notification_engine.info("Bot iteration", "USDT/USDC Bot MVP iteration started.")
         if self.state_manager.current_state == BotState.INIT:
-            self.state_manager.transition_to(BotState.RECOVERY, "РџРµСЂС€РёР№ Р·Р°РїСѓСЃРє Recovery РїРµСЂРµРґ СЂРѕР±РѕС‚РѕСЋ")
-        print("USDT/USDC Bot MVP Р·Р°РїСѓС‰РµРЅРѕ.")
-        print(f"РљРѕРЅС„С–РіСѓСЂР°С†С–СЏ: symbol={self.config.symbol}, mode={self.config.mode}, target_profit={self.config.target_profit}")
+            self.state_manager.transition_to(BotState.RECOVERY, "Initial recovery before running")
+        print("USDT/USDC Bot MVP started.")
+        print(f"Configuration: symbol={self.config.symbol}, mode={self.config.mode}, target_profit={self.config.target_profit}")
         print(f"Exchange rules: tick={self.config.price_tick_size}, step={self.config.quantity_step_size}, min_notional={self.config.min_notional}")
-        print(f"Market data cache TTL: {self.config.market_data_cache_ttl_seconds} СЃРµРє")
+        print(f"Market data cache TTL: {self.config.market_data_cache_ttl_seconds} sec")
 
         recovered = self.recovery_manager.recover_active_cycles()
-        print(f"Р’С–РґРЅРѕРІР»РµРЅРѕ Р°РєС‚РёРІРЅРёС… С†РёРєР»С–РІ: {len(recovered)}")
+        print(f"Recovered active cycles: {len(recovered)}")
 
         if self.state_manager.current_state == BotState.RECOVERY:
-            self.state_manager.transition_to(BotState.READY, "Recovery Р·Р°РІРµСЂС€РµРЅРѕ")
+            self.state_manager.transition_to(BotState.READY, "Recovery completed")
 
         if self.cycle_manager.has_active_cycles():
-            self.state_manager.transition_to(BotState.SAFE_WAIT, "РџС–СЃР»СЏ Recovery Р·РЅР°Р№РґРµРЅРѕ Р°РєС‚РёРІРЅРёР№ С†РёРєР»")
-            self.notification_engine.warning("РђРєС‚РёРІРЅРёР№ С†РёРєР» РїС–СЃР»СЏ Recovery", "Р—РЅР°Р№РґРµРЅРѕ РЅРµР·Р°РІРµСЂС€РµРЅРёР№ С†РёРєР». РќРѕРІС– С†РёРєР»Рё РЅРµ РІС–РґРєСЂРёРІР°СЋС‚СЊСЃСЏ.")
-            print("Р„ Р°РєС‚РёРІРЅРёР№ С†РёРєР». РќРѕРІС– С†РёРєР»Рё РЅРµ РІС–РґРєСЂРёРІР°СЋС‚СЊСЃСЏ.")
+            self.state_manager.transition_to(BotState.SAFE_WAIT, "Active cycle found after recovery")
+            self.notification_engine.warning("Active cycle after recovery", "Unfinished cycle found. New cycles will not be opened.")
+            print("Active cycle exists. New cycles will not be opened.")
             return
 
         if self.state_manager.current_state == BotState.READY:
-            self.state_manager.transition_to(BotState.RUNNING_DEMO, "Р—Р°РїСѓСЃРє Demo-С†РёРєР»Сѓ Р°РЅР°Р»С–Р·Сѓ")
+            self.state_manager.transition_to(BotState.RUNNING_DEMO, "Starting Demo analysis cycle")
 
         market_state = self.market_analyzer.analyze_market()
         self.database.save_market_snapshot(market_state)
@@ -99,8 +99,8 @@ class BotEngine:
         decision = self.decision_engine.make_decision(market_state)
         risk_result = self.risk_manager.validate_decision(decision, budget, current_price=market_state.price)
 
-        print(f"РЎРёРјРІРѕР»: {market_state.symbol}")
-        print(f"Р¦С–РЅР°: {market_state.price}")
+        print(f"Symbol: {market_state.symbol}")
+        print(f"Price: {market_state.price}")
         print(f"Bid: {market_state.bid}")
         print(f"Ask: {market_state.ask}")
         print(f"Spread: {market_state.spread}")
@@ -111,11 +111,11 @@ class BotEngine:
         print(f"Micro Trend: {market_state.micro_trend} ({market_state.trade_volume_delta:.4f})")
         print(f"Volatility: {market_state.volatility_regime} ({market_state.relative_volatility:.8f})")
         print(f"Market Health: {market_state.market_health_status} ({market_state.market_health_score:.2f}) - {market_state.market_health_reason}")
-        print(f"Р‘СЋРґР¶РµС‚ USDT: {budget.usdt_budget:.2f}")
-        print(f"Р‘СЋРґР¶РµС‚ USDC: {budget.usdc_budget:.2f}")
+        print(f"Budget USDT: {budget.usdt_budget:.2f}")
+        print(f"Budget USDC: {budget.usdc_budget:.2f}")
         self.logger.info("Decision: %s | Risk allowed: %s | Reason: %s", decision.action, risk_result.allowed, decision.reason)
-        print(f"Р С–С€РµРЅРЅСЏ: {decision.action}")
-        print(f"РџСЂРёС‡РёРЅР°: {decision.reason}")
+        print(f"Decision: {decision.action}")
+        print(f"Reason: {decision.reason}")
         print(f"Risk allowed: {risk_result.allowed}")
         print(f"Risk reason: {risk_result.reason}")
 
@@ -135,10 +135,10 @@ class BotEngine:
 
             self.cycle_manager.place_open_order(cycle)
             self.database.save_cycle(cycle)
-            self.database.save_system_event("INFO", "CycleManager", f"РЎС‚РІРѕСЂРµРЅРѕ Demo С†РёРєР» #{cycle.id}", cycle.id)
-            self.notification_engine.important("РЎС‚РІРѕСЂРµРЅРѕ Demo С†РёРєР»", f"РЎС‚РІРѕСЂРµРЅРѕ Demo С†РёРєР» #{cycle.id}: {cycle.direction.value}", cycle.id)
+            self.database.save_system_event("INFO", "CycleManager", f"Demo cycle #{cycle.id} created", cycle.id)
+            self.notification_engine.important("Demo cycle created", f"Demo cycle #{cycle.id} created: {cycle.direction.value}", cycle.id)
 
-            print(f"РЎС‚РІРѕСЂРµРЅРѕ Demo С†РёРєР» #{cycle.id}: {cycle.direction.value}")
+            print(f"Demo cycle #{cycle.id} created: {cycle.direction.value}")
             print(f"Open price: {cycle.open_price:.8f}")
             print(f"Close target: {cycle.close_price:.8f}")
 
@@ -155,52 +155,52 @@ class BotEngine:
                         self.database.save_cycle(cycle)
                         self.cycle_manager.place_close_order(cycle)
                         self.database.save_cycle(cycle)
-                        self.database.save_system_event("INFO", "DemoOrderManager", "Open-order РІРёРєРѕРЅР°РЅРѕ", cycle.id)
-                        print(f"Open-order РІРёРєРѕРЅР°РЅРѕ РїСЂРё bid={bid:.8f}, ask={ask:.8f}")
+                        self.database.save_system_event("INFO", "DemoOrderManager", "Open order filled", cycle.id)
+                        print(f"Open order filled at bid={bid:.8f}, ask={ask:.8f}")
 
                 if cycle.status == CycleStatus.CLOSE_ORDER_PLACED:
                     if self.order_manager.can_fill_close_order(cycle, bid=bid, ask=ask):
                         self.cycle_manager.mark_close_filled(cycle)
                         self.database.save_cycle(cycle)
-                        self.database.save_system_event("INFO", "DemoOrderManager", "Close-order РІРёРєРѕРЅР°РЅРѕ", cycle.id)
-                        print(f"Close-order РІРёРєРѕРЅР°РЅРѕ РїСЂРё bid={bid:.8f}, ask={ask:.8f}")
+                        self.database.save_system_event("INFO", "DemoOrderManager", "Close order filled", cycle.id)
+                        print(f"Close order filled at bid={bid:.8f}, ask={ask:.8f}")
                         break
 
             if cycle.status == CycleStatus.CLOSED:
-                self.notification_engine.important("Demo С†РёРєР» Р·Р°РєСЂРёС‚Рѕ", f"РџСЂРёР±СѓС‚РѕРє: {cycle.actual_profit:.8f}", cycle.id)
-                print(f"Demo С†РёРєР» Р·Р°РєСЂРёС‚Рѕ. РџСЂРёР±СѓС‚РѕРє: {cycle.actual_profit:.8f}")
+                self.notification_engine.important("Demo cycle closed", f"Profit: {cycle.actual_profit:.8f}", cycle.id)
+                print(f"Demo cycle closed. Profit: {cycle.actual_profit:.8f}")
             else:
-                print(f"Demo С†РёРєР» С‰Рµ РІС–РґРєСЂРёС‚РёР№. РџРѕС‚РѕС‡РЅРёР№ СЃС‚Р°С‚СѓСЃ: {cycle.status.value}")
+                print(f"Demo cycle is still open. Current status: {cycle.status.value}")
 
         self.database.save_trade_signal(decision, risk_result, cycle_id=cycle_id)
         self.audit_engine.audit_decision(market_state, decision, risk_result, cycle_id=cycle_id)
 
-        print(f"Р¦РёРєР»С–РІ Сѓ Р‘Р”: {self.database.count_rows('cycles')}")
-        print(f"РЎРёРіРЅР°Р»С–РІ Сѓ Р‘Р”: {self.database.count_rows('trade_signals')}")
-        print(f"Market snapshots Сѓ Р‘Р”: {self.database.count_rows('market_snapshots')}")
-        print(f"System events Сѓ Р‘Р”: {self.database.count_rows('system_events')}")
+        print(f"Cycles in DB: {self.database.count_rows('cycles')}")
+        print(f"Signals in DB: {self.database.count_rows('trade_signals')}")
+        print(f"Market snapshots in DB: {self.database.count_rows('market_snapshots')}")
+        print(f"System events in DB: {self.database.count_rows('system_events')}")
 
         stats = self.portfolio_analytics.calculate_stats(
             current_portfolio_value=budget.total_value + self.database.sum_realized_profit(),
         )
 
         print("--- Portfolio Analytics ---")
-        print(f"РЈСЃСЊРѕРіРѕ С†РёРєР»С–РІ: {stats.total_cycles}")
-        print(f"Р—Р°РєСЂРёС‚РёС… С†РёРєР»С–РІ: {stats.closed_cycles}")
-        print(f"РђРєС‚РёРІРЅРёС… С†РёРєР»С–РІ: {stats.active_cycles}")
+        print(f"Total cycles: {stats.total_cycles}")
+        print(f"Closed cycles: {stats.closed_cycles}")
+        print(f"Active cycles: {stats.active_cycles}")
         print(f"Win rate: {stats.win_rate * 100:.2f}%")
-        print(f"Р РµР°Р»С–Р·РѕРІР°РЅРёР№ РїСЂРёР±СѓС‚РѕРє: {stats.realized_profit:.8f}")
+        print(f"Realized profit: {stats.realized_profit:.8f}")
         print(f"ROI: {stats.roi * 100:.4f}%")
 
         summary = self.statistics_engine.build_summary()
 
         print("--- Statistics Engine ---")
-        print(f"РЎРёРіРЅР°Р»С–РІ СѓСЃСЊРѕРіРѕ: {summary.signal_stats.total_signals}")
-        print(f"BUY СЃРёРіРЅР°Р»С–РІ: {summary.signal_stats.buy_signals}")
-        print(f"SELL СЃРёРіРЅР°Р»С–РІ: {summary.signal_stats.sell_signals}")
-        print(f"WAIT СЃРёРіРЅР°Р»С–РІ: {summary.signal_stats.wait_signals}")
-        print(f"Р”РѕР·РІРѕР»РµРЅРёС… СЃРёРіРЅР°Р»С–РІ: {summary.signal_stats.allowed_signals}")
-        print(f"Р—Р°Р±Р»РѕРєРѕРІР°РЅРёС… СЃРёРіРЅР°Р»С–РІ: {summary.signal_stats.blocked_signals}")
-        print(f"РЎРµСЂРµРґРЅС–Р№ Cycle Prediction Score: {summary.signal_stats.average_cycle_prediction_score:.2f}")
-        print(f"РЎРµСЂРµРґРЅСЏ С‚СЂРёРІР°Р»С–СЃС‚СЊ Р·Р°РєСЂРёС‚РѕРіРѕ С†РёРєР»Сѓ: {summary.cycle_stats.average_duration_seconds:.2f} СЃРµРє")
+        print(f"Total signals: {summary.signal_stats.total_signals}")
+        print(f"BUY signals: {summary.signal_stats.buy_signals}")
+        print(f"SELL signals: {summary.signal_stats.sell_signals}")
+        print(f"WAIT signals: {summary.signal_stats.wait_signals}")
+        print(f"Allowed signals: {summary.signal_stats.allowed_signals}")
+        print(f"Blocked signals: {summary.signal_stats.blocked_signals}")
+        print(f"Average Cycle Prediction Score: {summary.signal_stats.average_cycle_prediction_score:.2f}")
+        print(f"Average closed cycle duration: {summary.cycle_stats.average_duration_seconds:.2f} sec")
 

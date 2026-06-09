@@ -11,7 +11,7 @@ class DecisionEngine:
 
     def make_decision(self, market_state: MarketState) -> TradeDecision:
         if market_state.market_regime == "ABNORMAL":
-            return self._decision("SAFE_WAIT", "РђРЅРѕРјР°Р»СЊРЅРёР№ СЃС‚Р°РЅ СЂРёРЅРєСѓ", "LOW", 0)
+            return self._decision("SAFE_WAIT", "Abnormal market state", "LOW", 0)
 
         if market_state.market_health_status == "UNHEALTHY":
             return self._decision(
@@ -22,32 +22,32 @@ class DecisionEngine:
             )
 
         if market_state.center_confidence == "LOW":
-            return self._decision("WAIT", "РќРёР·СЊРєР° РЅР°РґС–Р№РЅС–СЃС‚СЊ С†РµРЅС‚СЂСѓ", "LOW", 0)
+            return self._decision("WAIT", "Low center confidence", "LOW", 0)
 
         if market_state.market_activity_score < self.config.min_market_activity_score:
-            return self._decision("WAIT", "РќРёР·СЊРєР° Р°РєС‚РёРІРЅС–СЃС‚СЊ СЂРёРЅРєСѓ", "LOW", market_state.market_activity_score)
+            return self._decision("WAIT", "Low market activity", "LOW", market_state.market_activity_score)
 
         score = self._calculate_cycle_prediction_score(market_state)
 
         if market_state.work_position <= self.config.buy_zone_max:
             action = "BUY_USDC"
-            reason = "Р¦С–РЅР° РІ РЅРёР¶РЅС–Р№ С‡Р°СЃС‚РёРЅС– СЂРѕР±РѕС‡РѕРіРѕ РєРѕСЂРёРґРѕСЂСѓ"
+            reason = "Price is in the lower part of the working corridor"
         elif market_state.work_position >= self.config.sell_zone_min:
             action = "SELL_USDC"
-            reason = "Р¦С–РЅР° Сѓ РІРµСЂС…РЅС–Р№ С‡Р°СЃС‚РёРЅС– СЂРѕР±РѕС‡РѕРіРѕ РєРѕСЂРёРґРѕСЂСѓ"
+            reason = "Price is in the upper part of the working corridor"
         else:
-            return self._decision("WAIT", "Р¦С–РЅР° Р±Р»РёР·СЊРєРѕ РґРѕ С†РµРЅС‚СЂСѓ СЂРѕР±РѕС‡РѕРіРѕ РєРѕСЂРёРґРѕСЂСѓ", "MEDIUM", score)
+            return self._decision("WAIT", "Price is close to the working corridor center", "MEDIUM", score)
 
         microstructure_score = self._microstructure_score(market_state, action)
         score = score * 0.80 + microstructure_score * 0.20
 
         if market_state.volatility_regime == "EXTREME":
-            return self._decision("SAFE_WAIT", "Р•РєСЃС‚СЂРµРјР°Р»СЊРЅР° РІРѕР»Р°С‚РёР»СЊРЅС–СЃС‚СЊ", "LOW", score)
+            return self._decision("SAFE_WAIT", "Extreme volatility", "LOW", score)
 
         if score < self.config.min_cycle_prediction_score:
             return self._decision(
                 "WAIT",
-                "РќРµРґРѕСЃС‚Р°С‚РЅС–Р№ Cycle Prediction Score РїС–СЃР»СЏ microstructure-С„С–Р»СЊС‚СЂС–РІ",
+                "Insufficient Cycle Prediction Score after microstructure filters",
                 "MEDIUM",
                 score,
             )
@@ -99,7 +99,7 @@ class DecisionEngine:
 
 
     def _microstructure_score(self, market_state: MarketState, action: str) -> float:
-        """РћС†С–РЅРєР° РїС–РґС‚РІРµСЂРґР¶РµРЅРЅСЏ СЃРёРіРЅР°Р»Сѓ СЃС‚Р°РєР°РЅРѕРј С– РѕСЃС‚Р°РЅРЅС–РјРё СѓРіРѕРґР°РјРё."""
+        """Score signal confirmation from order book and recent trades."""
         if action == "BUY_USDC":
             return self._buy_microstructure_score(market_state)
 

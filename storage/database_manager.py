@@ -568,7 +568,7 @@ class DatabaseManager:
     def count_rows(self, table: str) -> int:
         allowed_tables = {"cycles", "trade_signals", "market_snapshots", "system_events", "bot_budget_events", "notifications", "decision_audit", "backtest_runs", "backtest_trades", "walk_forward_runs", "walk_forward_windows", "backtest_equity_points", "backtest_period_analytics", "paper_orders", "paper_cycles", "paper_safety_events", "paper_state_transitions", "paper_runs"}
         if table not in allowed_tables:
-            raise ValueError("РќРµРґРѕР·РІРѕР»РµРЅР° С‚Р°Р±Р»РёС†СЏ.")
+            raise ValueError("Table is not allowed.")
         with self.connect() as conn:
             row = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()
             return int(row[0])

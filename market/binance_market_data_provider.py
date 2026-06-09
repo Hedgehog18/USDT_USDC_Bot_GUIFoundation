@@ -48,7 +48,7 @@ class BinanceMarketDataError(RuntimeError):
 
 
 class BinanceMarketDataProvider:
-    """Read-only market data provider РґР»СЏ Binance Spot."""
+    """Read-only market data provider for Binance Spot."""
 
     def __init__(
         self,
@@ -136,6 +136,6 @@ class BinanceMarketDataProvider:
             response = requests.get(url, params=params, timeout=self.timeout)
             response.raise_for_status()
         except requests.RequestException as exc:
-            raise BinanceMarketDataError(f"РџРѕРјРёР»РєР° Binance market data: {exc}") from exc
+            raise BinanceMarketDataError(f"Binance market data error: {exc}") from exc
 
         return response.json()
