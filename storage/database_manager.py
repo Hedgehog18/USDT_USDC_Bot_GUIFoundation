@@ -539,6 +539,32 @@ class DatabaseManager:
                 (limit,),
             ).fetchall()
 
+    def load_latest_system_event(self):
+        rows = self.load_recent_system_events(limit=1)
+        return rows[0] if rows else None
+
+    def load_latest_signal(self):
+        with self.connect() as conn:
+            return conn.execute(
+                """
+                SELECT timestamp, action, confidence, reason
+                FROM trade_signals
+                ORDER BY timestamp DESC, id DESC
+                LIMIT 1
+                """
+            ).fetchone()
+
+    def load_latest_cycle(self):
+        with self.connect() as conn:
+            return conn.execute(
+                """
+                SELECT id, direction, status, open_price, close_price, actual_profit
+                FROM cycles
+                ORDER BY created_at DESC, id DESC
+                LIMIT 1
+                """
+            ).fetchone()
+
     def count_rows(self, table: str) -> int:
         allowed_tables = {"cycles", "trade_signals", "market_snapshots", "system_events", "bot_budget_events", "notifications", "decision_audit", "backtest_runs", "backtest_trades", "walk_forward_runs", "walk_forward_windows", "backtest_equity_points", "backtest_period_analytics", "paper_orders", "paper_cycles", "paper_safety_events", "paper_state_transitions", "paper_runs"}
         if table not in allowed_tables:

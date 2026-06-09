@@ -7,6 +7,7 @@ from gui.dashboard_tab import DashboardTab
 from gui.health_tab import HealthTab
 from gui.logs_tab import LogsTab
 from gui.paper_trading_tab import PaperTradingTab
+from gui.runner_tab import RunnerTab
 from gui.settings_tab import SettingsTab
 from storage.database_manager import DatabaseManager
 
@@ -27,6 +28,7 @@ class MainWindow(QMainWindow):
         tabs.addTab(BacktestTab(self.config, self.database), "Backtest")
         tabs.addTab(PaperTradingTab(self.config, self.database), "Paper Trading")
         tabs.addTab(AnalyticsTab(self.database), "Analytics")
+        tabs.addTab(RunnerTab(self.config, self.database), "Runner")
         tabs.addTab(LogsTab(self.config.log_file_path, self.database), "Logs")
         tabs.addTab(SettingsTab(), "Settings")
 

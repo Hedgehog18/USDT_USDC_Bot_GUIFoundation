@@ -42,6 +42,14 @@ def test_analytics_tab_imports():
     assert MainWindowAnalyticsTab is AnalyticsTab
 
 
+def test_runner_tab_imports():
+    from gui.main_window import RunnerTab as MainWindowRunnerTab
+    from gui.runner_tab import RunnerTab
+
+    assert RunnerTab is not None
+    assert MainWindowRunnerTab is RunnerTab
+
+
 def test_gui_tab_modules_import():
     from gui.analytics_tab import AnalyticsTab
     from gui.backtest_tab import BacktestTab
@@ -49,6 +57,7 @@ def test_gui_tab_modules_import():
     from gui.health_tab import HealthTab
     from gui.logs_tab import LogsTab
     from gui.paper_trading_tab import PaperTradingTab
+    from gui.runner_tab import RunnerTab
     from gui.settings_tab import SettingsTab
 
     assert AnalyticsTab is not None
@@ -57,4 +66,5 @@ def test_gui_tab_modules_import():
     assert HealthTab is not None
     assert LogsTab is not None
     assert PaperTradingTab is not None
+    assert RunnerTab is not None
     assert SettingsTab is not None
