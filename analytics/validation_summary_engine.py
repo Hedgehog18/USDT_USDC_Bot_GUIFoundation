@@ -1,8 +1,10 @@
 from dataclasses import dataclass
 
 from analytics.decision_diagnostics_engine import DecisionDiagnosticsEngine
+from analytics.order_book_diagnostics_engine import OrderBookDiagnosticsEngine
 from analytics.risk_diagnostics_engine import RiskDiagnosticsEngine
 from analytics.strategy_validation_engine import StrategyValidationEngine
+from config.config_manager import BotConfig, ConfigManager
 from paper.paper_analytics_engine import PaperAnalyticsEngine
 from storage.database_manager import DatabaseManager
 
@@ -21,13 +23,15 @@ class ValidationSummary:
 
 
 class ValidationSummaryEngine:
-    def __init__(self, database: DatabaseManager) -> None:
+    def __init__(self, database: DatabaseManager, config: BotConfig | None = None) -> None:
         self.database = database
+        self.config = config or ConfigManager().config
 
     def build_summary(self) -> ValidationSummary:
         strategy = StrategyValidationEngine(self.database).build_summary()
         decision = DecisionDiagnosticsEngine(self.database).build_summary()
         risk = RiskDiagnosticsEngine(self.database).build_summary()
+        order_book = OrderBookDiagnosticsEngine(self.database, self.config).build_summary()
         backtest = self._load_latest_backtest()
         paper = self._load_paper_stats()
 
@@ -43,6 +47,8 @@ class ValidationSummaryEngine:
             paper_cycles=paper.total_cycles,
             paper_net_profit=paper.net_profit,
             risk_blocked_rate=risk_blocked_rate,
+            entry_zone_snapshots=order_book.entry_zone_snapshots,
+            matching_pressure_count=self._matching_pressure_count(order_book),
         )
         status = self._build_status(
             strategy_signals=strategy.total_signals,
@@ -90,6 +96,8 @@ class ValidationSummaryEngine:
         paper_cycles: int,
         paper_net_profit: float,
         risk_blocked_rate: float,
+        entry_zone_snapshots: int,
+        matching_pressure_count: int,
     ) -> list[str]:
         warnings = []
         if strategy_signals == 0:
@@ -110,7 +118,16 @@ class ValidationSummaryEngine:
             warnings.append(f"Risk blocked rate is very high ({risk_blocked_rate * 100:.2f}%)")
         elif risk_blocked_rate >= 0.7:
             warnings.append(f"Risk blocked rate is elevated ({risk_blocked_rate * 100:.2f}%)")
+        if entry_zone_snapshots > 0 and matching_pressure_count == 0:
+            warnings.append("Entry zones detected, but order book never confirmed them.")
         return warnings
+
+    @staticmethod
+    def _matching_pressure_count(order_book_summary) -> int:
+        return (
+            order_book_summary.buy_zone_distribution.get("BID_PRESSURE", 0)
+            + order_book_summary.sell_zone_distribution.get("ASK_PRESSURE", 0)
+        )
 
     @staticmethod
     def _build_status(

@@ -118,3 +118,58 @@ def test_validation_summary_ready_for_long_paper(tmp_path):
     assert summary.paper_cycles == 1
     assert summary.paper_net_profit == 0.08
     assert summary.risk_blocked_rate == 0.0
+
+
+def test_validation_summary_warns_when_entry_zones_have_no_matching_pressure(test_config, tmp_path):
+    database = DatabaseManager(str(tmp_path / "bot.sqlite"))
+    with database.connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO trade_signals (
+                timestamp, action, reason, confidence,
+                cycle_prediction_score, target_profit,
+                risk_allowed, risk_reason, risk_level, cycle_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("2026-01-01T00:00:00", "WAIT", "test", "LOW", 0.0, 0.1, 0, "blocked", "LOW", None),
+        )
+        conn.execute(
+            """
+            INSERT INTO market_snapshots (
+                timestamp, symbol, price, bid, ask, spread,
+                work_center, work_position,
+                short_center, short_position,
+                long_center, long_position,
+                center_confidence, center_alignment,
+                market_activity_score, market_regime,
+                order_book_pressure, order_book_imbalance,
+                micro_trend
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "2026-01-01T00:00:00",
+                "USDCUSDT",
+                1.0,
+                0.9999,
+                1.0001,
+                0.0002,
+                1.0,
+                85.0,
+                1.0,
+                50.0,
+                1.0,
+                50.0,
+                "LOW",
+                "ALIGNED",
+                80.0,
+                "NORMAL",
+                "BID_PRESSURE",
+                0.25,
+                "SELL_DOMINANT",
+            ),
+        )
+        conn.commit()
+
+    summary = ValidationSummaryEngine(database, test_config).build_summary()
+
+    assert "Entry zones detected, but order book never confirmed them." in summary.warnings

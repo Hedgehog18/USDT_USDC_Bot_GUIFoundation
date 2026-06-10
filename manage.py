@@ -859,11 +859,37 @@ def command_long_paper_run(args) -> None:
         print("- None")
     print("Next action:")
     print(result.validation_summary.next_action)
+    pressure = OrderBookDiagnosticsEngine(database, config).build_summary()
+    print("--- Order Book Pressure Summary ---")
+    print("Order book pressure distribution:")
+    _print_distribution(pressure.order_book_pressure_distribution)
+    print("Entry-zone pressure distribution:")
+    _print_distribution(_merge_distributions(pressure.buy_zone_distribution, pressure.sell_zone_distribution))
+    print("BUY-zone pressure distribution:")
+    _print_distribution(pressure.buy_zone_distribution)
+    print("SELL-zone pressure distribution:")
+    _print_distribution(pressure.sell_zone_distribution)
     print("--- Reports ---")
     print(f"Cycles CSV: {result.report_paths.cycles_csv}")
     print(f"Safety CSV: {result.report_paths.safety_csv}")
     print(f"Summary CSV: {result.report_paths.summary_csv}")
     print(f"Insights TXT: {result.report_paths.insights_txt}")
+
+
+def _merge_distributions(*items: dict[str, int]) -> dict[str, int]:
+    merged: dict[str, int] = {}
+    for item in items:
+        for key, value in item.items():
+            merged[key] = merged.get(key, 0) + value
+    return merged
+
+
+def _print_distribution(distribution: dict[str, int]) -> None:
+    if not distribution:
+        print("- No data")
+        return
+    for label, count in distribution.items():
+        print(f"- {label}: {count}")
 
 
 def command_long_paper_runs(args) -> None:

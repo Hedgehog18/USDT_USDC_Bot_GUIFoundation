@@ -67,7 +67,7 @@ class LongPaperRunWorkflow:
             summary_csv=exporter.export_summary_csv(stats),
             insights_txt=insights_path,
         )
-        validation_summary = ValidationSummaryEngine(self.database).build_summary()
+        validation_summary = ValidationSummaryEngine(self.database, self.config).build_summary()
         long_run_id = self.database.save_long_paper_run(
             iterations=iterations,
             interval_seconds=interval_seconds,

@@ -7,6 +7,8 @@ from storage.database_manager import DatabaseManager
 class DummyConfig:
     backtest_initial_usdt = 50.0
     backtest_initial_usdc = 50.0
+    buy_zone_max = 20.0
+    sell_zone_min = 80.0
 
 
 class FakePaperTradingEngine:
