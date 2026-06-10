@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 
 from analytics.center_confidence_diagnostics_engine import CenterConfidenceDiagnosticsEngine
 from analytics.center_confidence_rule_sim_engine import CenterConfidenceRuleSimulationEngine
+from analytics.combined_entry_rule_sim_engine import CombinedEntryRuleSimulationEngine
 from analytics.decision_diagnostics_engine import DecisionDiagnosticsEngine
 from analytics.entry_zone_diagnostics_engine import EntryZoneDiagnosticsEngine
 from analytics.filter_pass_diagnostics_engine import FilterPassDiagnosticsEngine
@@ -85,6 +86,10 @@ class AnalyticsTab(QWidget):
         self.center_confidence_rule_sim = QTextEdit()
         self.center_confidence_rule_sim.setReadOnly(True)
         self.center_confidence_rule_sim.setMinimumHeight(185)
+
+        self.combined_entry_rule_sim = QTextEdit()
+        self.combined_entry_rule_sim.setReadOnly(True)
+        self.combined_entry_rule_sim.setMinimumHeight(190)
 
         self.validation_summary = QTextEdit()
         self.validation_summary.setReadOnly(True)
@@ -155,6 +160,13 @@ class AnalyticsTab(QWidget):
             6,
             1,
         )
+        top_layout.addWidget(
+            self._section("Combined Entry Rule Simulation", self.combined_entry_rule_sim),
+            7,
+            0,
+            1,
+            2,
+        )
         top_layout.setColumnStretch(0, 1)
         top_layout.setColumnStretch(1, 1)
         top_panel.setLayout(top_layout)
@@ -205,6 +217,7 @@ class AnalyticsTab(QWidget):
         self.center_confidence_rule_sim.setPlainText(
             "\n".join(self._center_confidence_rule_sim_lines())
         )
+        self.combined_entry_rule_sim.setPlainText("\n".join(self._combined_entry_rule_sim_lines()))
         self.decision_diagnostics.setPlainText("\n".join(self._decision_diagnostics_lines()))
         self.risk_diagnostics.setPlainText("\n".join(self._risk_diagnostics_lines()))
         run = self._load_latest_backtest_run()
@@ -593,6 +606,48 @@ class AnalyticsTab(QWidget):
                         f"work-short={item.work_short_distance:.8f} | "
                         f"work-long={item.work_long_distance:.8f} | "
                         f"pressure={item.order_book_pressure} | micro={item.micro_trend}"
+                    )
+                    for item in profile.latest_passed_samples
+                )
+            else:
+                lines.append("- No passed samples.")
+        return lines
+
+    def _combined_entry_rule_sim_lines(self) -> list[str]:
+        try:
+            report = CombinedEntryRuleSimulationEngine(self.database, self.config).build_report(latest=3)
+        except Exception as exc:
+            return [f"Could not load combined entry rule simulation: {exc}"]
+
+        if not report.profiles or report.profiles[0].total_entry_zone_samples == 0:
+            return ["No entry-zone samples available."]
+
+        lines = [
+            "Simulation only. MarketAnalyzer, DecisionEngine, RiskManager, config, and trades are unchanged."
+        ]
+        for profile in report.profiles:
+            lines.extend([
+                "",
+                profile.name,
+                f"Total entry-zone samples: {profile.total_entry_zone_samples}",
+                f"BUY candidates: {profile.buy_candidates}",
+                f"SELL candidates: {profile.sell_candidates}",
+                f"Pass count: {profile.pass_count}",
+                f"Pass rate: {profile.pass_rate * 100:.2f}%",
+                "Remaining blocking filters:",
+            ])
+            if profile.remaining_blocking_filters:
+                lines.extend(f"- {name}: {count}" for name, count in profile.remaining_blocking_filters)
+            else:
+                lines.append("- None")
+            lines.append("Latest passed samples:")
+            if profile.latest_passed_samples:
+                lines.extend(
+                    (
+                        f"- {item.timestamp} | {item.zone} | work={item.work_position:.2f} | "
+                        f"confidence={item.center_confidence} | pressure={item.order_book_pressure} | "
+                        f"micro={item.micro_trend} | work-short={item.work_short_distance:.8f} | "
+                        f"work-long={item.work_long_distance:.8f}"
                     )
                     for item in profile.latest_passed_samples
                 )

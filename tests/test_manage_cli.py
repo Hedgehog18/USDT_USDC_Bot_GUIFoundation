@@ -267,6 +267,14 @@ def test_manage_cli_has_center_confidence_rule_sim_command():
     assert args.latest == 4
 
 
+def test_manage_cli_has_combined_entry_rule_sim_command():
+    parser = build_parser()
+    args = parser.parse_args(["combined-entry-rule-sim", "--latest", "4"])
+
+    assert args.command == "combined-entry-rule-sim"
+    assert args.latest == 4
+
+
 def test_manage_cli_has_validation_summary_command():
     parser = build_parser()
     args = parser.parse_args(["validation-summary"])
