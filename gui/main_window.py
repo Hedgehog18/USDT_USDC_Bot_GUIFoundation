@@ -1,5 +1,6 @@
 from PySide6.QtCore import QSettings
-from PySide6.QtWidgets import QMainWindow, QSplitter, QTabWidget
+from PySide6.QtGui import QAction
+from PySide6.QtWidgets import QMainWindow, QMessageBox, QSplitter, QTabWidget
 
 from app.version import VERSION
 from config.config_manager import ConfigManager
@@ -25,6 +26,10 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"USDT/USDC Bot MVP - v{VERSION}")
         self.resize(1000, 700)
 
+        self._create_actions()
+        self._create_menus()
+        self.statusBar().showMessage("Ready")
+
         self.tabs = QTabWidget()
         dashboard_tab = DashboardTab(self.config, self.database)
         self.tabs.addTab(dashboard_tab, "Dashboard")
@@ -39,9 +44,62 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self.tabs)
         self._restore_gui_state()
 
+    def refresh_current_tab(self) -> None:
+        current_widget = self.tabs.currentWidget()
+        current_title = self.tabs.tabText(self.tabs.currentIndex())
+        refresh_method = getattr(current_widget, "refresh", None)
+
+        if callable(refresh_method):
+            try:
+                refresh_method()
+            except Exception as exc:
+                self.statusBar().showMessage(f"Refresh failed: {exc}", 5000)
+                return
+            self.statusBar().showMessage(f"Refreshed {current_title}", 3000)
+            return
+
+        self.statusBar().showMessage(f"{current_title} has no refresh action", 3000)
+
+    def show_about_dialog(self) -> None:
+        QMessageBox.about(
+            self,
+            "About USDT/USDC Bot MVP",
+            "\n".join([
+                "USDT/USDC Bot MVP",
+                f"Version: {VERSION}",
+                "Mode: Demo/Paper only",
+                "Real trading disabled",
+            ]),
+        )
+
     def closeEvent(self, event) -> None:
         self._save_gui_state()
         super().closeEvent(event)
+
+    def _create_actions(self) -> None:
+        self.exit_action = QAction("Exit", self)
+        self.exit_action.setShortcut("Ctrl+Q")
+        self.exit_action.setStatusTip("Close the GUI")
+        self.exit_action.triggered.connect(self.close)
+
+        self.refresh_current_tab_action = QAction("Refresh Current Tab", self)
+        self.refresh_current_tab_action.setShortcut("F5")
+        self.refresh_current_tab_action.setStatusTip("Refresh the active tab")
+        self.refresh_current_tab_action.triggered.connect(self.refresh_current_tab)
+
+        self.about_action = QAction("About", self)
+        self.about_action.setStatusTip("Show application information")
+        self.about_action.triggered.connect(self.show_about_dialog)
+
+    def _create_menus(self) -> None:
+        file_menu = self.menuBar().addMenu("File")
+        file_menu.addAction(self.exit_action)
+
+        view_menu = self.menuBar().addMenu("View")
+        view_menu.addAction(self.refresh_current_tab_action)
+
+        help_menu = self.menuBar().addMenu("Help")
+        help_menu.addAction(self.about_action)
 
     def _save_gui_state(self) -> None:
         self.settings.setValue("window/geometry", self.saveGeometry())

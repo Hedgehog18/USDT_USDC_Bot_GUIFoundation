@@ -4,6 +4,13 @@ def test_gui_main_window_imports():
     assert MainWindow is not None
 
 
+def test_gui_main_window_menu_methods_exist():
+    from gui.main_window import MainWindow
+
+    assert hasattr(MainWindow, "refresh_current_tab")
+    assert hasattr(MainWindow, "show_about_dialog")
+
+
 def test_dashboard_tab_imports():
     from gui.main_window import DashboardTab
 
