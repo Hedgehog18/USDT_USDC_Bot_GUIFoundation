@@ -1,7 +1,7 @@
 import logging
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QObject, Qt, QThread, Signal, Slot
 from PySide6.QtWidgets import (
     QApplication,
     QGroupBox,
@@ -20,7 +20,36 @@ from paper.paper_insights_engine import PaperInsightsEngine
 from paper.paper_insights_exporter import PaperInsightsExporter
 from paper.paper_report_exporter import PaperReportExporter
 from paper.paper_trading_engine import PaperTradingEngine
+from paper.long_paper_run_workflow import LongPaperRunWorkflow
 from storage.database_manager import DatabaseManager
+
+
+class LongPaperRunWorker(QObject):
+    status = Signal(str)
+    finished = Signal(object)
+    error = Signal(str)
+
+    def __init__(self, config, database: DatabaseManager, iterations: int, interval_seconds: int) -> None:
+        super().__init__()
+        self.config = config
+        self.database = database
+        self.iterations = iterations
+        self.interval_seconds = interval_seconds
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            self.status.emit(
+                f"Starting long paper run: iterations={self.iterations}, "
+                f"interval_seconds={self.interval_seconds}"
+            )
+            result = LongPaperRunWorkflow(self.config, self.database).run(
+                iterations=self.iterations,
+                interval_seconds=self.interval_seconds,
+            )
+            self.finished.emit(result)
+        except Exception as exc:
+            self.error.emit(str(exc))
 
 
 class PaperTradingTab(QWidget):
@@ -29,6 +58,8 @@ class PaperTradingTab(QWidget):
         self.config = config
         self.database = database
         self.logger = logging.getLogger("usdt_usdc_bot")
+        self.long_thread: QThread | None = None
+        self.long_worker: LongPaperRunWorker | None = None
 
         self.result_output = self._create_readonly_text(180)
         self.insights_output = self._create_readonly_text(160)
@@ -38,9 +69,15 @@ class PaperTradingTab(QWidget):
 
         self.iterations_input = QLineEdit("10")
         self.iterations_input.setPlaceholderText("Iterations")
+        self.long_iterations_input = QLineEdit("500")
+        self.long_iterations_input.setPlaceholderText("Long run iterations")
+        self.long_interval_input = QLineEdit("5")
+        self.long_interval_input.setPlaceholderText("Interval seconds")
 
         self.start_button = QPushButton("Start Paper Simulation")
         self.start_button.clicked.connect(self.run_paper_simulation)
+        self.long_start_button = QPushButton("Start Long Paper Run")
+        self.long_start_button.clicked.connect(self.start_long_paper_run)
 
         self.refresh_button = QPushButton("Refresh Paper Summary")
         self.refresh_button.clicked.connect(self.refresh)
@@ -57,6 +94,22 @@ class PaperTradingTab(QWidget):
 
         controls_group = QGroupBox("Paper Simulation Controls")
         controls_group.setLayout(controls)
+
+        long_controls = QHBoxLayout()
+        long_controls.addWidget(QLabel("Iterations:"))
+        long_controls.addWidget(self.long_iterations_input)
+        long_controls.addWidget(QLabel("Interval seconds:"))
+        long_controls.addWidget(self.long_interval_input)
+        long_controls.addWidget(self.long_start_button)
+        long_controls.addStretch()
+
+        long_controls_group = QGroupBox("Long Paper Run")
+        long_layout = QVBoxLayout()
+        warning = QLabel("Long paper run may take time. Real trading disabled.")
+        warning.setStyleSheet("font-weight: 600; color: #f59e0b;")
+        long_layout.addWidget(warning)
+        long_layout.addLayout(long_controls)
+        long_controls_group.setLayout(long_layout)
 
         self.top_splitter = QSplitter(Qt.Orientation.Horizontal)
         self.top_splitter.setObjectName("paper_trading_top_splitter")
@@ -78,6 +131,7 @@ class PaperTradingTab(QWidget):
 
         layout = QVBoxLayout()
         layout.addWidget(controls_group)
+        layout.addWidget(long_controls_group)
         layout.addWidget(self.refresh_button)
         layout.addWidget(self.main_splitter)
         self.setLayout(layout)
@@ -137,6 +191,84 @@ class PaperTradingTab(QWidget):
         finally:
             self.start_button.setEnabled(True)
 
+    def start_long_paper_run(self) -> None:
+        iterations = self._read_positive_int(self.long_iterations_input.text(), "Iterations")
+        if iterations is None:
+            return
+
+        interval_seconds = self._read_non_negative_int(self.long_interval_input.text(), "Interval seconds")
+        if interval_seconds is None:
+            return
+
+        if self.long_thread is not None:
+            self.result_output.setPlainText("Long paper run is already running.")
+            return
+
+        self.long_start_button.setEnabled(False)
+        self.start_button.setEnabled(False)
+        self.result_output.setPlainText(
+            "Long paper run started.\n"
+            "Long paper run may take time. Real trading disabled."
+        )
+
+        self.long_thread = QThread(self)
+        self.long_worker = LongPaperRunWorker(self.config, self.database, iterations, interval_seconds)
+        self.long_worker.moveToThread(self.long_thread)
+        self.long_thread.started.connect(self.long_worker.run)
+        self.long_worker.status.connect(self.result_output.setPlainText)
+        self.long_worker.finished.connect(self._handle_long_paper_finished)
+        self.long_worker.error.connect(self._handle_long_paper_error)
+        self.long_worker.finished.connect(self.long_thread.quit)
+        self.long_worker.error.connect(self.long_thread.quit)
+        self.long_thread.finished.connect(self.long_worker.deleteLater)
+        self.long_thread.finished.connect(self._clear_long_paper_thread)
+        self.long_thread.start()
+
+    def _handle_long_paper_finished(self, result) -> None:
+        lines = [
+            "Long paper run completed",
+            "Real trading disabled.",
+            f"Run ID: {result.run_id}",
+            f"Iterations: {result.run_result.iterations}",
+            f"Opened cycles: {result.run_result.opened_cycles}",
+            f"Closed cycles: {result.run_result.closed_cycles}",
+            f"Safety stops: {result.run_result.safety_stops}",
+            f"Final value: {result.run_result.final_portfolio.total_value:.8f}",
+            "",
+            "Paper Stats:",
+            f"Total cycles: {result.stats.total_cycles}",
+            f"Closed cycles: {result.stats.closed_cycles}",
+            f"Win rate: {result.stats.win_rate * 100:.2f}%",
+            f"Net profit: {result.stats.net_profit:.8f}",
+            f"Profit factor: {result.stats.profit_factor:.4f}",
+            "",
+            "Paper Insights:",
+            f"Rating: {result.insights.rating}",
+            f"Summary: {result.insights.summary}",
+            "",
+            "Validation Summary:",
+            f"Overall status: {result.validation_summary.overall_status}",
+            f"Next action: {result.validation_summary.next_action}",
+            "",
+            "Reports:",
+            f"Cycles CSV: {result.report_paths.cycles_csv}",
+            f"Safety CSV: {result.report_paths.safety_csv}",
+            f"Summary CSV: {result.report_paths.summary_csv}",
+            f"Insights TXT: {result.report_paths.insights_txt}",
+        ]
+        self.refresh()
+        self.result_output.setPlainText("\n".join(lines))
+
+    def _handle_long_paper_error(self, message: str) -> None:
+        self.logger.error("Long paper run failed from GUI: %s", message)
+        self.result_output.setPlainText(f"ERROR:\n{message}")
+
+    def _clear_long_paper_thread(self) -> None:
+        self.long_thread = None
+        self.long_worker = None
+        self.long_start_button.setEnabled(True)
+        self.start_button.setEnabled(True)
+
     def export_paper_report(self) -> None:
         try:
             cycle_rows = self.database.load_recent_paper_cycles(limit=500)
@@ -174,6 +306,28 @@ class PaperTradingTab(QWidget):
         layout.addWidget(widget)
         group.setLayout(layout)
         return group
+
+    def _read_positive_int(self, raw_value: str, label: str) -> int | None:
+        try:
+            value = int(raw_value.strip())
+        except ValueError:
+            self.result_output.setPlainText(f"{label} must be an integer greater than 0.")
+            return None
+        if value <= 0:
+            self.result_output.setPlainText(f"{label} must be an integer greater than 0.")
+            return None
+        return value
+
+    def _read_non_negative_int(self, raw_value: str, label: str) -> int | None:
+        try:
+            value = int(raw_value.strip())
+        except ValueError:
+            self.result_output.setPlainText(f"{label} must be an integer 0 or greater.")
+            return None
+        if value < 0:
+            self.result_output.setPlainText(f"{label} must be an integer 0 or greater.")
+            return None
+        return value
 
     def _build_summary_lines(self) -> list[str]:
         lines = ["=== Paper Trading ===", ""]

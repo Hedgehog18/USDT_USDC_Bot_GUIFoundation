@@ -23,6 +23,13 @@ def test_paper_trading_tab_imports():
     assert PaperTradingTab is not None
 
 
+def test_paper_trading_tab_long_run_controls_import():
+    from gui.paper_trading_tab import LongPaperRunWorker, PaperTradingTab
+
+    assert LongPaperRunWorker is not None
+    assert hasattr(PaperTradingTab, "start_long_paper_run")
+
+
 def test_backtest_tab_imports():
     from gui.main_window import BacktestTab
 

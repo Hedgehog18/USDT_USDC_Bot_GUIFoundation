@@ -24,6 +24,7 @@ from paper.paper_insights_engine import PaperInsightsEngine
 from paper.paper_insights_exporter import PaperInsightsExporter
 from paper.paper_report_exporter import PaperReportExporter
 from paper.paper_trading_engine import PaperTradingEngine
+from paper.long_paper_run_workflow import LongPaperRunWorkflow
 
 from app.app_logger import AppLogger
 from app.bot_engine import BotEngine
@@ -607,6 +608,61 @@ def command_paper_cycle_sim(args) -> None:
     print(f"Summary: {insights.summary}")
     print(f"Insights TXT: {insights_path}")
 
+
+def command_long_paper_run(args) -> None:
+    config, logger, database = build_context()
+    logger.info(
+        "Long paper run started: iterations=%s interval=%s",
+        args.iterations,
+        args.interval,
+    )
+    result = LongPaperRunWorkflow(config, database).run(
+        iterations=args.iterations,
+        interval_seconds=args.interval,
+    )
+
+    print("=== Long Paper Run ===")
+    print("Long paper run completed. Real trading disabled.")
+    print(f"Run ID: {result.run_id}")
+    print(f"Iterations: {result.run_result.iterations}")
+    print(f"Opened cycles: {result.run_result.opened_cycles}")
+    print(f"Closed cycles: {result.run_result.closed_cycles}")
+    print(f"Safety stops: {result.run_result.safety_stops}")
+    print(f"Final value: {result.run_result.final_portfolio.total_value:.8f}")
+    print("--- Paper Stats ---")
+    print(f"Total cycles: {result.stats.total_cycles}")
+    print(f"Closed cycles: {result.stats.closed_cycles}")
+    print(f"Win rate: {result.stats.win_rate * 100:.2f}%")
+    print(f"Net profit: {result.stats.net_profit:.8f}")
+    print(f"Profit factor: {result.stats.profit_factor:.4f}")
+    print("--- Paper Insights ---")
+    print(f"Rating: {result.insights.rating}")
+    print(f"Summary: {result.insights.summary}")
+    if result.insights.warnings:
+        print("Warnings:")
+        for item in result.insights.warnings:
+            print(f"- {item}")
+    if result.insights.next_steps:
+        print("Next steps:")
+        for item in result.insights.next_steps:
+            print(f"- {item}")
+    print("--- Validation Summary ---")
+    print(f"Overall status: {result.validation_summary.overall_status}")
+    print("Warnings:")
+    if result.validation_summary.warnings:
+        for item in result.validation_summary.warnings:
+            print(f"- {item}")
+    else:
+        print("- None")
+    print("Next action:")
+    print(result.validation_summary.next_action)
+    print("--- Reports ---")
+    print(f"Cycles CSV: {result.report_paths.cycles_csv}")
+    print(f"Safety CSV: {result.report_paths.safety_csv}")
+    print(f"Summary CSV: {result.report_paths.summary_csv}")
+    print(f"Insights TXT: {result.report_paths.insights_txt}")
+
+
 def command_paper_cycles(args) -> None:
     _config, _logger, database = build_context()
     rows = database.load_recent_paper_cycles(limit=args.limit)
@@ -831,6 +887,11 @@ def build_parser() -> argparse.ArgumentParser:
     paper_cycle_sim_parser = subparsers.add_parser("paper-cycle-sim", help="Р—Р°РїСѓСЃС‚РёС‚Рё paper cycle СЃРёРјСѓР»СЏС†С–СЋ")
     paper_cycle_sim_parser.add_argument("--iterations", type=int, default=10)
     paper_cycle_sim_parser.set_defaults(func=command_paper_cycle_sim)
+
+    long_paper_run_parser = subparsers.add_parser("long-paper-run", help="Run long paper validation workflow")
+    long_paper_run_parser.add_argument("--iterations", type=int, default=500)
+    long_paper_run_parser.add_argument("--interval", type=int, default=5)
+    long_paper_run_parser.set_defaults(func=command_long_paper_run)
 
     paper_cycles_parser = subparsers.add_parser("paper-cycles", help="РџРѕРєР°Р·Р°С‚Рё РѕСЃС‚Р°РЅРЅС– paper cycles")
     paper_cycles_parser.add_argument("--limit", type=int, default=20)
