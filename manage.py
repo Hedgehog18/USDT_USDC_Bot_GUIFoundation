@@ -41,6 +41,7 @@ from analytics.data_source_check_engine import DataSourceCheckEngine
 from analytics.decision_diagnostics_engine import DecisionDiagnosticsEngine
 from analytics.entry_zone_diagnostics_engine import EntryZoneDiagnosticsEngine
 from analytics.filter_pass_diagnostics_engine import FilterPassDiagnosticsEngine
+from analytics.order_book_diagnostics_engine import OrderBookDiagnosticsEngine
 from analytics.risk_diagnostics_engine import RiskDiagnosticsEngine
 from analytics.statistics_engine import StatisticsEngine
 from analytics.strategy_tuning_report_engine import StrategyTuningReportEngine
@@ -364,6 +365,44 @@ def command_filter_pass_diagnostics(args) -> None:
             )
     else:
         print("- No blocked entry-zone snapshots.")
+
+
+def command_order_book_diagnostics(args) -> None:
+    config, _logger, database = build_context()
+    summary = OrderBookDiagnosticsEngine(database, config).build_summary(latest=args.latest)
+
+    print("=== Order Book Diagnostics ===")
+    if summary.total_snapshots == 0:
+        print("No order book diagnostics data available.")
+        return
+
+    print(f"Total snapshots: {summary.total_snapshots}")
+    print(f"Entry-zone snapshots: {summary.entry_zone_snapshots}")
+    print("Order book pressure distribution:")
+    for pressure, count in summary.order_book_pressure_distribution.items():
+        print(f"- {pressure}: {count}")
+    print("BUY-zone pressure distribution:")
+    for pressure, count in summary.buy_zone_distribution.items():
+        print(f"- {pressure}: {count}")
+    print("SELL-zone pressure distribution:")
+    for pressure, count in summary.sell_zone_distribution.items():
+        print(f"- {pressure}: {count}")
+    print(f"Average order_book_imbalance: {summary.average_order_book_imbalance:.6f}")
+    print(f"Min order_book_imbalance: {summary.min_order_book_imbalance:.6f}")
+    print(f"Max order_book_imbalance: {summary.max_order_book_imbalance:.6f}")
+    print("Latest entry-zone snapshots:")
+    if summary.latest_entry_zone_snapshots:
+        for item in summary.latest_entry_zone_snapshots:
+            print(
+                f"- {item.timestamp} | {item.direction_candidate} | "
+                f"work_position={item.work_position:.4f} | "
+                f"order_book_pressure={item.order_book_pressure} | "
+                f"order_book_imbalance={item.order_book_imbalance:.6f} | "
+                f"micro_trend={item.micro_trend} | "
+                f"center_confidence={item.center_confidence}"
+            )
+    else:
+        print("- No entry-zone snapshots.")
 
 
 def command_validation_summary(args) -> None:
@@ -1047,6 +1086,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     filter_pass_diagnostics_parser.add_argument("--latest", type=int, default=5)
     filter_pass_diagnostics_parser.set_defaults(func=command_filter_pass_diagnostics)
+
+    order_book_diagnostics_parser = subparsers.add_parser(
+        "order-book-diagnostics",
+        help="Show order book pressure diagnostics for entry-zone snapshots",
+    )
+    order_book_diagnostics_parser.add_argument("--latest", type=int, default=10)
+    order_book_diagnostics_parser.set_defaults(func=command_order_book_diagnostics)
 
     validation_summary_parser = subparsers.add_parser(
         "validation-summary",

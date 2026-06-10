@@ -236,6 +236,14 @@ def test_manage_cli_has_filter_pass_diagnostics_command():
     assert args.latest == 3
 
 
+def test_manage_cli_has_order_book_diagnostics_command():
+    parser = build_parser()
+    args = parser.parse_args(["order-book-diagnostics", "--latest", "4"])
+
+    assert args.command == "order-book-diagnostics"
+    assert args.latest == 4
+
+
 def test_manage_cli_has_validation_summary_command():
     parser = build_parser()
     args = parser.parse_args(["validation-summary"])

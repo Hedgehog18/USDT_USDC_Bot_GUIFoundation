@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 from analytics.decision_diagnostics_engine import DecisionDiagnosticsEngine
 from analytics.entry_zone_diagnostics_engine import EntryZoneDiagnosticsEngine
 from analytics.filter_pass_diagnostics_engine import FilterPassDiagnosticsEngine
+from analytics.order_book_diagnostics_engine import OrderBookDiagnosticsEngine
 from analytics.risk_diagnostics_engine import RiskDiagnosticsEngine
 from analytics.strategy_tuning_report_engine import StrategyTuningReportEngine
 from analytics.strategy_validation_engine import StrategyValidationEngine
@@ -66,6 +67,10 @@ class AnalyticsTab(QWidget):
         self.filter_pass_diagnostics.setReadOnly(True)
         self.filter_pass_diagnostics.setMinimumHeight(175)
 
+        self.order_book_diagnostics = QTextEdit()
+        self.order_book_diagnostics.setReadOnly(True)
+        self.order_book_diagnostics.setMinimumHeight(175)
+
         self.validation_summary = QTextEdit()
         self.validation_summary.setReadOnly(True)
         self.validation_summary.setMinimumHeight(150)
@@ -112,8 +117,11 @@ class AnalyticsTab(QWidget):
             self._section("Filter Pass Diagnostics", self.filter_pass_diagnostics),
             4,
             0,
+        )
+        top_layout.addWidget(
+            self._section("Order Book Diagnostics", self.order_book_diagnostics),
+            4,
             1,
-            2,
         )
         top_layout.setColumnStretch(0, 1)
         top_layout.setColumnStretch(1, 1)
@@ -157,6 +165,7 @@ class AnalyticsTab(QWidget):
         self.strategy_tuning.setPlainText("\n".join(self._strategy_tuning_lines()))
         self.entry_zone_diagnostics.setPlainText("\n".join(self._entry_zone_diagnostics_lines()))
         self.filter_pass_diagnostics.setPlainText("\n".join(self._filter_pass_diagnostics_lines()))
+        self.order_book_diagnostics.setPlainText("\n".join(self._order_book_diagnostics_lines()))
         self.decision_diagnostics.setPlainText("\n".join(self._decision_diagnostics_lines()))
         self.risk_diagnostics.setPlainText("\n".join(self._risk_diagnostics_lines()))
         run = self._load_latest_backtest_run()
@@ -385,6 +394,54 @@ class AnalyticsTab(QWidget):
             )
         else:
             lines.append("- No blocked entry-zone snapshots.")
+        return lines
+
+    def _order_book_diagnostics_lines(self) -> list[str]:
+        try:
+            summary = OrderBookDiagnosticsEngine(self.database, self.config).build_summary(latest=5)
+        except Exception as exc:
+            return [f"Could not load order book diagnostics: {exc}"]
+
+        if summary.total_snapshots == 0:
+            return ["No order book diagnostics data available."]
+
+        lines = [
+            f"Total snapshots: {summary.total_snapshots}",
+            f"Entry-zone snapshots: {summary.entry_zone_snapshots}",
+            "Pressure distribution:",
+        ]
+        lines.extend(
+            f"- {pressure}: {count}"
+            for pressure, count in summary.order_book_pressure_distribution.items()
+        )
+        lines.append("BUY-zone:")
+        lines.extend(
+            f"- {pressure}: {count}"
+            for pressure, count in summary.buy_zone_distribution.items()
+        )
+        lines.append("SELL-zone:")
+        lines.extend(
+            f"- {pressure}: {count}"
+            for pressure, count in summary.sell_zone_distribution.items()
+        )
+        lines.extend([
+            f"Avg imbalance: {summary.average_order_book_imbalance:.6f}",
+            f"Min imbalance: {summary.min_order_book_imbalance:.6f}",
+            f"Max imbalance: {summary.max_order_book_imbalance:.6f}",
+            "Latest entry-zone snapshots:",
+        ])
+        if summary.latest_entry_zone_snapshots:
+            lines.extend(
+                (
+                    f"- {item.timestamp} | {item.direction_candidate} | "
+                    f"work={item.work_position:.2f} | pressure={item.order_book_pressure} | "
+                    f"imb={item.order_book_imbalance:.4f} | micro={item.micro_trend} | "
+                    f"confidence={item.center_confidence}"
+                )
+                for item in summary.latest_entry_zone_snapshots
+            )
+        else:
+            lines.append("- No entry-zone snapshots.")
         return lines
 
     def _decision_diagnostics_lines(self) -> list[str]:
