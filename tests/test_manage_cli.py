@@ -164,6 +164,14 @@ def test_manage_cli_has_strategy_report_command():
     assert args.command == "strategy-report"
 
 
+def test_manage_cli_has_decision_diagnostics_command():
+    parser = build_parser()
+    args = parser.parse_args(["decision-diagnostics", "--top", "3"])
+
+    assert args.command == "decision-diagnostics"
+    assert args.top == 3
+
+
 def test_manage_cli_has_gui_command():
     parser = build_parser()
     args = parser.parse_args(["gui"])

@@ -33,6 +33,7 @@ from notifications.notification_engine import NotificationEngine
 from portfolio.portfolio_analytics import PortfolioAnalytics
 from runner.bot_runner import BotRunner
 from storage.database_manager import DatabaseManager
+from analytics.decision_diagnostics_engine import DecisionDiagnosticsEngine
 from analytics.statistics_engine import StatisticsEngine
 from analytics.strategy_validation_engine import StrategyValidationEngine
 
@@ -137,6 +138,43 @@ def command_strategy_report(args) -> None:
             print(f"- {regime}: {count}")
     else:
         print("- No market snapshots yet.")
+
+
+def command_decision_diagnostics(args) -> None:
+    _config, _logger, database = build_context()
+    summary = DecisionDiagnosticsEngine(database).build_summary(top=args.top)
+
+    print("=== Decision Diagnostics ===")
+    if summary.total_decisions == 0:
+        print("No decision diagnostics data available.")
+        return
+
+    print(f"Total decisions/signals: {summary.total_decisions}")
+    print(f"BUY count: {summary.buy_count}")
+    print(f"SELL count: {summary.sell_count}")
+    print(f"WAIT count: {summary.wait_count}")
+    print(f"Risk blocked: {summary.risk_blocked_count}")
+    print("Top WAIT reasons:")
+    _print_reason_rows(summary.top_wait_reasons)
+    print("Top BUY reasons:")
+    _print_reason_rows(summary.top_buy_reasons)
+    print("Top SELL reasons:")
+    _print_reason_rows(summary.top_sell_reasons)
+    print("Confidence distribution:")
+    if summary.confidence_distribution:
+        for confidence, count in summary.confidence_distribution.items():
+            print(f"- {confidence}: {count}")
+    else:
+        print("- No confidence data.")
+
+
+def _print_reason_rows(rows: list[tuple[str, int]]) -> None:
+    if not rows:
+        print("- No data.")
+        return
+
+    for reason, count in rows:
+        print(f"- {reason}: {count}")
 
 
 def command_notifications(args) -> None:
@@ -654,6 +692,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     strategy_report_parser = subparsers.add_parser("strategy-report", help="Show strategy validation summary")
     strategy_report_parser.set_defaults(func=command_strategy_report)
+
+    decision_diagnostics_parser = subparsers.add_parser(
+        "decision-diagnostics",
+        help="Show decision reason diagnostics",
+    )
+    decision_diagnostics_parser.add_argument("--top", type=int, default=5)
+    decision_diagnostics_parser.set_defaults(func=command_decision_diagnostics)
 
     notifications_parser = subparsers.add_parser("notifications", help="РџРѕРєР°Р·Р°С‚Рё РїРѕРІС–РґРѕРјР»РµРЅРЅСЏ")
     notifications_parser.add_argument("--limit", type=int, default=10)

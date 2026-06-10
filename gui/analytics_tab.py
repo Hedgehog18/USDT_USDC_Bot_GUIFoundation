@@ -5,7 +5,7 @@ from matplotlib.figure import Figure
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QGroupBox,
-    QHBoxLayout,
+    QGridLayout,
     QLabel,
     QPushButton,
     QScrollArea,
@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from analytics.decision_diagnostics_engine import DecisionDiagnosticsEngine
 from analytics.strategy_validation_engine import StrategyValidationEngine
 from storage.database_manager import DatabaseManager
 
@@ -46,6 +47,10 @@ class AnalyticsTab(QWidget):
         self.strategy_summary.setReadOnly(True)
         self.strategy_summary.setMinimumHeight(170)
 
+        self.decision_diagnostics = QTextEdit()
+        self.decision_diagnostics.setReadOnly(True)
+        self.decision_diagnostics.setMinimumHeight(170)
+
         self.equity_figure = Figure(figsize=(8, 3.6), constrained_layout=True)
         self.equity_canvas = FigureCanvas(self.equity_figure)
 
@@ -62,10 +67,11 @@ class AnalyticsTab(QWidget):
         self.refresh_button.clicked.connect(self.refresh)
 
         top_panel = QWidget()
-        top_layout = QHBoxLayout()
-        top_layout.addWidget(self._section("Summary", self.summary))
-        top_layout.addWidget(self._section("Latest Backtest Insights", self.insights))
-        top_layout.addWidget(self._section("Strategy Summary", self.strategy_summary))
+        top_layout = QGridLayout()
+        top_layout.addWidget(self._section("Summary", self.summary), 0, 0)
+        top_layout.addWidget(self._section("Latest Backtest Insights", self.insights), 0, 1)
+        top_layout.addWidget(self._section("Strategy Summary", self.strategy_summary), 1, 0)
+        top_layout.addWidget(self._section("Decision Diagnostics", self.decision_diagnostics), 1, 1)
         top_panel.setLayout(top_layout)
 
         charts_content = QWidget()
@@ -98,6 +104,7 @@ class AnalyticsTab(QWidget):
 
     def refresh(self) -> None:
         self.strategy_summary.setPlainText("\n".join(self._strategy_summary_lines()))
+        self.decision_diagnostics.setPlainText("\n".join(self._decision_diagnostics_lines()))
         run = self._load_latest_backtest_run()
         if run is None:
             self.summary.setPlainText("No backtest runs yet.")
@@ -197,6 +204,44 @@ class AnalyticsTab(QWidget):
         else:
             lines.append("- No market snapshots yet.")
         return lines
+
+    def _decision_diagnostics_lines(self) -> list[str]:
+        try:
+            summary = DecisionDiagnosticsEngine(self.database).build_summary(top=3)
+        except Exception as exc:
+            return [f"Could not load decision diagnostics: {exc}"]
+
+        if summary.total_decisions == 0:
+            return ["No decision diagnostics data available."]
+
+        lines = [
+            f"Total decisions/signals: {summary.total_decisions}",
+            f"BUY count: {summary.buy_count}",
+            f"SELL count: {summary.sell_count}",
+            f"WAIT count: {summary.wait_count}",
+            f"Risk blocked: {summary.risk_blocked_count}",
+            "WAIT reasons:",
+            *self._reason_lines(summary.top_wait_reasons),
+            "BUY reasons:",
+            *self._reason_lines(summary.top_buy_reasons),
+            "SELL reasons:",
+            *self._reason_lines(summary.top_sell_reasons),
+            "Confidence distribution:",
+        ]
+        if summary.confidence_distribution:
+            lines.extend(
+                f"- {confidence}: {count}"
+                for confidence, count in summary.confidence_distribution.items()
+            )
+        else:
+            lines.append("- No confidence data.")
+        return lines
+
+    @staticmethod
+    def _reason_lines(rows: list[tuple[str, int]]) -> list[str]:
+        if not rows:
+            return ["- No data."]
+        return [f"- {reason}: {count}" for reason, count in rows]
 
     @staticmethod
     def _section(title: str, widget: QWidget) -> QGroupBox:
