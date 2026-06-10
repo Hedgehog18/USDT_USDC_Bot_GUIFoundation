@@ -1,7 +1,19 @@
 import logging
 from pathlib import Path
 
-from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QLineEdit, QPushButton, QTextEdit, QVBoxLayout, QWidget
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
+    QApplication,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QSplitter,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
 
 from paper.paper_analytics_engine import PaperAnalyticsEngine
 from paper.paper_insights_engine import PaperInsightsEngine
@@ -18,8 +30,11 @@ class PaperTradingTab(QWidget):
         self.database = database
         self.logger = logging.getLogger("usdt_usdc_bot")
 
-        self.output = QTextEdit()
-        self.output.setReadOnly(True)
+        self.result_output = self._create_readonly_text(180)
+        self.insights_output = self._create_readonly_text(160)
+        self.runs_output = self._create_readonly_text(190)
+        self.cycles_output = self._create_readonly_text(220)
+        self.output = self.result_output
 
         self.iterations_input = QLineEdit("10")
         self.iterations_input.setPlaceholderText("Iterations")
@@ -27,7 +42,7 @@ class PaperTradingTab(QWidget):
         self.start_button = QPushButton("Start Paper Simulation")
         self.start_button.clicked.connect(self.run_paper_simulation)
 
-        self.refresh_button = QPushButton("Показати Paper Summary")
+        self.refresh_button = QPushButton("Refresh Paper Summary")
         self.refresh_button.clicked.connect(self.refresh)
 
         self.export_button = QPushButton("Export Paper Report")
@@ -40,17 +55,37 @@ class PaperTradingTab(QWidget):
         controls.addWidget(self.export_button)
         controls.addStretch()
 
+        controls_group = QGroupBox("Paper Simulation Controls")
+        controls_group.setLayout(controls)
+
+        top_splitter = QSplitter(Qt.Orientation.Horizontal)
+        top_splitter.addWidget(self._section("Result Output", self.result_output))
+        top_splitter.addWidget(self._section("Latest Paper Insights", self.insights_output))
+        top_splitter.setSizes([620, 520])
+
+        bottom_splitter = QSplitter(Qt.Orientation.Horizontal)
+        bottom_splitter.addWidget(self._section("Recent Paper Runs", self.runs_output))
+        bottom_splitter.addWidget(self._section("Recent Paper Cycles", self.cycles_output))
+        bottom_splitter.setSizes([560, 620])
+
+        main_splitter = QSplitter(Qt.Orientation.Vertical)
+        main_splitter.addWidget(top_splitter)
+        main_splitter.addWidget(bottom_splitter)
+        main_splitter.setSizes([310, 430])
+
         layout = QVBoxLayout()
-        layout.addLayout(controls)
+        layout.addWidget(controls_group)
         layout.addWidget(self.refresh_button)
-        layout.addWidget(QLabel("Output:"))
-        layout.addWidget(self.output)
+        layout.addWidget(main_splitter)
         self.setLayout(layout)
 
         self.refresh()
 
     def refresh(self) -> None:
-        self.output.setPlainText("\n".join(self._build_summary_lines()))
+        self.result_output.setPlainText("Ready. Use Start Paper Simulation or Export Paper Report.")
+        self.insights_output.setPlainText("\n".join(self._latest_paper_insights_lines()))
+        self.runs_output.setPlainText("\n".join(self._paper_runs_lines()))
+        self.cycles_output.setPlainText("\n".join(self._paper_cycles_lines()))
 
     def run_paper_simulation(self) -> None:
         raw_value = self.iterations_input.text().strip()
@@ -58,15 +93,15 @@ class PaperTradingTab(QWidget):
         try:
             iterations = int(raw_value)
         except ValueError:
-            self.output.setPlainText("Iterations має бути цілим числом більше 0.")
+            self.result_output.setPlainText("Iterations має бути цілим числом більше 0.")
             return
 
         if iterations <= 0:
-            self.output.setPlainText("Iterations має бути цілим числом більше 0.")
+            self.result_output.setPlainText("Iterations має бути цілим числом більше 0.")
             return
 
         self.start_button.setEnabled(False)
-        self.output.setPlainText("Start Paper Simulation")
+        self.result_output.setPlainText("Start Paper Simulation")
         QApplication.processEvents()
 
         try:
@@ -90,14 +125,12 @@ class PaperTradingTab(QWidget):
                 f"Insights TXT: {insights_path}",
                 f"Rating: {insights.rating}",
                 f"Summary: {insights.summary}",
-                "",
-                "--- Updated Paper Data ---",
-                *self._build_summary_lines(),
             ]
-            self.output.setPlainText("\n".join(lines))
+            self.refresh()
+            self.result_output.setPlainText("\n".join(lines))
         except Exception as exc:
             self.logger.exception("Paper simulation failed from GUI")
-            self.output.setPlainText(f"ERROR:\n{exc}")
+            self.result_output.setPlainText(f"ERROR:\n{exc}")
         finally:
             self.start_button.setEnabled(True)
 
@@ -117,27 +150,43 @@ class PaperTradingTab(QWidget):
                 f"Cycles CSV: {cycles_path}",
                 f"Safety CSV: {safety_path}",
                 f"Summary CSV: {summary_path}",
-                "",
-                "Latest Paper Insights:",
-                *self._latest_paper_insights_lines(),
-                "",
-                "--- Current Paper Data ---",
-                *self._build_summary_lines(),
             ]
-            self.output.setPlainText("\n".join(lines))
+            self.refresh()
+            self.result_output.setPlainText("\n".join(lines))
         except Exception as exc:
             self.logger.exception("Paper report export failed from GUI")
-            self.output.setPlainText(f"ERROR:\n{exc}")
+            self.result_output.setPlainText(f"ERROR:\n{exc}")
+
+    @staticmethod
+    def _create_readonly_text(minimum_height: int) -> QTextEdit:
+        widget = QTextEdit()
+        widget.setReadOnly(True)
+        widget.setMinimumHeight(minimum_height)
+        return widget
+
+    @staticmethod
+    def _section(title: str, widget: QWidget) -> QGroupBox:
+        group = QGroupBox(title)
+        layout = QVBoxLayout()
+        layout.addWidget(widget)
+        group.setLayout(layout)
+        return group
 
     def _build_summary_lines(self) -> list[str]:
-        cycles = self.database.load_recent_paper_cycles(limit=10)
-        runs = self.database.load_recent_paper_runs(limit=10)
-
         lines = ["=== Paper Trading ===", ""]
         lines.append("Latest Paper Insights:")
         lines.extend(self._latest_paper_insights_lines())
         lines.append("")
         lines.append("Recent Paper Runs:")
+        lines.extend(self._paper_runs_lines())
+        lines.append("")
+        lines.append("Recent Paper Cycles:")
+        lines.extend(self._paper_cycles_lines())
+        return lines
+
+    def _paper_runs_lines(self) -> list[str]:
+        runs = self.database.load_recent_paper_runs(limit=10)
+        lines = []
         if runs:
             for row in runs:
                 run_id, timestamp, iterations, opened, closed, stops, usdt, usdc, value, rating, summary = row
@@ -147,9 +196,11 @@ class PaperTradingTab(QWidget):
                 )
         else:
             lines.append("Paper runs ще немає.")
+        return lines
 
-        lines.append("")
-        lines.append("Recent Paper Cycles:")
+    def _paper_cycles_lines(self) -> list[str]:
+        cycles = self.database.load_recent_paper_cycles(limit=10)
+        lines = []
         if cycles:
             for row in cycles:
                 timestamp, cycle_id, direction, status, open_price, close_price, quantity, open_fee, close_fee, gross, net = row
@@ -159,7 +210,6 @@ class PaperTradingTab(QWidget):
                 )
         else:
             lines.append("Paper cycles ще немає.")
-
         return lines
 
     def _latest_paper_insights_lines(self) -> list[str]:

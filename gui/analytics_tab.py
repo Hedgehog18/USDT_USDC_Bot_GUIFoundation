@@ -2,7 +2,19 @@ from pathlib import Path
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
-from PySide6.QtWidgets import QLabel, QPushButton, QScrollArea, QSizePolicy, QTextEdit, QVBoxLayout, QWidget
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QScrollArea,
+    QSizePolicy,
+    QSplitter,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
 
 from storage.database_manager import DatabaseManager
 
@@ -23,11 +35,11 @@ class AnalyticsTab(QWidget):
 
         self.summary = QTextEdit()
         self.summary.setReadOnly(True)
-        self.summary.setMaximumHeight(125)
+        self.summary.setMinimumHeight(170)
 
         self.insights = QTextEdit()
         self.insights.setReadOnly(True)
-        self.insights.setMaximumHeight(170)
+        self.insights.setMinimumHeight(170)
 
         self.equity_figure = Figure(figsize=(8, 3.6), constrained_layout=True)
         self.equity_canvas = FigureCanvas(self.equity_figure)
@@ -44,28 +56,35 @@ class AnalyticsTab(QWidget):
         self.refresh_button = QPushButton("Refresh Analytics")
         self.refresh_button.clicked.connect(self.refresh)
 
-        content = QWidget()
-        content_layout = QVBoxLayout()
-        content_layout.addWidget(QLabel("Summary:"))
-        content_layout.addWidget(self.summary)
-        content_layout.addWidget(QLabel("Latest Backtest Insights:"))
-        content_layout.addWidget(self.insights)
-        content_layout.addWidget(QLabel("Equity Curve:"))
-        content_layout.addWidget(self.equity_canvas)
-        content_layout.addWidget(QLabel("Drawdown Curve:"))
-        content_layout.addWidget(self.drawdown_canvas)
-        content_layout.addWidget(QLabel("Trade PnL Distribution:"))
-        content_layout.addWidget(self.pnl_canvas)
-        content_layout.addStretch()
-        content.setLayout(content_layout)
+        top_panel = QWidget()
+        top_layout = QHBoxLayout()
+        top_layout.addWidget(self._section("Summary", self.summary))
+        top_layout.addWidget(self._section("Latest Backtest Insights", self.insights))
+        top_panel.setLayout(top_layout)
+
+        charts_content = QWidget()
+        charts_layout = QVBoxLayout()
+        charts_layout.addWidget(QLabel("Equity Curve:"))
+        charts_layout.addWidget(self.equity_canvas)
+        charts_layout.addWidget(QLabel("Drawdown Curve:"))
+        charts_layout.addWidget(self.drawdown_canvas)
+        charts_layout.addWidget(QLabel("Trade PnL Distribution:"))
+        charts_layout.addWidget(self.pnl_canvas)
+        charts_layout.addStretch()
+        charts_content.setLayout(charts_layout)
 
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
-        scroll_area.setWidget(content)
+        scroll_area.setWidget(charts_content)
+
+        splitter = QSplitter(Qt.Orientation.Vertical)
+        splitter.addWidget(top_panel)
+        splitter.addWidget(scroll_area)
+        splitter.setSizes([240, 620])
 
         layout = QVBoxLayout()
         layout.addWidget(self.refresh_button)
-        layout.addWidget(scroll_area)
+        layout.addWidget(splitter)
         self.setLayout(layout)
 
         self.refresh()
@@ -143,6 +162,14 @@ class AnalyticsTab(QWidget):
 
         lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
         return [f"Insights TXT: {path}", *lines]
+
+    @staticmethod
+    def _section(title: str, widget: QWidget) -> QGroupBox:
+        group = QGroupBox(title)
+        layout = QVBoxLayout()
+        layout.addWidget(widget)
+        group.setLayout(layout)
+        return group
 
     def _draw_equity_curve(self, indexes: list[int], values: list[float], run_id: int) -> None:
         self.equity_figure.clear()

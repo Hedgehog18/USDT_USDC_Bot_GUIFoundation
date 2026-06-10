@@ -2,8 +2,19 @@ from datetime import datetime
 from enum import Enum
 import traceback
 
-from PySide6.QtCore import QObject, QThread, QTimer, Signal, Slot
-from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QLabel, QLineEdit, QPushButton, QTextEdit, QVBoxLayout, QWidget
+from PySide6.QtCore import QObject, Qt, QThread, QTimer, Signal, Slot
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QSplitter,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
 
 from app.bot_engine import BotEngine
 from runner.bot_runner import BotRunner
@@ -143,17 +154,21 @@ class RunnerTab(QWidget):
 
         self.status_output = QTextEdit()
         self.status_output.setReadOnly(True)
-        self.status_output.setMaximumHeight(170)
+        self.status_output.setMinimumHeight(180)
 
         self.status_label = QLabel(f"Runner status: {self.status.value}")
         self.safety_label = QLabel("Real trading disabled. Demo/Paper mode only.")
+        self.safety_label.setStyleSheet(
+            "font-weight: 600; color: #f59e0b; padding: 6px; border: 1px solid #b45309;"
+        )
 
         self.summary_output = QTextEdit()
         self.summary_output.setReadOnly(True)
-        self.summary_output.setMaximumHeight(105)
+        self.summary_output.setMinimumHeight(130)
 
         self.output = QTextEdit()
         self.output.setReadOnly(True)
+        self.output.setMinimumHeight(260)
 
         self.refresh_button = QPushButton("Refresh Runner")
         self.refresh_button.clicked.connect(self.refresh)
@@ -173,22 +188,46 @@ class RunnerTab(QWidget):
         controls.addWidget(self.start_button)
         controls.addWidget(self.stop_button)
 
+        controls_group = QGroupBox("Runner Controls")
+        controls_group.setLayout(controls)
+
         actions = QHBoxLayout()
         actions.addWidget(self.refresh_button)
         actions.addWidget(self.auto_refresh_checkbox)
         actions.addStretch()
 
+        status_group = QGroupBox("Status")
+        status_layout = QVBoxLayout()
+        status_layout.addWidget(self.status_label)
+        status_layout.addWidget(self.status_output)
+        status_group.setLayout(status_layout)
+
+        summary_group = QGroupBox("Last Run Summary")
+        summary_layout = QVBoxLayout()
+        summary_layout.addWidget(self.summary_output)
+        summary_group.setLayout(summary_layout)
+
+        monitor_group = QGroupBox("Monitor")
+        monitor_layout = QVBoxLayout()
+        monitor_layout.addLayout(actions)
+        monitor_layout.addWidget(self.output)
+        monitor_group.setLayout(monitor_layout)
+
+        top_panel = QWidget()
+        top_layout = QVBoxLayout()
+        top_layout.addWidget(controls_group)
+        top_layout.addWidget(self.safety_label)
+        top_layout.addWidget(status_group)
+        top_layout.addWidget(summary_group)
+        top_panel.setLayout(top_layout)
+
+        splitter = QSplitter(Qt.Orientation.Vertical)
+        splitter.addWidget(top_panel)
+        splitter.addWidget(monitor_group)
+        splitter.setSizes([430, 520])
+
         layout = QVBoxLayout()
-        layout.addLayout(controls)
-        layout.addWidget(self.safety_label)
-        layout.addWidget(self.status_label)
-        layout.addWidget(QLabel("Status:"))
-        layout.addWidget(self.status_output)
-        layout.addWidget(QLabel("Last run summary:"))
-        layout.addWidget(self.summary_output)
-        layout.addLayout(actions)
-        layout.addWidget(QLabel("Monitor:"))
-        layout.addWidget(self.output)
+        layout.addWidget(splitter)
         self.setLayout(layout)
 
         self._update_last_run_summary()
