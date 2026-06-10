@@ -44,39 +44,39 @@ class AnalyticsTab(QWidget):
 
         self.summary = QTextEdit()
         self.summary.setReadOnly(True)
-        self.summary.setMinimumHeight(190)
+        self.summary.setMinimumHeight(150)
 
         self.insights = QTextEdit()
         self.insights.setReadOnly(True)
-        self.insights.setMinimumHeight(190)
+        self.insights.setMinimumHeight(150)
 
         self.strategy_summary = QTextEdit()
         self.strategy_summary.setReadOnly(True)
-        self.strategy_summary.setMinimumHeight(190)
+        self.strategy_summary.setMinimumHeight(150)
 
         self.strategy_tuning = QTextEdit()
         self.strategy_tuning.setReadOnly(True)
-        self.strategy_tuning.setMinimumHeight(220)
+        self.strategy_tuning.setMinimumHeight(165)
 
         self.entry_zone_diagnostics = QTextEdit()
         self.entry_zone_diagnostics.setReadOnly(True)
-        self.entry_zone_diagnostics.setMinimumHeight(220)
+        self.entry_zone_diagnostics.setMinimumHeight(165)
 
         self.filter_pass_diagnostics = QTextEdit()
         self.filter_pass_diagnostics.setReadOnly(True)
-        self.filter_pass_diagnostics.setMinimumHeight(240)
+        self.filter_pass_diagnostics.setMinimumHeight(175)
 
         self.validation_summary = QTextEdit()
         self.validation_summary.setReadOnly(True)
-        self.validation_summary.setMinimumHeight(180)
+        self.validation_summary.setMinimumHeight(150)
 
         self.decision_diagnostics = QTextEdit()
         self.decision_diagnostics.setReadOnly(True)
-        self.decision_diagnostics.setMinimumHeight(190)
+        self.decision_diagnostics.setMinimumHeight(150)
 
         self.risk_diagnostics = QTextEdit()
         self.risk_diagnostics.setReadOnly(True)
-        self.risk_diagnostics.setMinimumHeight(190)
+        self.risk_diagnostics.setMinimumHeight(150)
 
         self.equity_figure = Figure(figsize=(8, 3.6), constrained_layout=True)
         self.equity_canvas = FigureCanvas(self.equity_figure)
@@ -96,28 +96,32 @@ class AnalyticsTab(QWidget):
 
         top_panel = QWidget()
         top_layout = QGridLayout()
-        top_layout.addWidget(self._section("Validation Summary", self.validation_summary), 0, 0, 1, 2)
+        top_layout.addWidget(self._section("Validation Summary", self.validation_summary), 0, 0)
+        top_layout.addWidget(self._section("Latest Backtest Insights", self.insights), 0, 1)
         top_layout.addWidget(self._section("Summary", self.summary), 1, 0)
-        top_layout.addWidget(self._section("Latest Backtest Insights", self.insights), 1, 1)
-        top_layout.addWidget(self._section("Strategy Summary", self.strategy_summary), 2, 0)
+        top_layout.addWidget(self._section("Strategy Summary", self.strategy_summary), 1, 1)
+        top_layout.addWidget(self._section("Risk Diagnostics", self.risk_diagnostics), 2, 0)
         top_layout.addWidget(self._section("Decision Diagnostics", self.decision_diagnostics), 2, 1)
-        top_layout.addWidget(self._section("Risk Diagnostics", self.risk_diagnostics), 3, 0, 1, 2)
-        top_layout.addWidget(self._section("Strategy Tuning Report", self.strategy_tuning), 4, 0, 1, 2)
+        top_layout.addWidget(self._section("Strategy Tuning Report", self.strategy_tuning), 3, 0)
         top_layout.addWidget(
             self._section("Entry Zone Diagnostics", self.entry_zone_diagnostics),
-            5,
-            0,
+            3,
             1,
-            2,
         )
         top_layout.addWidget(
             self._section("Filter Pass Diagnostics", self.filter_pass_diagnostics),
-            6,
+            4,
             0,
             1,
             2,
         )
+        top_layout.setColumnStretch(0, 1)
+        top_layout.setColumnStretch(1, 1)
         top_panel.setLayout(top_layout)
+
+        top_scroll_area = QScrollArea()
+        top_scroll_area.setWidgetResizable(True)
+        top_scroll_area.setWidget(top_panel)
 
         charts_content = QWidget()
         charts_layout = QVBoxLayout()
@@ -136,9 +140,9 @@ class AnalyticsTab(QWidget):
 
         self.main_splitter = QSplitter(Qt.Orientation.Vertical)
         self.main_splitter.setObjectName("analytics_main_splitter")
-        self.main_splitter.addWidget(top_panel)
+        self.main_splitter.addWidget(top_scroll_area)
         self.main_splitter.addWidget(scroll_area)
-        self.main_splitter.setSizes([660, 720])
+        self.main_splitter.setSizes([430, 720])
 
         layout = QVBoxLayout()
         layout.addWidget(self.refresh_button)

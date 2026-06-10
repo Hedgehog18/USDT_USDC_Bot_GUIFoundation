@@ -32,6 +32,34 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Ready")
 
         self.tabs = QTabWidget()
+        self.tabs.setDocumentMode(False)
+        self.tabs.setStyleSheet(
+            """
+            QTabWidget::pane {
+                border-top: 1px solid #4b5563;
+            }
+            QTabBar::tab {
+                background: #2f2f2f;
+                border: 1px solid #444;
+                border-bottom: none;
+                color: #f3f4f6;
+                min-width: 84px;
+                padding: 8px 14px;
+                margin-right: 2px;
+                font-weight: 600;
+            }
+            QTabBar::tab:selected {
+                background: #3f4652;
+                color: #ffffff;
+                border-color: #6b7280;
+                border-top: 2px solid #60a5fa;
+            }
+            QTabBar::tab:hover:!selected {
+                background: #3a3a3a;
+                border-top: 2px solid #9ca3af;
+            }
+            """
+        )
         dashboard_tab = DashboardTab(self.config, self.database)
         self.tabs.addTab(dashboard_tab, "Dashboard")
         self.tabs.addTab(HealthTab(self.config, self.database), "Health")

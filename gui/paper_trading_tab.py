@@ -4,11 +4,13 @@ from pathlib import Path
 from PySide6.QtCore import QObject, Qt, QThread, Signal, Slot
 from PySide6.QtWidgets import (
     QApplication,
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
+    QScrollArea,
     QSplitter,
     QTextEdit,
     QVBoxLayout,
@@ -124,10 +126,8 @@ class PaperTradingTab(QWidget):
 
         self.bottom_splitter = QSplitter(Qt.Orientation.Horizontal)
         self.bottom_splitter.setObjectName("paper_trading_bottom_splitter")
-        self.bottom_splitter.addWidget(self._section("Recent Paper Runs", self.runs_output))
-        self.bottom_splitter.addWidget(self._section("Recent Paper Cycles", self.cycles_output))
-        self.bottom_splitter.addWidget(self._section("Recent Long Paper Runs", self.long_runs_output))
-        self.bottom_splitter.setSizes([540, 620, 540])
+        self.bottom_splitter.addWidget(self._history_grid())
+        self.bottom_splitter.setSizes([1600])
 
         self.main_splitter = QSplitter(Qt.Orientation.Vertical)
         self.main_splitter.setObjectName("paper_trading_main_splitter")
@@ -143,6 +143,21 @@ class PaperTradingTab(QWidget):
         self.setLayout(layout)
 
         self.refresh()
+
+    def _history_grid(self) -> QScrollArea:
+        content = QWidget()
+        layout = QGridLayout()
+        layout.addWidget(self._section("Recent Paper Runs", self.runs_output), 0, 0)
+        layout.addWidget(self._section("Recent Paper Cycles", self.cycles_output), 0, 1)
+        layout.addWidget(self._section("Recent Long Paper Runs", self.long_runs_output), 1, 0, 1, 2)
+        layout.setColumnStretch(0, 1)
+        layout.setColumnStretch(1, 1)
+        content.setLayout(layout)
+
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setWidget(content)
+        return scroll_area
 
     def refresh(self) -> None:
         self.result_output.setPlainText("Ready. Use Start Paper Simulation or Export Paper Report.")
