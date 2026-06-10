@@ -37,12 +37,19 @@ def test_migration_adds_missing_market_snapshot_columns(tmp_path: Path):
     applied = manager.run()
 
     assert "market_snapshots.order_book_imbalance" in applied
+    assert "market_snapshots.corridor_quality_score" in applied
+    assert "market_snapshots.mean_reversion_score" in applied
     assert "market_snapshots.market_health_score" in applied
 
     with sqlite3.connect(db_path) as conn:
         columns = {row[1] for row in conn.execute("PRAGMA table_info(market_snapshots)").fetchall()}
 
     assert "order_book_imbalance" in columns
+    assert "tick_activity_score" in columns
+    assert "center_crossing_score" in columns
+    assert "mean_reversion_score" in columns
+    assert "spread_stability_score" in columns
+    assert "corridor_quality_score" in columns
     assert "market_health_status" in columns
 
 

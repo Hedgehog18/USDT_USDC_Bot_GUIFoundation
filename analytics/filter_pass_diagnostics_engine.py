@@ -59,8 +59,8 @@ class FilterPassDiagnosticsEngine:
             self._build_filter_stat(evaluated, "volatility_regime", "volatility_regime != EXTREME"),
             self._build_filter_stat(evaluated, "order_book_pressure", "BUY=BID_PRESSURE, SELL=ASK_PRESSURE"),
             self._build_filter_stat(evaluated, "micro_trend", "BUY=BUY_DOMINANT, SELL=SELL_DOMINANT"),
-            self._build_filter_stat(evaluated, "corridor_quality", "threshold unknown; source metric not stored"),
-            self._build_filter_stat(evaluated, "mean_reversion_score", "threshold unknown; source metric not stored"),
+            self._build_filter_stat(evaluated, "corridor_quality", "corridor_quality_score > 0"),
+            self._build_filter_stat(evaluated, "mean_reversion_score", "mean_reversion_score > 0"),
         ]
 
         blocked_snapshots = [
@@ -106,6 +106,8 @@ class FilterPassDiagnosticsEngine:
                     order_book_pressure,
                     micro_trend,
                     volatility_regime,
+                    corridor_quality_score,
+                    mean_reversion_score,
                     market_health_score,
                     market_health_status
                 FROM market_snapshots
@@ -127,6 +129,8 @@ class FilterPassDiagnosticsEngine:
                 order_book_pressure,
                 micro_trend,
                 volatility_regime,
+                corridor_quality_score,
+                mean_reversion_score,
                 market_health_score,
                 market_health_status,
             ) = row
@@ -142,6 +146,8 @@ class FilterPassDiagnosticsEngine:
                 "order_book_pressure": clean_display_text(order_book_pressure).upper(),
                 "micro_trend": clean_display_text(micro_trend).upper(),
                 "volatility_regime": clean_display_text(volatility_regime).upper(),
+                "corridor_quality_score": float(corridor_quality_score or 0.0),
+                "mean_reversion_score": float(mean_reversion_score or 0.0),
                 "market_health_score": float(market_health_score or 0.0),
                 "market_health_status": clean_display_text(market_health_status).upper(),
             })
@@ -162,8 +168,8 @@ class FilterPassDiagnosticsEngine:
                 "volatility_regime": row["volatility_regime"] != "EXTREME",
                 "order_book_pressure": self._order_book_pressure_pass(zone, row["order_book_pressure"]),
                 "micro_trend": self._micro_trend_pass(zone, row["micro_trend"]),
-                "corridor_quality": None,
-                "mean_reversion_score": None,
+                "corridor_quality": row["corridor_quality_score"] > 0.0,
+                "mean_reversion_score": row["mean_reversion_score"] > 0.0,
             },
         }
 

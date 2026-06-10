@@ -26,6 +26,11 @@ class DatabaseMigrationManager:
             ColumnDefinition("expectancy", "REAL DEFAULT 0"),
         ],
         "market_snapshots": [
+            ColumnDefinition("tick_activity_score", "REAL DEFAULT 0"),
+            ColumnDefinition("center_crossing_score", "REAL DEFAULT 0"),
+            ColumnDefinition("mean_reversion_score", "REAL DEFAULT 0"),
+            ColumnDefinition("spread_stability_score", "REAL DEFAULT 0"),
+            ColumnDefinition("corridor_quality_score", "REAL DEFAULT 0"),
             ColumnDefinition("order_book_imbalance", "REAL DEFAULT 0"),
             ColumnDefinition("order_book_pressure", "TEXT DEFAULT 'UNKNOWN'"),
             ColumnDefinition("trade_volume_delta", "REAL DEFAULT 0"),

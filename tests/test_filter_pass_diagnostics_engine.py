@@ -23,6 +23,8 @@ def _insert_snapshot(
     order_book_pressure: str = "BID_PRESSURE",
     micro_trend: str = "BUY_DOMINANT",
     volatility_regime: str = "NORMAL",
+    corridor_quality_score: float = 80.0,
+    mean_reversion_score: float = 70.0,
     market_health_score: float = 100.0,
     market_health_status: str = "HEALTHY",
 ) -> None:
@@ -36,8 +38,9 @@ def _insert_snapshot(
             center_confidence, center_alignment,
             market_activity_score, market_regime,
             order_book_pressure, micro_trend, volatility_regime,
+            corridor_quality_score, mean_reversion_score,
             market_health_score, market_health_status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             f"2026-01-01T00:0{index}:00",
@@ -59,6 +62,8 @@ def _insert_snapshot(
             order_book_pressure,
             micro_trend,
             volatility_regime,
+            corridor_quality_score,
+            mean_reversion_score,
             market_health_score,
             market_health_status,
         ),
@@ -90,6 +95,8 @@ def test_filter_pass_diagnostics_counts_pass_fail_unknown(tmp_path):
             order_book_pressure="BID_PRESSURE",
             micro_trend="BUY_DOMINANT",
             volatility_regime="EXTREME",
+            corridor_quality_score=0.0,
+            mean_reversion_score=0.0,
             market_health_score=30.0,
             market_health_status="UNHEALTHY",
         )
@@ -112,8 +119,12 @@ def test_filter_pass_diagnostics_counts_pass_fail_unknown(tmp_path):
     assert stats["order_book_pressure"].failed == 1
     assert stats["micro_trend"].passed == 1
     assert stats["micro_trend"].failed == 1
-    assert stats["corridor_quality"].unknown == 2
-    assert stats["mean_reversion_score"].unknown == 2
+    assert stats["corridor_quality"].passed == 1
+    assert stats["corridor_quality"].failed == 1
+    assert stats["corridor_quality"].unknown == 0
+    assert stats["mean_reversion_score"].passed == 1
+    assert stats["mean_reversion_score"].failed == 1
+    assert stats["mean_reversion_score"].unknown == 0
     assert summary.top_blocking_filters[0][1] == 1
     assert summary.latest_blocked_snapshots[0].zone == "SELL"
     assert "center_confidence" in summary.latest_blocked_snapshots[0].failed_filters
