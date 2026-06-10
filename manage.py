@@ -34,6 +34,7 @@ from portfolio.portfolio_analytics import PortfolioAnalytics
 from runner.bot_runner import BotRunner
 from storage.database_manager import DatabaseManager
 from analytics.statistics_engine import StatisticsEngine
+from analytics.strategy_validation_engine import StrategyValidationEngine
 
 
 
@@ -113,6 +114,29 @@ def command_stats(args) -> None:
     print(f"Total deposits: {portfolio.total_deposits:.2f}")
     print(f"Net deposits: {portfolio.net_deposits:.2f}")
     print(f"ROI: {portfolio.roi * 100:.4f}%")
+
+
+def command_strategy_report(args) -> None:
+    _config, _logger, database = build_context()
+    summary = StrategyValidationEngine(database).build_summary()
+
+    print("=== Strategy Validation Report ===")
+    if summary.total_signals == 0:
+        print("No strategy data available.")
+        return
+
+    print(f"Signals generated: {summary.total_signals}")
+    print(f"BUY signals: {summary.buy_signals}")
+    print(f"SELL signals: {summary.sell_signals}")
+    print(f"Avg confidence: {summary.average_confidence * 100:.2f}%")
+    print(f"Avg spread: {summary.average_spread:.8f}")
+    print(f"Avg volatility: {summary.average_volatility:.8f}")
+    print("Market regimes:")
+    if summary.market_regime_distribution:
+        for regime, count in summary.market_regime_distribution.items():
+            print(f"- {regime}: {count}")
+    else:
+        print("- No market snapshots yet.")
 
 
 def command_notifications(args) -> None:
@@ -627,6 +651,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     stats_parser = subparsers.add_parser("stats", help="РџРѕРєР°Р·Р°С‚Рё СЃС‚Р°С‚РёСЃС‚РёРєСѓ")
     stats_parser.set_defaults(func=command_stats)
+
+    strategy_report_parser = subparsers.add_parser("strategy-report", help="Show strategy validation summary")
+    strategy_report_parser.set_defaults(func=command_strategy_report)
 
     notifications_parser = subparsers.add_parser("notifications", help="РџРѕРєР°Р·Р°С‚Рё РїРѕРІС–РґРѕРјР»РµРЅРЅСЏ")
     notifications_parser.add_argument("--limit", type=int, default=10)

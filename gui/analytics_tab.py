@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from analytics.strategy_validation_engine import StrategyValidationEngine
 from storage.database_manager import DatabaseManager
 
 
@@ -41,6 +42,10 @@ class AnalyticsTab(QWidget):
         self.insights.setReadOnly(True)
         self.insights.setMinimumHeight(170)
 
+        self.strategy_summary = QTextEdit()
+        self.strategy_summary.setReadOnly(True)
+        self.strategy_summary.setMinimumHeight(170)
+
         self.equity_figure = Figure(figsize=(8, 3.6), constrained_layout=True)
         self.equity_canvas = FigureCanvas(self.equity_figure)
 
@@ -60,6 +65,7 @@ class AnalyticsTab(QWidget):
         top_layout = QHBoxLayout()
         top_layout.addWidget(self._section("Summary", self.summary))
         top_layout.addWidget(self._section("Latest Backtest Insights", self.insights))
+        top_layout.addWidget(self._section("Strategy Summary", self.strategy_summary))
         top_panel.setLayout(top_layout)
 
         charts_content = QWidget()
@@ -91,6 +97,7 @@ class AnalyticsTab(QWidget):
         self.refresh()
 
     def refresh(self) -> None:
+        self.strategy_summary.setPlainText("\n".join(self._strategy_summary_lines()))
         run = self._load_latest_backtest_run()
         if run is None:
             self.summary.setPlainText("No backtest runs yet.")
@@ -163,6 +170,33 @@ class AnalyticsTab(QWidget):
 
         lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
         return [f"Insights TXT: {path}", *lines]
+
+    def _strategy_summary_lines(self) -> list[str]:
+        try:
+            summary = StrategyValidationEngine(self.database).build_summary()
+        except Exception as exc:
+            return [f"Could not load strategy summary: {exc}"]
+
+        if summary.total_signals == 0:
+            return ["No strategy data available."]
+
+        lines = [
+            f"Signals generated: {summary.total_signals}",
+            f"Buy signals: {summary.buy_signals}",
+            f"Sell signals: {summary.sell_signals}",
+            f"Avg confidence: {summary.average_confidence * 100:.2f}%",
+            f"Avg spread: {summary.average_spread:.8f}",
+            f"Avg volatility: {summary.average_volatility:.8f}",
+            "Market regimes:",
+        ]
+        if summary.market_regime_distribution:
+            lines.extend(
+                f"- {regime}: {count}"
+                for regime, count in summary.market_regime_distribution.items()
+            )
+        else:
+            lines.append("- No market snapshots yet.")
+        return lines
 
     @staticmethod
     def _section(title: str, widget: QWidget) -> QGroupBox:

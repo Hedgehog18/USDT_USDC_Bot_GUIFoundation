@@ -157,6 +157,13 @@ def test_manage_cli_has_paper_runs_command():
     assert args.limit == 5
 
 
+def test_manage_cli_has_strategy_report_command():
+    parser = build_parser()
+    args = parser.parse_args(["strategy-report"])
+
+    assert args.command == "strategy-report"
+
+
 def test_manage_cli_has_gui_command():
     parser = build_parser()
     args = parser.parse_args(["gui"])
