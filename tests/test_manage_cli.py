@@ -221,6 +221,14 @@ def test_manage_cli_has_entry_zone_diagnostics_command():
     assert args.command == "entry-zone-diagnostics"
 
 
+def test_manage_cli_has_filter_pass_diagnostics_command():
+    parser = build_parser()
+    args = parser.parse_args(["filter-pass-diagnostics", "--latest", "3"])
+
+    assert args.command == "filter-pass-diagnostics"
+    assert args.latest == 3
+
+
 def test_manage_cli_has_validation_summary_command():
     parser = build_parser()
     args = parser.parse_args(["validation-summary"])

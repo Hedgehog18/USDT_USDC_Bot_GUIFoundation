@@ -39,6 +39,7 @@ from storage.database_manager import DatabaseManager
 from analytics.confidence_diagnostics_engine import ConfidenceDiagnosticsEngine
 from analytics.decision_diagnostics_engine import DecisionDiagnosticsEngine
 from analytics.entry_zone_diagnostics_engine import EntryZoneDiagnosticsEngine
+from analytics.filter_pass_diagnostics_engine import FilterPassDiagnosticsEngine
 from analytics.risk_diagnostics_engine import RiskDiagnosticsEngine
 from analytics.statistics_engine import StatisticsEngine
 from analytics.strategy_tuning_report_engine import StrategyTuningReportEngine
@@ -297,6 +298,45 @@ def command_entry_zone_diagnostics(args) -> None:
             print(f"- {regime}: {count}")
     else:
         print("- No market snapshots yet.")
+
+
+def command_filter_pass_diagnostics(args) -> None:
+    config, _logger, database = build_context()
+    summary = FilterPassDiagnosticsEngine(database, config).build_summary(latest=args.latest)
+
+    print("=== Filter Pass Diagnostics ===")
+    if summary.total_entry_zone_snapshots == 0:
+        print("No filter pass diagnostics data available.")
+        return
+
+    if summary.warning:
+        print(f"WARNING: {summary.warning}")
+    print(f"Total entry zone snapshots: {summary.total_entry_zone_snapshots}")
+    print(f"BUY zone snapshots: {summary.buy_zone_snapshots}")
+    print(f"SELL zone snapshots: {summary.sell_zone_snapshots}")
+    print("Filter pass rates:")
+    for item in summary.filters:
+        print(
+            f"- {item.name}: passed={item.passed} failed={item.failed} "
+            f"unknown={item.unknown} pass_rate={item.pass_rate * 100:.2f}% "
+            f"| threshold: {item.threshold}"
+        )
+    print("Top blocking filters:")
+    if summary.top_blocking_filters:
+        for name, failed in summary.top_blocking_filters:
+            print(f"- {name}: {failed}")
+    else:
+        print("- No blocking filters detected.")
+    print("Latest blocked entry-zone snapshots:")
+    if summary.latest_blocked_snapshots:
+        for item in summary.latest_blocked_snapshots:
+            filters = ", ".join(item.failed_filters) if item.failed_filters else "none"
+            print(
+                f"- {item.timestamp} | {item.zone} | "
+                f"work_position={item.work_position:.4f} | failed={filters}"
+            )
+    else:
+        print("- No blocked entry-zone snapshots.")
 
 
 def command_validation_summary(args) -> None:
@@ -967,6 +1007,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Show saved market snapshot entry zone diagnostics",
     )
     entry_zone_diagnostics_parser.set_defaults(func=command_entry_zone_diagnostics)
+
+    filter_pass_diagnostics_parser = subparsers.add_parser(
+        "filter-pass-diagnostics",
+        help="Show filter pass/fail diagnostics for entry-zone snapshots",
+    )
+    filter_pass_diagnostics_parser.add_argument("--latest", type=int, default=5)
+    filter_pass_diagnostics_parser.set_defaults(func=command_filter_pass_diagnostics)
 
     validation_summary_parser = subparsers.add_parser(
         "validation-summary",

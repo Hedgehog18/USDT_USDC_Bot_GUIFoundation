@@ -37,7 +37,7 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(HealthTab(self.config, self.database), "Health")
         self.tabs.addTab(BacktestTab(self.config, self.database), "Backtest")
         self.tabs.addTab(PaperTradingTab(self.config, self.database), "Paper Trading")
-        self.tabs.addTab(AnalyticsTab(self.database), "Analytics")
+        self.tabs.addTab(AnalyticsTab(self.database, self.config), "Analytics")
         self.tabs.addTab(RunnerTab(self.config, self.database, dashboard_tab.refresh), "Runner")
         self.tabs.addTab(LogsTab(self.config.log_file_path, self.database), "Logs")
         self.tabs.addTab(SettingsTab(), "Settings")

@@ -18,10 +18,12 @@ from PySide6.QtWidgets import (
 
 from analytics.decision_diagnostics_engine import DecisionDiagnosticsEngine
 from analytics.entry_zone_diagnostics_engine import EntryZoneDiagnosticsEngine
+from analytics.filter_pass_diagnostics_engine import FilterPassDiagnosticsEngine
 from analytics.risk_diagnostics_engine import RiskDiagnosticsEngine
 from analytics.strategy_tuning_report_engine import StrategyTuningReportEngine
 from analytics.strategy_validation_engine import StrategyValidationEngine
 from analytics.validation_summary_engine import ValidationSummaryEngine
+from config.config_manager import ConfigManager
 from storage.database_manager import DatabaseManager
 
 
@@ -35,9 +37,10 @@ def calculate_drawdown_curve(values: list[float]) -> list[float]:
 
 
 class AnalyticsTab(QWidget):
-    def __init__(self, database: DatabaseManager) -> None:
+    def __init__(self, database: DatabaseManager, config=None) -> None:
         super().__init__()
         self.database = database
+        self.config = config or ConfigManager().config
 
         self.summary = QTextEdit()
         self.summary.setReadOnly(True)
@@ -58,6 +61,10 @@ class AnalyticsTab(QWidget):
         self.entry_zone_diagnostics = QTextEdit()
         self.entry_zone_diagnostics.setReadOnly(True)
         self.entry_zone_diagnostics.setMinimumHeight(220)
+
+        self.filter_pass_diagnostics = QTextEdit()
+        self.filter_pass_diagnostics.setReadOnly(True)
+        self.filter_pass_diagnostics.setMinimumHeight(240)
 
         self.validation_summary = QTextEdit()
         self.validation_summary.setReadOnly(True)
@@ -103,6 +110,13 @@ class AnalyticsTab(QWidget):
             1,
             2,
         )
+        top_layout.addWidget(
+            self._section("Filter Pass Diagnostics", self.filter_pass_diagnostics),
+            6,
+            0,
+            1,
+            2,
+        )
         top_panel.setLayout(top_layout)
 
         charts_content = QWidget()
@@ -138,6 +152,7 @@ class AnalyticsTab(QWidget):
         self.strategy_summary.setPlainText("\n".join(self._strategy_summary_lines()))
         self.strategy_tuning.setPlainText("\n".join(self._strategy_tuning_lines()))
         self.entry_zone_diagnostics.setPlainText("\n".join(self._entry_zone_diagnostics_lines()))
+        self.filter_pass_diagnostics.setPlainText("\n".join(self._filter_pass_diagnostics_lines()))
         self.decision_diagnostics.setPlainText("\n".join(self._decision_diagnostics_lines()))
         self.risk_diagnostics.setPlainText("\n".join(self._risk_diagnostics_lines()))
         run = self._load_latest_backtest_run()
@@ -321,6 +336,51 @@ class AnalyticsTab(QWidget):
             )
         else:
             lines.append("- No market snapshots yet.")
+        return lines
+
+    def _filter_pass_diagnostics_lines(self) -> list[str]:
+        try:
+            summary = FilterPassDiagnosticsEngine(self.database, self.config).build_summary(latest=5)
+        except Exception as exc:
+            return [f"Could not load filter pass diagnostics: {exc}"]
+
+        if summary.total_entry_zone_snapshots == 0:
+            return ["No filter pass diagnostics data available."]
+
+        lines = []
+        if summary.warning:
+            lines.append(f"WARNING: {summary.warning}")
+            lines.append("")
+        lines.extend([
+            f"Total entry zone snapshots: {summary.total_entry_zone_snapshots}",
+            f"BUY zone snapshots: {summary.buy_zone_snapshots}",
+            f"SELL zone snapshots: {summary.sell_zone_snapshots}",
+            "Filter pass rates:",
+        ])
+        lines.extend(
+            (
+                f"- {item.name}: passed={item.passed} failed={item.failed} "
+                f"unknown={item.unknown} pass_rate={item.pass_rate * 100:.2f}%"
+            )
+            for item in summary.filters
+        )
+        lines.append("Top blocking filters:")
+        if summary.top_blocking_filters:
+            lines.extend(f"- {name}: {failed}" for name, failed in summary.top_blocking_filters)
+        else:
+            lines.append("- No blocking filters detected.")
+        lines.append("Latest blocked entry-zone snapshots:")
+        if summary.latest_blocked_snapshots:
+            lines.extend(
+                (
+                    f"- {item.timestamp} | {item.zone} | "
+                    f"work_position={item.work_position:.4f} | "
+                    f"failed={', '.join(item.failed_filters)}"
+                )
+                for item in summary.latest_blocked_snapshots
+            )
+        else:
+            lines.append("- No blocked entry-zone snapshots.")
         return lines
 
     def _decision_diagnostics_lines(self) -> list[str]:
