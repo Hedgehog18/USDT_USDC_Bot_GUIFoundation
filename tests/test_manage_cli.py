@@ -259,6 +259,14 @@ def test_manage_cli_has_center_confidence_diagnostics_command():
     assert args.latest == 4
 
 
+def test_manage_cli_has_center_confidence_rule_sim_command():
+    parser = build_parser()
+    args = parser.parse_args(["center-confidence-rule-sim", "--latest", "4"])
+
+    assert args.command == "center-confidence-rule-sim"
+    assert args.latest == 4
+
+
 def test_manage_cli_has_validation_summary_command():
     parser = build_parser()
     args = parser.parse_args(["validation-summary"])

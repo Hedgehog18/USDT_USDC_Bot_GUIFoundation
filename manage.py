@@ -37,6 +37,7 @@ from portfolio.portfolio_analytics import PortfolioAnalytics
 from runner.bot_runner import BotRunner
 from storage.database_manager import DatabaseManager
 from analytics.center_confidence_diagnostics_engine import CenterConfidenceDiagnosticsEngine
+from analytics.center_confidence_rule_sim_engine import CenterConfidenceRuleSimulationEngine
 from analytics.confidence_diagnostics_engine import ConfidenceDiagnosticsEngine
 from analytics.data_source_check_engine import DataSourceCheckEngine
 from analytics.decision_diagnostics_engine import DecisionDiagnosticsEngine
@@ -482,6 +483,46 @@ def command_center_confidence_diagnostics(args) -> None:
             )
     else:
         print("- No LOW confidence snapshots.")
+
+
+def command_center_confidence_rule_sim(args) -> None:
+    config, _logger, database = build_context()
+    report = CenterConfidenceRuleSimulationEngine(database, config).build_report(latest=args.latest)
+
+    print("=== Center Confidence Rule Simulation ===")
+    print("Simulation only. MarketAnalyzer, DecisionEngine, RiskManager, config, and trades are unchanged.")
+    if not report.profiles or report.profiles[0].total_entry_zone_samples == 0:
+        print("No entry-zone samples available.")
+        return
+
+    for profile in report.profiles:
+        print(f"--- {profile.name} ---")
+        print(f"Total entry-zone samples: {profile.total_entry_zone_samples}")
+        print(f"BUY candidates: {profile.buy_candidates}")
+        print(f"SELL candidates: {profile.sell_candidates}")
+        print(f"Pass count: {profile.pass_count}")
+        print(f"Pass rate: {profile.pass_rate * 100:.2f}%")
+        print("Remaining blocking filters:")
+        if profile.remaining_blocking_filters:
+            for name, count in profile.remaining_blocking_filters:
+                print(f"- {name}: {count}")
+        else:
+            print("- None")
+        print("Latest passed samples:")
+        if profile.latest_passed_samples:
+            for item in profile.latest_passed_samples:
+                print(
+                    f"- {item.timestamp} | {item.zone} | "
+                    f"work_position={item.work_position:.4f} | "
+                    f"center_confidence={item.center_confidence} | "
+                    f"work_short_distance={item.work_short_distance:.8f} | "
+                    f"work_long_distance={item.work_long_distance:.8f} | "
+                    f"short_long_distance={item.short_long_distance:.8f} | "
+                    f"pressure={item.order_book_pressure} | "
+                    f"micro_trend={item.micro_trend}"
+                )
+        else:
+            print("- No passed samples.")
 
 
 def command_validation_summary(args) -> None:
@@ -1218,6 +1259,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     center_confidence_diagnostics_parser.add_argument("--latest", type=int, default=10)
     center_confidence_diagnostics_parser.set_defaults(func=command_center_confidence_diagnostics)
+
+    center_confidence_rule_sim_parser = subparsers.add_parser(
+        "center-confidence-rule-sim",
+        help="Simulate softer center confidence rules using saved snapshots",
+    )
+    center_confidence_rule_sim_parser.add_argument("--latest", type=int, default=5)
+    center_confidence_rule_sim_parser.set_defaults(func=command_center_confidence_rule_sim)
 
     validation_summary_parser = subparsers.add_parser(
         "validation-summary",
