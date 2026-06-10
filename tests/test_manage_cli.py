@@ -181,6 +181,13 @@ def test_manage_cli_has_risk_diagnostics_command():
     assert args.latest == 2
 
 
+def test_manage_cli_has_validation_summary_command():
+    parser = build_parser()
+    args = parser.parse_args(["validation-summary"])
+
+    assert args.command == "validation-summary"
+
+
 def test_manage_cli_has_gui_command():
     parser = build_parser()
     args = parser.parse_args(["gui"])

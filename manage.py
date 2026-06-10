@@ -37,6 +37,7 @@ from analytics.decision_diagnostics_engine import DecisionDiagnosticsEngine
 from analytics.risk_diagnostics_engine import RiskDiagnosticsEngine
 from analytics.statistics_engine import StatisticsEngine
 from analytics.strategy_validation_engine import StrategyValidationEngine
+from analytics.validation_summary_engine import ValidationSummaryEngine
 
 
 
@@ -199,6 +200,28 @@ def command_risk_diagnostics(args) -> None:
             )
     else:
         print("- No blocked decisions.")
+
+
+def command_validation_summary(args) -> None:
+    _config, _logger, database = build_context()
+    summary = ValidationSummaryEngine(database).build_summary()
+
+    print("=== Validation Summary ===")
+    print(f"Overall status: {summary.overall_status}")
+    print(f"Strategy signals: {summary.strategy_signals}")
+    print(f"Latest backtest trades: {summary.latest_backtest_trades}")
+    print(f"Latest backtest net profit: {summary.latest_backtest_net_profit:.8f}")
+    print(f"Paper cycles: {summary.paper_cycles}")
+    print(f"Paper net profit: {summary.paper_net_profit:.8f}")
+    print(f"Risk blocked rate: {summary.risk_blocked_rate * 100:.2f}%")
+    print("Warnings:")
+    if summary.warnings:
+        for item in summary.warnings:
+            print(f"- {item}")
+    else:
+        print("- None")
+    print("Next action:")
+    print(summary.next_action)
 
 
 def _print_reason_rows(rows: list[tuple[str, int]]) -> None:
@@ -740,6 +763,12 @@ def build_parser() -> argparse.ArgumentParser:
     risk_diagnostics_parser.add_argument("--top", type=int, default=5)
     risk_diagnostics_parser.add_argument("--latest", type=int, default=5)
     risk_diagnostics_parser.set_defaults(func=command_risk_diagnostics)
+
+    validation_summary_parser = subparsers.add_parser(
+        "validation-summary",
+        help="Show aggregate validation status",
+    )
+    validation_summary_parser.set_defaults(func=command_validation_summary)
 
     notifications_parser = subparsers.add_parser("notifications", help="РџРѕРєР°Р·Р°С‚Рё РїРѕРІС–РґРѕРјР»РµРЅРЅСЏ")
     notifications_parser.add_argument("--limit", type=int, default=10)

@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 from analytics.decision_diagnostics_engine import DecisionDiagnosticsEngine
 from analytics.risk_diagnostics_engine import RiskDiagnosticsEngine
 from analytics.strategy_validation_engine import StrategyValidationEngine
+from analytics.validation_summary_engine import ValidationSummaryEngine
 from storage.database_manager import DatabaseManager
 
 
@@ -48,6 +49,10 @@ class AnalyticsTab(QWidget):
         self.strategy_summary.setReadOnly(True)
         self.strategy_summary.setMinimumHeight(170)
 
+        self.validation_summary = QTextEdit()
+        self.validation_summary.setReadOnly(True)
+        self.validation_summary.setMinimumHeight(150)
+
         self.decision_diagnostics = QTextEdit()
         self.decision_diagnostics.setReadOnly(True)
         self.decision_diagnostics.setMinimumHeight(170)
@@ -73,11 +78,12 @@ class AnalyticsTab(QWidget):
 
         top_panel = QWidget()
         top_layout = QGridLayout()
-        top_layout.addWidget(self._section("Summary", self.summary), 0, 0)
-        top_layout.addWidget(self._section("Latest Backtest Insights", self.insights), 0, 1)
-        top_layout.addWidget(self._section("Strategy Summary", self.strategy_summary), 1, 0)
-        top_layout.addWidget(self._section("Decision Diagnostics", self.decision_diagnostics), 1, 1)
-        top_layout.addWidget(self._section("Risk Diagnostics", self.risk_diagnostics), 2, 0, 1, 2)
+        top_layout.addWidget(self._section("Validation Summary", self.validation_summary), 0, 0, 1, 2)
+        top_layout.addWidget(self._section("Summary", self.summary), 1, 0)
+        top_layout.addWidget(self._section("Latest Backtest Insights", self.insights), 1, 1)
+        top_layout.addWidget(self._section("Strategy Summary", self.strategy_summary), 2, 0)
+        top_layout.addWidget(self._section("Decision Diagnostics", self.decision_diagnostics), 2, 1)
+        top_layout.addWidget(self._section("Risk Diagnostics", self.risk_diagnostics), 3, 0, 1, 2)
         top_panel.setLayout(top_layout)
 
         charts_content = QWidget()
@@ -99,7 +105,7 @@ class AnalyticsTab(QWidget):
         self.main_splitter.setObjectName("analytics_main_splitter")
         self.main_splitter.addWidget(top_panel)
         self.main_splitter.addWidget(scroll_area)
-        self.main_splitter.setSizes([430, 620])
+        self.main_splitter.setSizes([560, 620])
 
         layout = QVBoxLayout()
         layout.addWidget(self.refresh_button)
@@ -109,6 +115,7 @@ class AnalyticsTab(QWidget):
         self.refresh()
 
     def refresh(self) -> None:
+        self.validation_summary.setPlainText("\n".join(self._validation_summary_lines()))
         self.strategy_summary.setPlainText("\n".join(self._strategy_summary_lines()))
         self.decision_diagnostics.setPlainText("\n".join(self._decision_diagnostics_lines()))
         self.risk_diagnostics.setPlainText("\n".join(self._risk_diagnostics_lines()))
@@ -210,6 +217,29 @@ class AnalyticsTab(QWidget):
             )
         else:
             lines.append("- No market snapshots yet.")
+        return lines
+
+    def _validation_summary_lines(self) -> list[str]:
+        try:
+            summary = ValidationSummaryEngine(self.database).build_summary()
+        except Exception as exc:
+            return [f"Could not load validation summary: {exc}"]
+
+        lines = [
+            f"Overall status: {summary.overall_status}",
+            f"Strategy signals: {summary.strategy_signals}",
+            f"Latest backtest trades: {summary.latest_backtest_trades}",
+            f"Latest backtest net profit: {summary.latest_backtest_net_profit:.8f}",
+            f"Paper cycles: {summary.paper_cycles}",
+            f"Paper net profit: {summary.paper_net_profit:.8f}",
+            f"Risk blocked rate: {summary.risk_blocked_rate * 100:.2f}%",
+            "Warnings:",
+        ]
+        if summary.warnings:
+            lines.extend(f"- {item}" for item in summary.warnings)
+        else:
+            lines.append("- None")
+        lines.extend(["Next action:", summary.next_action])
         return lines
 
     def _decision_diagnostics_lines(self) -> list[str]:
