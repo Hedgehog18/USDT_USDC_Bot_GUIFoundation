@@ -26,6 +26,7 @@ class BotEngine:
         self.config = self.config_manager.config
         self.logger = AppLogger(self.config).configure()
 
+        self.database = DatabaseManager(self.config.database_path)
         self.market_data_cache = MarketDataCache(self.config.market_data_cache_ttl_seconds)
         self.market_data_provider = BinanceMarketDataProvider(
             base_url=self.config.binance_base_url,
@@ -36,10 +37,10 @@ class BotEngine:
             provider=self.market_data_provider,
             use_real_data=self.config.use_real_market_data,
             config=self.config,
+            fallback_callback=self._save_market_data_fallback_event,
         )
         self.decision_engine = DecisionEngine(self.config)
         self.risk_manager = RiskManager(self.config)
-        self.database = DatabaseManager(self.config.database_path)
         self.state_manager = BotStateManager(self.database)
         self.budget_manager = BotBudgetManager(self.database)
         self.cycle_manager = CycleManager()
@@ -55,6 +56,13 @@ class BotEngine:
             config=self.config,
             database=self.database,
             market_provider=self.market_data_provider,
+        )
+
+    def _save_market_data_fallback_event(self, message: str) -> None:
+        self.database.save_system_event(
+            "WARNING",
+            "MarketAnalyzer",
+            f"Market data fallback activated: {message}",
         )
 
     def start(self) -> None:

@@ -41,7 +41,8 @@ class LongPaperRunWorker(QObject):
         try:
             self.status.emit(
                 f"Starting long paper run: iterations={self.iterations}, "
-                f"interval_seconds={self.interval_seconds}"
+                f"interval_seconds={self.interval_seconds}\n"
+                f"Data source: {'BINANCE' if bool(getattr(self.config, 'use_real_market_data', False)) else 'MOCK'}"
             )
             result = LongPaperRunWorkflow(self.config, self.database).run(
                 iterations=self.iterations,
@@ -178,6 +179,8 @@ class PaperTradingTab(QWidget):
             lines = [
                 "Paper simulation completed",
                 f"Run ID: {paper_run_id}",
+                f"Data source: {result.data_source}",
+                *self._data_source_warning_lines(result.data_source),
                 f"Iterations: {result.iterations}",
                 f"Opened cycles: {result.opened_cycles}",
                 f"Closed cycles: {result.closed_cycles}",
@@ -214,7 +217,8 @@ class PaperTradingTab(QWidget):
         self.start_button.setEnabled(False)
         self.result_output.setPlainText(
             "Long paper run started.\n"
-            "Long paper run may take time. Real trading disabled."
+            "Long paper run may take time. Real trading disabled.\n"
+            f"Data source: {self._configured_data_source()}"
         )
 
         self.long_thread = QThread(self)
@@ -234,6 +238,8 @@ class PaperTradingTab(QWidget):
         lines = [
             "Long paper run completed",
             "Real trading disabled.",
+            f"Data source: {result.data_source}",
+            *self._data_source_warning_lines(result.data_source),
             f"Long Run ID: {result.long_run_id}",
             f"Paper Run ID: {result.run_id}",
             f"Iterations: {result.run_result.iterations}",
@@ -430,3 +436,12 @@ class PaperTradingTab(QWidget):
             f"Rating: {insights.rating}",
             f"Summary: {insights.summary}",
         ]
+
+    def _configured_data_source(self) -> str:
+        return "BINANCE" if bool(getattr(self.config, "use_real_market_data", False)) else "MOCK"
+
+    @staticmethod
+    def _data_source_warning_lines(data_source: str) -> list[str]:
+        if data_source == "FALLBACK":
+            return ["WARNING: Results may not reflect real Binance market data."]
+        return []

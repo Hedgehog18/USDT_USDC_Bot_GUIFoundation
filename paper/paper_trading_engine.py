@@ -19,6 +19,7 @@ class PaperTradingRunResult:
     closed_cycles: int
     safety_stops: int
     final_portfolio: PaperPortfolio
+    data_source: str = "UNKNOWN"
 
 
 class PaperTradingEngine:
@@ -109,4 +110,5 @@ class PaperTradingEngine:
             closed_cycles=closed,
             safety_stops=safety_stops,
             final_portfolio=self.portfolio_manager.get_portfolio(),
+            data_source=getattr(self.bot.market_analyzer, "last_data_source", "UNKNOWN"),
         )

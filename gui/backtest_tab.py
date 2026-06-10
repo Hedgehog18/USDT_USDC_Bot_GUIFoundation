@@ -1,6 +1,6 @@
 import logging
 
-from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QLineEdit, QPushButton, QTextEdit, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QComboBox, QHBoxLayout, QLabel, QLineEdit, QPushButton, QTextEdit, QVBoxLayout, QWidget
 
 from backtest.backtest_engine import BacktestEngine
 from backtest.backtest_insights_engine import BacktestInsightsEngine
@@ -13,6 +13,8 @@ from storage.database_manager import DatabaseManager
 
 
 class BacktestTab(QWidget):
+    ALLOWED_INTERVALS = ("1m", "3m", "5m", "15m", "30m", "1h", "4h", "1d")
+
     def __init__(self, config, database: DatabaseManager) -> None:
         super().__init__()
         self.config = config
@@ -22,8 +24,12 @@ class BacktestTab(QWidget):
         self.output = QTextEdit()
         self.output.setReadOnly(True)
 
-        self.interval_input = QLineEdit(self.config.backtest_interval or "1m")
-        self.interval_input.setPlaceholderText("Interval")
+        self.interval_input = QComboBox()
+        self.interval_input.addItems(self.ALLOWED_INTERVALS)
+        configured_interval = self.config.backtest_interval or "1m"
+        self.interval_input.setCurrentText(
+            configured_interval if configured_interval in self.ALLOWED_INTERVALS else "1m"
+        )
 
         self.limit_input = QLineEdit(str(self.config.backtest_limit or 500))
         self.limit_input.setPlaceholderText("Limit")
@@ -55,12 +61,8 @@ class BacktestTab(QWidget):
         self.output.setPlainText("\n".join(self._build_summary_lines()))
 
     def run_backtest(self) -> None:
-        interval = self.interval_input.text().strip()
+        interval = self.interval_input.currentText().strip()
         raw_limit = self.limit_input.text().strip()
-
-        if not interval:
-            self.output.setPlainText("Interval не може бути порожнім.")
-            return
 
         try:
             limit = int(raw_limit)
@@ -156,3 +158,4 @@ class BacktestTab(QWidget):
                 f"net={net_profit:.8f} roi={roi * 100:.4f}% dd={max_drawdown * 100:.4f}%"
             )
         return lines
+

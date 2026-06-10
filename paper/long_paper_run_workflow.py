@@ -29,6 +29,7 @@ class LongPaperRunResult:
     run_id: int
     long_run_id: int
     run_result: PaperTradingRunResult
+    data_source: str
     stats: PaperAnalytics
     insights: PaperInsights
     validation_summary: ValidationSummary
@@ -83,6 +84,7 @@ class LongPaperRunWorkflow:
             run_id=run_id,
             long_run_id=long_run_id,
             run_result=run_result,
+            data_source=run_result.data_source,
             stats=stats,
             insights=insights,
             validation_summary=validation_summary,
@@ -99,9 +101,11 @@ class LongPaperRunWorkflow:
         total_closed = 0
         total_safety_stops = 0
         last_result = None
+        data_sources: list[str] = []
 
         for index in range(iterations):
             last_result = engine.run(1)
+            data_sources.append(last_result.data_source)
             total_opened += last_result.opened_cycles
             total_closed += last_result.closed_cycles
             total_safety_stops += last_result.safety_stops
@@ -119,4 +123,15 @@ class LongPaperRunWorkflow:
             closed_cycles=total_closed,
             safety_stops=total_safety_stops,
             final_portfolio=last_result.final_portfolio,
+            data_source=LongPaperRunWorkflow._combine_data_sources(data_sources),
         )
+
+    @staticmethod
+    def _combine_data_sources(data_sources: list[str]) -> str:
+        if "FALLBACK" in data_sources:
+            return "FALLBACK"
+        if "BINANCE" in data_sources:
+            return "BINANCE"
+        if "MOCK" in data_sources:
+            return "MOCK"
+        return "UNKNOWN"

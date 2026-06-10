@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Callable
 
 from config.config_manager import BotConfig
 from market.activity_engine import ActivityEngine
@@ -18,6 +19,7 @@ class MarketAnalyzer:
         provider: BinanceMarketDataProvider | None = None,
         use_real_data: bool = True,
         config: BotConfig | None = None,
+        fallback_callback: Callable[[str], None] | None = None,
     ) -> None:
         self.symbol = symbol
         self.config = config
@@ -29,16 +31,36 @@ class MarketAnalyzer:
         self.market_health_engine = MarketHealthEngine(config) if config else None
         self.provider = provider or BinanceMarketDataProvider()
         self.use_real_data = use_real_data
+        self.fallback_callback = fallback_callback
+        self.last_data_source = "UNKNOWN"
+        self.last_fallback_error = ""
 
     def analyze_market(self) -> MarketState:
         if self.use_real_data:
             try:
-                return self._analyze_real_market()
-            except BinanceMarketDataError:
+                state = self._analyze_real_market()
+                self.last_data_source = "BINANCE"
+                self.last_fallback_error = ""
+                return state
+            except BinanceMarketDataError as exc:
                 # Тимчасовий fallback, щоб Demo не падав при відсутності інтернету.
+                self.last_data_source = "FALLBACK"
+                self.last_fallback_error = str(exc)
+                self._notify_fallback(str(exc))
                 return self._analyze_mock_market()
 
+        self.last_data_source = "MOCK"
+        self.last_fallback_error = ""
         return self._analyze_mock_market()
+
+    def _notify_fallback(self, message: str) -> None:
+        if self.fallback_callback is None:
+            return
+
+        try:
+            self.fallback_callback(message)
+        except Exception:
+            pass
 
     def _analyze_real_market(self) -> MarketState:
         bid_ask = self.provider.get_bid_ask(self.symbol)

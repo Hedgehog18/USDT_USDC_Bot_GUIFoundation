@@ -87,7 +87,7 @@ class _SignalWriter:
 class DemoRunnerWorker(QObject):
     started = Signal(str)
     status = Signal(str)
-    finished = Signal(int, bool)
+    finished = Signal(int, bool, str)
     error = Signal(str)
 
     def __init__(self, iterations: int, interval_seconds: int) -> None:
@@ -120,7 +120,8 @@ class DemoRunnerWorker(QObject):
                 result = self.runner.run()
             writer.flush()
 
-            self.finished.emit(result.iterations_completed, result.stopped_by_limit)
+            data_source = getattr(bot.market_analyzer, "last_data_source", "UNKNOWN")
+            self.finished.emit(result.iterations_completed, result.stopped_by_limit, data_source)
         except Exception:
             self.error.emit(traceback.format_exc())
 
@@ -260,6 +261,7 @@ class RunnerTab(QWidget):
         self._append_status(
             f"Starting demo runner: iterations={iterations}, interval_seconds={interval_seconds}"
         )
+        self._append_status(f"Data source: {self._configured_data_source()}")
         self.stopped_by_user = False
         self._set_status(RunnerStatus.RUNNING)
         self._update_last_run_summary()
@@ -362,16 +364,20 @@ class RunnerTab(QWidget):
         self.status_output.setPlainText(f"{current}\n{line}".strip())
         self.status_output.verticalScrollBar().setValue(self.status_output.verticalScrollBar().maximum())
 
-    def _handle_runner_finished(self, iterations_completed: int, stopped_by_limit: bool) -> None:
+    def _handle_runner_finished(self, iterations_completed: int, stopped_by_limit: bool, data_source: str) -> None:
         self._set_status(RunnerStatus.FINISHED)
         self._append_status(
             "Demo runner completed. "
             f"Iterations: {iterations_completed}. Stopped by limit: {stopped_by_limit}."
         )
+        self._append_status(f"Data source: {data_source}")
+        if data_source == "FALLBACK":
+            self._append_status("WARNING: Results may not reflect real Binance market data.")
         self._update_last_run_summary(
             iterations_completed=iterations_completed,
             stopped_by_limit=stopped_by_limit,
             stopped_by_user=self.stopped_by_user,
+            data_source=data_source,
         )
         self._save_system_event(
             "INFO",
@@ -406,14 +412,21 @@ class RunnerTab(QWidget):
         stopped_by_limit: bool | None = None,
         stopped_by_user: bool | None = None,
         error_message: str | None = None,
+        data_source: str | None = None,
     ) -> None:
         lines = [
             f"Iterations completed: {iterations_completed if iterations_completed is not None else 'N/A'}",
             f"Stopped by limit: {stopped_by_limit if stopped_by_limit is not None else 'N/A'}",
             f"Stopped by user: {stopped_by_user if stopped_by_user is not None else 'N/A'}",
+            f"Data source: {data_source or 'N/A'}",
             f"Error message: {clean_display_text(error_message) if error_message else 'N/A'}",
         ]
+        if data_source == "FALLBACK":
+            lines.append("WARNING: Results may not reflect real Binance market data.")
         self.summary_output.setPlainText("\n".join(lines))
+
+    def _configured_data_source(self) -> str:
+        return "BINANCE" if bool(getattr(self.config, "use_real_market_data", False)) else "MOCK"
 
     def _save_system_event(self, level: str, message: str) -> None:
         try:

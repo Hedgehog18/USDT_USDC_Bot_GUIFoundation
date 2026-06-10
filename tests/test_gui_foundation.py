@@ -35,6 +35,7 @@ def test_backtest_tab_imports():
     from gui.main_window import BacktestTab
 
     assert BacktestTab is not None
+    assert BacktestTab.ALLOWED_INTERVALS == ("1m", "3m", "5m", "15m", "30m", "1h", "4h", "1d")
 
 
 def test_logs_tab_imports():
