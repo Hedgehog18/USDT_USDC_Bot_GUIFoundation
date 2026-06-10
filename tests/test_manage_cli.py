@@ -198,6 +198,14 @@ def test_manage_cli_has_risk_diagnostics_command():
     assert args.latest == 2
 
 
+def test_manage_cli_has_confidence_diagnostics_command():
+    parser = build_parser()
+    args = parser.parse_args(["confidence-diagnostics", "--top", "4"])
+
+    assert args.command == "confidence-diagnostics"
+    assert args.top == 4
+
+
 def test_manage_cli_has_validation_summary_command():
     parser = build_parser()
     args = parser.parse_args(["validation-summary"])

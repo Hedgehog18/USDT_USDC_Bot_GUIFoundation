@@ -36,6 +36,7 @@ from notifications.notification_engine import NotificationEngine
 from portfolio.portfolio_analytics import PortfolioAnalytics
 from runner.bot_runner import BotRunner
 from storage.database_manager import DatabaseManager
+from analytics.confidence_diagnostics_engine import ConfidenceDiagnosticsEngine
 from analytics.decision_diagnostics_engine import DecisionDiagnosticsEngine
 from analytics.risk_diagnostics_engine import RiskDiagnosticsEngine
 from analytics.statistics_engine import StatisticsEngine
@@ -211,6 +212,37 @@ def command_risk_diagnostics(args) -> None:
             )
     else:
         print("- No blocked decisions.")
+
+
+def command_confidence_diagnostics(args) -> None:
+    _config, _logger, database = build_context()
+    summary = ConfidenceDiagnosticsEngine(database).build_summary(top=args.top)
+
+    print("=== Confidence Diagnostics ===")
+    if summary.total_decisions == 0:
+        print("No confidence diagnostics data available.")
+        return
+
+    print(f"Total decisions/signals: {summary.total_decisions}")
+    print(f"Average confidence: {summary.average_confidence:.4f}")
+    print(f"Min confidence: {summary.min_confidence:.4f}")
+    print(f"Max confidence: {summary.max_confidence:.4f}")
+    print(f"Median confidence: {summary.median_confidence:.4f}")
+    print("Confidence buckets:")
+    for bucket, count in summary.confidence_buckets.items():
+        print(f"- {bucket}: {count}")
+    print("Top WAIT reasons:")
+    _print_reason_rows(summary.top_wait_reasons)
+    print("Center distance statistics:")
+    print(f"- Average: {summary.center_distance.average:.4f}")
+    print(f"- Min: {summary.center_distance.minimum:.4f}")
+    print(f"- Max: {summary.center_distance.maximum:.4f}")
+    print("Market regimes:")
+    if summary.market_regime_distribution:
+        for regime, count in summary.market_regime_distribution.items():
+            print(f"- {regime}: {count}")
+    else:
+        print("- No market snapshots yet.")
 
 
 def command_validation_summary(args) -> None:
@@ -861,6 +893,13 @@ def build_parser() -> argparse.ArgumentParser:
     risk_diagnostics_parser.add_argument("--top", type=int, default=5)
     risk_diagnostics_parser.add_argument("--latest", type=int, default=5)
     risk_diagnostics_parser.set_defaults(func=command_risk_diagnostics)
+
+    confidence_diagnostics_parser = subparsers.add_parser(
+        "confidence-diagnostics",
+        help="Show confidence score diagnostics",
+    )
+    confidence_diagnostics_parser.add_argument("--top", type=int, default=5)
+    confidence_diagnostics_parser.set_defaults(func=command_confidence_diagnostics)
 
     validation_summary_parser = subparsers.add_parser(
         "validation-summary",
