@@ -20,6 +20,7 @@ from analytics.decision_diagnostics_engine import DecisionDiagnosticsEngine
 from analytics.entry_zone_diagnostics_engine import EntryZoneDiagnosticsEngine
 from analytics.filter_pass_diagnostics_engine import FilterPassDiagnosticsEngine
 from analytics.order_book_diagnostics_engine import OrderBookDiagnosticsEngine
+from analytics.order_book_rule_sim_engine import OrderBookRuleSimulationEngine
 from analytics.risk_diagnostics_engine import RiskDiagnosticsEngine
 from analytics.strategy_tuning_report_engine import StrategyTuningReportEngine
 from analytics.strategy_validation_engine import StrategyValidationEngine
@@ -70,6 +71,10 @@ class AnalyticsTab(QWidget):
         self.order_book_diagnostics = QTextEdit()
         self.order_book_diagnostics.setReadOnly(True)
         self.order_book_diagnostics.setMinimumHeight(175)
+
+        self.order_book_rule_sim = QTextEdit()
+        self.order_book_rule_sim.setReadOnly(True)
+        self.order_book_rule_sim.setMinimumHeight(175)
 
         self.validation_summary = QTextEdit()
         self.validation_summary.setReadOnly(True)
@@ -123,6 +128,13 @@ class AnalyticsTab(QWidget):
             4,
             1,
         )
+        top_layout.addWidget(
+            self._section("Order Book Rule Simulation", self.order_book_rule_sim),
+            5,
+            0,
+            1,
+            2,
+        )
         top_layout.setColumnStretch(0, 1)
         top_layout.setColumnStretch(1, 1)
         top_panel.setLayout(top_layout)
@@ -166,6 +178,7 @@ class AnalyticsTab(QWidget):
         self.entry_zone_diagnostics.setPlainText("\n".join(self._entry_zone_diagnostics_lines()))
         self.filter_pass_diagnostics.setPlainText("\n".join(self._filter_pass_diagnostics_lines()))
         self.order_book_diagnostics.setPlainText("\n".join(self._order_book_diagnostics_lines()))
+        self.order_book_rule_sim.setPlainText("\n".join(self._order_book_rule_sim_lines()))
         self.decision_diagnostics.setPlainText("\n".join(self._decision_diagnostics_lines()))
         self.risk_diagnostics.setPlainText("\n".join(self._risk_diagnostics_lines()))
         run = self._load_latest_backtest_run()
@@ -442,6 +455,33 @@ class AnalyticsTab(QWidget):
             )
         else:
             lines.append("- No entry-zone snapshots.")
+        return lines
+
+    def _order_book_rule_sim_lines(self) -> list[str]:
+        try:
+            report = OrderBookRuleSimulationEngine(self.database, self.config).build_report()
+        except Exception as exc:
+            return [f"Could not load order book rule simulation: {exc}"]
+
+        if not report.profiles or report.profiles[0].total_entry_zone_samples == 0:
+            return ["No entry-zone samples available."]
+
+        lines = ["Simulation only. DecisionEngine, RiskManager, config, and trades are unchanged."]
+        for profile in report.profiles:
+            lines.extend([
+                "",
+                profile.name,
+                f"Total entry-zone samples: {profile.total_entry_zone_samples}",
+                f"BUY candidates: {profile.buy_candidates}",
+                f"SELL candidates: {profile.sell_candidates}",
+                f"Pass count: {profile.pass_count}",
+                f"Pass rate: {profile.pass_rate * 100:.2f}%",
+                "Remaining blocking filters:",
+            ])
+            if profile.remaining_blocking_filters:
+                lines.extend(f"- {name}: {count}" for name, count in profile.remaining_blocking_filters)
+            else:
+                lines.append("- None")
         return lines
 
     def _decision_diagnostics_lines(self) -> list[str]:

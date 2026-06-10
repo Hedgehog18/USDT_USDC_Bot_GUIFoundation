@@ -42,6 +42,7 @@ from analytics.decision_diagnostics_engine import DecisionDiagnosticsEngine
 from analytics.entry_zone_diagnostics_engine import EntryZoneDiagnosticsEngine
 from analytics.filter_pass_diagnostics_engine import FilterPassDiagnosticsEngine
 from analytics.order_book_diagnostics_engine import OrderBookDiagnosticsEngine
+from analytics.order_book_rule_sim_engine import OrderBookRuleSimulationEngine
 from analytics.risk_diagnostics_engine import RiskDiagnosticsEngine
 from analytics.statistics_engine import StatisticsEngine
 from analytics.strategy_tuning_report_engine import StrategyTuningReportEngine
@@ -403,6 +404,31 @@ def command_order_book_diagnostics(args) -> None:
             )
     else:
         print("- No entry-zone snapshots.")
+
+
+def command_order_book_rule_sim(args) -> None:
+    config, _logger, database = build_context()
+    report = OrderBookRuleSimulationEngine(database, config).build_report()
+
+    print("=== Order Book Rule Simulation ===")
+    print("Simulation only. DecisionEngine, RiskManager, config, and trades are unchanged.")
+    if not report.profiles or report.profiles[0].total_entry_zone_samples == 0:
+        print("No entry-zone samples available.")
+        return
+
+    for profile in report.profiles:
+        print(f"--- {profile.name} ---")
+        print(f"Total entry-zone samples: {profile.total_entry_zone_samples}")
+        print(f"BUY candidates: {profile.buy_candidates}")
+        print(f"SELL candidates: {profile.sell_candidates}")
+        print(f"Pass count: {profile.pass_count}")
+        print(f"Pass rate: {profile.pass_rate * 100:.2f}%")
+        print("Remaining blocking filters:")
+        if profile.remaining_blocking_filters:
+            for name, count in profile.remaining_blocking_filters:
+                print(f"- {name}: {count}")
+        else:
+            print("- None")
 
 
 def command_validation_summary(args) -> None:
@@ -1119,6 +1145,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     order_book_diagnostics_parser.add_argument("--latest", type=int, default=10)
     order_book_diagnostics_parser.set_defaults(func=command_order_book_diagnostics)
+
+    order_book_rule_sim_parser = subparsers.add_parser(
+        "order-book-rule-sim",
+        help="Simulate softer order book confirmation rules using saved snapshots",
+    )
+    order_book_rule_sim_parser.set_defaults(func=command_order_book_rule_sim)
 
     validation_summary_parser = subparsers.add_parser(
         "validation-summary",

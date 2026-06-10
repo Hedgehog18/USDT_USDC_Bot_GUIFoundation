@@ -244,6 +244,13 @@ def test_manage_cli_has_order_book_diagnostics_command():
     assert args.latest == 4
 
 
+def test_manage_cli_has_order_book_rule_sim_command():
+    parser = build_parser()
+    args = parser.parse_args(["order-book-rule-sim"])
+
+    assert args.command == "order-book-rule-sim"
+
+
 def test_manage_cli_has_validation_summary_command():
     parser = build_parser()
     args = parser.parse_args(["validation-summary"])
