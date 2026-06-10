@@ -317,6 +317,21 @@ class DatabaseManager:
                 )
             """)
             conn.execute("""
+                CREATE TABLE IF NOT EXISTS long_paper_runs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT NOT NULL,
+                    iterations INTEGER NOT NULL,
+                    interval_seconds INTEGER NOT NULL,
+                    final_value REAL NOT NULL,
+                    net_profit REAL NOT NULL,
+                    win_rate REAL NOT NULL,
+                    profit_factor REAL NOT NULL,
+                    validation_status TEXT NOT NULL,
+                    insights_rating TEXT NOT NULL,
+                    summary_report_path TEXT NOT NULL
+                )
+            """)
+            conn.execute("""
                 CREATE TABLE IF NOT EXISTS system_events (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     timestamp TEXT NOT NULL,
@@ -339,6 +354,7 @@ class DatabaseManager:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_paper_safety_events_timestamp ON paper_safety_events(timestamp)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_paper_state_transitions_timestamp ON paper_state_transitions(timestamp)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_paper_runs_timestamp ON paper_runs(timestamp)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_long_paper_runs_timestamp ON long_paper_runs(timestamp)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_walk_forward_runs_timestamp ON walk_forward_runs(timestamp)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_walk_forward_windows_run_id ON walk_forward_windows(run_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_backtest_runs_timestamp ON backtest_runs(timestamp)")
@@ -1264,6 +1280,58 @@ class DatabaseManager:
                        safety_stops, final_usdt, final_usdc, final_value,
                        rating, summary
                 FROM paper_runs
+                ORDER BY timestamp DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+
+    def save_long_paper_run(
+        self,
+        *,
+        iterations: int,
+        interval_seconds: int,
+        final_value: float,
+        net_profit: float,
+        win_rate: float,
+        profit_factor: float,
+        validation_status: str,
+        insights_rating: str,
+        summary_report_path: str,
+    ) -> int:
+        with self.connect() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO long_paper_runs (
+                    timestamp, iterations, interval_seconds, final_value,
+                    net_profit, win_rate, profit_factor, validation_status,
+                    insights_rating, summary_report_path
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    datetime.utcnow().isoformat(),
+                    iterations,
+                    interval_seconds,
+                    final_value,
+                    net_profit,
+                    win_rate,
+                    profit_factor,
+                    validation_status,
+                    insights_rating,
+                    summary_report_path,
+                ),
+            )
+            conn.commit()
+            return int(cursor.lastrowid)
+
+    def load_recent_long_paper_runs(self, limit: int = 20) -> list[tuple]:
+        with self.connect() as conn:
+            return conn.execute(
+                """
+                SELECT id, timestamp, iterations, interval_seconds,
+                       final_value, net_profit, win_rate, profit_factor,
+                       validation_status, insights_rating, summary_report_path
+                FROM long_paper_runs
                 ORDER BY timestamp DESC
                 LIMIT ?
                 """,

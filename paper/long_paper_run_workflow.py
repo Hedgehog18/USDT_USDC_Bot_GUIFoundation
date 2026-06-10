@@ -27,6 +27,7 @@ class LongPaperRunReportPaths:
 @dataclass(frozen=True)
 class LongPaperRunResult:
     run_id: int
+    long_run_id: int
     run_result: PaperTradingRunResult
     stats: PaperAnalytics
     insights: PaperInsights
@@ -66,9 +67,21 @@ class LongPaperRunWorkflow:
             insights_txt=insights_path,
         )
         validation_summary = ValidationSummaryEngine(self.database).build_summary()
+        long_run_id = self.database.save_long_paper_run(
+            iterations=iterations,
+            interval_seconds=interval_seconds,
+            final_value=run_result.final_portfolio.total_value,
+            net_profit=stats.net_profit,
+            win_rate=stats.win_rate,
+            profit_factor=stats.profit_factor,
+            validation_status=validation_summary.overall_status,
+            insights_rating=insights.rating,
+            summary_report_path=str(report_paths.summary_csv),
+        )
 
         return LongPaperRunResult(
             run_id=run_id,
+            long_run_id=long_run_id,
             run_result=run_result,
             stats=stats,
             insights=insights,

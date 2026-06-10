@@ -65,6 +65,7 @@ class PaperTradingTab(QWidget):
         self.insights_output = self._create_readonly_text(160)
         self.runs_output = self._create_readonly_text(190)
         self.cycles_output = self._create_readonly_text(220)
+        self.long_runs_output = self._create_readonly_text(190)
         self.output = self.result_output
 
         self.iterations_input = QLineEdit("10")
@@ -121,7 +122,8 @@ class PaperTradingTab(QWidget):
         self.bottom_splitter.setObjectName("paper_trading_bottom_splitter")
         self.bottom_splitter.addWidget(self._section("Recent Paper Runs", self.runs_output))
         self.bottom_splitter.addWidget(self._section("Recent Paper Cycles", self.cycles_output))
-        self.bottom_splitter.setSizes([560, 620])
+        self.bottom_splitter.addWidget(self._section("Recent Long Paper Runs", self.long_runs_output))
+        self.bottom_splitter.setSizes([420, 460, 420])
 
         self.main_splitter = QSplitter(Qt.Orientation.Vertical)
         self.main_splitter.setObjectName("paper_trading_main_splitter")
@@ -143,6 +145,7 @@ class PaperTradingTab(QWidget):
         self.insights_output.setPlainText("\n".join(self._latest_paper_insights_lines()))
         self.runs_output.setPlainText("\n".join(self._paper_runs_lines()))
         self.cycles_output.setPlainText("\n".join(self._paper_cycles_lines()))
+        self.long_runs_output.setPlainText("\n".join(self._long_paper_runs_lines()))
 
     def run_paper_simulation(self) -> None:
         raw_value = self.iterations_input.text().strip()
@@ -228,7 +231,8 @@ class PaperTradingTab(QWidget):
         lines = [
             "Long paper run completed",
             "Real trading disabled.",
-            f"Run ID: {result.run_id}",
+            f"Long Run ID: {result.long_run_id}",
+            f"Paper Run ID: {result.run_id}",
             f"Iterations: {result.run_result.iterations}",
             f"Opened cycles: {result.run_result.opened_cycles}",
             f"Closed cycles: {result.run_result.closed_cycles}",
@@ -367,6 +371,37 @@ class PaperTradingTab(QWidget):
                 )
         else:
             lines.append("Paper cycles ще немає.")
+        return lines
+
+    def _long_paper_runs_lines(self) -> list[str]:
+        try:
+            runs = self.database.load_recent_long_paper_runs(limit=10)
+        except Exception as exc:
+            return [f"Could not load long paper runs: {exc}"]
+
+        if not runs:
+            return ["Long paper runs not found yet."]
+
+        lines = []
+        for row in runs:
+            (
+                run_id,
+                timestamp,
+                iterations,
+                interval_seconds,
+                final_value,
+                net_profit,
+                win_rate,
+                profit_factor,
+                validation_status,
+                insights_rating,
+                _summary_report_path,
+            ) = row
+            lines.append(
+                f"#{run_id} | {timestamp} | iter={iterations} interval={interval_seconds}s "
+                f"value={final_value:.8f} net={net_profit:.8f} "
+                f"validation={validation_status} insights={insights_rating}"
+            )
         return lines
 
     def _latest_paper_insights_lines(self) -> list[str]:

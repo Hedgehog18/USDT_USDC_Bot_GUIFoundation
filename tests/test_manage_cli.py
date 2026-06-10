@@ -129,6 +129,14 @@ def test_manage_cli_has_long_paper_run_command():
     assert args.interval == 5
 
 
+def test_manage_cli_has_long_paper_runs_command():
+    parser = build_parser()
+    args = parser.parse_args(["long-paper-runs", "--limit", "20"])
+
+    assert args.command == "long-paper-runs"
+    assert args.limit == 20
+
+
 def test_manage_cli_has_paper_stats_safety_commands():
     parser = build_parser()
     stats_args = parser.parse_args(["paper-stats", "--limit", "10"])

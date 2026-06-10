@@ -28,6 +28,7 @@ def test_paper_trading_tab_long_run_controls_import():
 
     assert LongPaperRunWorker is not None
     assert hasattr(PaperTradingTab, "start_long_paper_run")
+    assert hasattr(PaperTradingTab, "_long_paper_runs_lines")
 
 
 def test_backtest_tab_imports():

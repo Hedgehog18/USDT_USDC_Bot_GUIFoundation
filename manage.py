@@ -623,7 +623,8 @@ def command_long_paper_run(args) -> None:
 
     print("=== Long Paper Run ===")
     print("Long paper run completed. Real trading disabled.")
-    print(f"Run ID: {result.run_id}")
+    print(f"Long Run ID: {result.long_run_id}")
+    print(f"Paper Run ID: {result.run_id}")
     print(f"Iterations: {result.run_result.iterations}")
     print(f"Opened cycles: {result.run_result.opened_cycles}")
     print(f"Closed cycles: {result.run_result.closed_cycles}")
@@ -661,6 +662,37 @@ def command_long_paper_run(args) -> None:
     print(f"Safety CSV: {result.report_paths.safety_csv}")
     print(f"Summary CSV: {result.report_paths.summary_csv}")
     print(f"Insights TXT: {result.report_paths.insights_txt}")
+
+
+def command_long_paper_runs(args) -> None:
+    _config, _logger, database = build_context()
+    rows = database.load_recent_long_paper_runs(limit=args.limit)
+
+    print("=== Recent Long Paper Runs ===")
+    if not rows:
+        print("Long paper runs not found yet.")
+        return
+
+    for row in rows:
+        (
+            run_id,
+            timestamp,
+            iterations,
+            interval_seconds,
+            final_value,
+            net_profit,
+            win_rate,
+            profit_factor,
+            validation_status,
+            insights_rating,
+            summary_report_path,
+        ) = row
+        print(
+            f"#{run_id} | {timestamp} | iter={iterations} interval={interval_seconds}s | "
+            f"value={final_value:.8f} net={net_profit:.8f} win={win_rate * 100:.2f}% "
+            f"pf={profit_factor:.4f} validation={validation_status} "
+            f"insights={insights_rating} summary={summary_report_path}"
+        )
 
 
 def command_paper_cycles(args) -> None:
@@ -892,6 +924,10 @@ def build_parser() -> argparse.ArgumentParser:
     long_paper_run_parser.add_argument("--iterations", type=int, default=500)
     long_paper_run_parser.add_argument("--interval", type=int, default=5)
     long_paper_run_parser.set_defaults(func=command_long_paper_run)
+
+    long_paper_runs_parser = subparsers.add_parser("long-paper-runs", help="Show recent long paper runs")
+    long_paper_runs_parser.add_argument("--limit", type=int, default=20)
+    long_paper_runs_parser.set_defaults(func=command_long_paper_runs)
 
     paper_cycles_parser = subparsers.add_parser("paper-cycles", help="РџРѕРєР°Р·Р°С‚Рё РѕСЃС‚Р°РЅРЅС– paper cycles")
     paper_cycles_parser.add_argument("--limit", type=int, default=20)
