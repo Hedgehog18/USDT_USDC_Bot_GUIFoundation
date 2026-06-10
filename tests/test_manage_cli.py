@@ -251,6 +251,14 @@ def test_manage_cli_has_order_book_rule_sim_command():
     assert args.command == "order-book-rule-sim"
 
 
+def test_manage_cli_has_center_confidence_diagnostics_command():
+    parser = build_parser()
+    args = parser.parse_args(["center-confidence-diagnostics", "--latest", "4"])
+
+    assert args.command == "center-confidence-diagnostics"
+    assert args.latest == 4
+
+
 def test_manage_cli_has_validation_summary_command():
     parser = build_parser()
     args = parser.parse_args(["validation-summary"])

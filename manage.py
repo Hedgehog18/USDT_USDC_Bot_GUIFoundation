@@ -36,6 +36,7 @@ from notifications.notification_engine import NotificationEngine
 from portfolio.portfolio_analytics import PortfolioAnalytics
 from runner.bot_runner import BotRunner
 from storage.database_manager import DatabaseManager
+from analytics.center_confidence_diagnostics_engine import CenterConfidenceDiagnosticsEngine
 from analytics.confidence_diagnostics_engine import ConfidenceDiagnosticsEngine
 from analytics.data_source_check_engine import DataSourceCheckEngine
 from analytics.decision_diagnostics_engine import DecisionDiagnosticsEngine
@@ -431,6 +432,58 @@ def command_order_book_rule_sim(args) -> None:
             print("- None")
 
 
+def command_center_confidence_diagnostics(args) -> None:
+    config, _logger, database = build_context()
+    summary = CenterConfidenceDiagnosticsEngine(database, config).build_summary(latest=args.latest)
+
+    print("=== Center Confidence Diagnostics ===")
+    if summary.total_snapshots == 0:
+        print("No center confidence diagnostics data available.")
+        return
+
+    print(f"Total snapshots: {summary.total_snapshots}")
+    print("Confidence distribution:")
+    for label, count in summary.confidence_distribution.items():
+        print(f"- {label}: {count}")
+    print("Entry-zone confidence distribution:")
+    for label, count in summary.entry_zone_confidence_distribution.items():
+        print(f"- {label}: {count}")
+    print("Center-zone confidence distribution:")
+    for label, count in summary.center_zone_confidence_distribution.items():
+        print(f"- {label}: {count}")
+    print("Metric stats:")
+    _print_metric_stats("work_position", summary.work_position_stats)
+    _print_metric_stats("work_center", summary.work_center_stats)
+    _print_metric_stats("short_center", summary.short_center_stats)
+    _print_metric_stats("long_center", summary.long_center_stats)
+    print("Center alignment distribution:")
+    if summary.center_alignment_distribution:
+        for label, count in summary.center_alignment_distribution.items():
+            print(f"- {label}: {count}")
+    else:
+        print("- No alignment data.")
+    print("Center distances:")
+    _print_metric_stats("abs(work_center - short_center)", summary.work_short_distance_stats)
+    _print_metric_stats("abs(work_center - long_center)", summary.work_long_distance_stats)
+    _print_metric_stats("abs(short_center - long_center)", summary.short_long_distance_stats)
+    print("Latest LOW confidence snapshots:")
+    if summary.latest_low_confidence_snapshots:
+        for item in summary.latest_low_confidence_snapshots:
+            print(
+                f"- {item.timestamp} | "
+                f"work_center={item.work_center:.8f} | "
+                f"short_center={item.short_center:.8f} | "
+                f"long_center={item.long_center:.8f} | "
+                f"alignment={item.center_alignment} | "
+                f"work_position={item.work_position:.4f} | "
+                f"regime={item.market_regime} | "
+                f"spread={item.spread:.8f} | "
+                f"order_book_pressure={item.order_book_pressure}"
+            )
+    else:
+        print("- No LOW confidence snapshots.")
+
+
 def command_validation_summary(args) -> None:
     _config, _logger, database = build_context()
     summary = ValidationSummaryEngine(database).build_summary()
@@ -460,6 +513,13 @@ def _print_reason_rows(rows: list[tuple[str, int]]) -> None:
 
     for reason, count in rows:
         print(f"- {clean_display_text(reason)}: {count}")
+
+
+def _print_metric_stats(label: str, stats) -> None:
+    print(
+        f"- {label}: avg={stats.average:.8f} "
+        f"min={stats.minimum:.8f} max={stats.maximum:.8f}"
+    )
 
 
 def command_notifications(args) -> None:
@@ -1151,6 +1211,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Simulate softer order book confirmation rules using saved snapshots",
     )
     order_book_rule_sim_parser.set_defaults(func=command_order_book_rule_sim)
+
+    center_confidence_diagnostics_parser = subparsers.add_parser(
+        "center-confidence-diagnostics",
+        help="Show center confidence diagnostics using saved market snapshots",
+    )
+    center_confidence_diagnostics_parser.add_argument("--latest", type=int, default=10)
+    center_confidence_diagnostics_parser.set_defaults(func=command_center_confidence_diagnostics)
 
     validation_summary_parser = subparsers.add_parser(
         "validation-summary",

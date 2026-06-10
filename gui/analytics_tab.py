@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from analytics.center_confidence_diagnostics_engine import CenterConfidenceDiagnosticsEngine
 from analytics.decision_diagnostics_engine import DecisionDiagnosticsEngine
 from analytics.entry_zone_diagnostics_engine import EntryZoneDiagnosticsEngine
 from analytics.filter_pass_diagnostics_engine import FilterPassDiagnosticsEngine
@@ -76,6 +77,10 @@ class AnalyticsTab(QWidget):
         self.order_book_rule_sim.setReadOnly(True)
         self.order_book_rule_sim.setMinimumHeight(175)
 
+        self.center_confidence_diagnostics = QTextEdit()
+        self.center_confidence_diagnostics.setReadOnly(True)
+        self.center_confidence_diagnostics.setMinimumHeight(185)
+
         self.validation_summary = QTextEdit()
         self.validation_summary.setReadOnly(True)
         self.validation_summary.setMinimumHeight(150)
@@ -135,6 +140,13 @@ class AnalyticsTab(QWidget):
             1,
             2,
         )
+        top_layout.addWidget(
+            self._section("Center Confidence Diagnostics", self.center_confidence_diagnostics),
+            6,
+            0,
+            1,
+            2,
+        )
         top_layout.setColumnStretch(0, 1)
         top_layout.setColumnStretch(1, 1)
         top_panel.setLayout(top_layout)
@@ -179,6 +191,9 @@ class AnalyticsTab(QWidget):
         self.filter_pass_diagnostics.setPlainText("\n".join(self._filter_pass_diagnostics_lines()))
         self.order_book_diagnostics.setPlainText("\n".join(self._order_book_diagnostics_lines()))
         self.order_book_rule_sim.setPlainText("\n".join(self._order_book_rule_sim_lines()))
+        self.center_confidence_diagnostics.setPlainText(
+            "\n".join(self._center_confidence_diagnostics_lines())
+        )
         self.decision_diagnostics.setPlainText("\n".join(self._decision_diagnostics_lines()))
         self.risk_diagnostics.setPlainText("\n".join(self._risk_diagnostics_lines()))
         run = self._load_latest_backtest_run()
@@ -484,6 +499,53 @@ class AnalyticsTab(QWidget):
                 lines.append("- None")
         return lines
 
+    def _center_confidence_diagnostics_lines(self) -> list[str]:
+        try:
+            summary = CenterConfidenceDiagnosticsEngine(self.database, self.config).build_summary(latest=5)
+        except Exception as exc:
+            return [f"Could not load center confidence diagnostics: {exc}"]
+
+        if summary.total_snapshots == 0:
+            return ["No center confidence diagnostics data available."]
+
+        lines = [
+            f"Total snapshots: {summary.total_snapshots}",
+            "Confidence distribution:",
+            *self._distribution_lines(summary.confidence_distribution),
+            "Entry-zone confidence distribution:",
+            *self._distribution_lines(summary.entry_zone_confidence_distribution),
+            "Center-zone confidence distribution:",
+            *self._distribution_lines(summary.center_zone_confidence_distribution),
+            "Metric stats:",
+            self._stats_line("work_position", summary.work_position_stats),
+            self._stats_line("work_center", summary.work_center_stats),
+            self._stats_line("short_center", summary.short_center_stats),
+            self._stats_line("long_center", summary.long_center_stats),
+            "Center alignment distribution:",
+        ]
+        lines.extend(self._distribution_lines(summary.center_alignment_distribution))
+        lines.extend([
+            "Center distances:",
+            self._stats_line("abs(work_center - short_center)", summary.work_short_distance_stats),
+            self._stats_line("abs(work_center - long_center)", summary.work_long_distance_stats),
+            self._stats_line("abs(short_center - long_center)", summary.short_long_distance_stats),
+            "Latest LOW confidence snapshots:",
+        ])
+        if summary.latest_low_confidence_snapshots:
+            lines.extend(
+                (
+                    f"- {item.timestamp} | work={item.work_position:.2f} | "
+                    f"work_center={item.work_center:.8f} | short={item.short_center:.8f} | "
+                    f"long={item.long_center:.8f} | alignment={item.center_alignment} | "
+                    f"regime={item.market_regime} | spread={item.spread:.8f} | "
+                    f"pressure={item.order_book_pressure}"
+                )
+                for item in summary.latest_low_confidence_snapshots
+            )
+        else:
+            lines.append("- No LOW confidence snapshots.")
+        return lines
+
     def _decision_diagnostics_lines(self) -> list[str]:
         try:
             summary = DecisionDiagnosticsEngine(self.database).build_summary(top=3)
@@ -557,6 +619,19 @@ class AnalyticsTab(QWidget):
         if not rows:
             return ["- No data."]
         return [f"- {reason}: {count}" for reason, count in rows]
+
+    @staticmethod
+    def _distribution_lines(rows: dict[str, int]) -> list[str]:
+        if not rows:
+            return ["- No data."]
+        return [f"- {label}: {count}" for label, count in rows.items()]
+
+    @staticmethod
+    def _stats_line(label: str, stats) -> str:
+        return (
+            f"- {label}: avg={stats.average:.8f} "
+            f"min={stats.minimum:.8f} max={stats.maximum:.8f}"
+        )
 
     @staticmethod
     def _section(title: str, widget: QWidget) -> QGroupBox:
