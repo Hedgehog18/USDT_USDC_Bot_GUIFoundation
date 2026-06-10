@@ -18,6 +18,13 @@ def test_manage_cli_has_notifications_command():
     assert args.limit == 5
 
 
+def test_manage_cli_has_data_source_check_command():
+    parser = build_parser()
+    args = parser.parse_args(["data-source-check"])
+
+    assert args.command == "data-source-check"
+
+
 def test_manage_cli_has_audit_command():
     parser = build_parser()
     args = parser.parse_args(["audit", "--limit", "3"])

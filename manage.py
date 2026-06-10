@@ -37,6 +37,7 @@ from portfolio.portfolio_analytics import PortfolioAnalytics
 from runner.bot_runner import BotRunner
 from storage.database_manager import DatabaseManager
 from analytics.confidence_diagnostics_engine import ConfidenceDiagnosticsEngine
+from analytics.data_source_check_engine import DataSourceCheckEngine
 from analytics.decision_diagnostics_engine import DecisionDiagnosticsEngine
 from analytics.entry_zone_diagnostics_engine import EntryZoneDiagnosticsEngine
 from analytics.filter_pass_diagnostics_engine import FilterPassDiagnosticsEngine
@@ -94,6 +95,32 @@ def command_health(args) -> None:
     for item in report.items:
         status = "OK" if item.ok else "FAIL"
         print(f"[{status}] {item.name}: {item.message}")
+
+
+def command_data_source_check(args) -> None:
+    config, logger, _database = build_context()
+    report = DataSourceCheckEngine(config).build_report()
+    logger.info(
+        "CLI data-source-check executed: source=%s binance_ok=%s",
+        report.source,
+        report.binance_ok,
+    )
+
+    print("=== Data Source Check ===")
+    print(f"Current mode: {report.mode}")
+    print(f"use_real_market_data: {report.use_real_market_data}")
+    print(f"Binance base URL: {report.binance_base_url}")
+    print(f"Symbol: {report.symbol}")
+    print(f"Binance health-check OK: {report.binance_ok}")
+    print(f"Last price: {report.last_price if report.last_price is not None else 'N/A'}")
+    print(f"Timestamp: {report.timestamp or 'N/A'}")
+    print(f"Source: {report.source}")
+    print("--- Workflow sources ---")
+    print(f"Backtest: {report.backtest_source}")
+    print(f"Runner: {report.runner_source}")
+    print(f"Long Paper Run: {report.long_paper_run_source}")
+    if report.error_message:
+        print(f"Error: {report.error_message}")
 
 
 def command_migrate(args) -> None:
@@ -963,6 +990,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     health_parser = subparsers.add_parser("health", help="РџРµСЂРµРІС–СЂРёС‚Рё РіРѕС‚РѕРІРЅС–СЃС‚СЊ СЃРёСЃС‚РµРјРё")
     health_parser.set_defaults(func=command_health)
+
+    data_source_parser = subparsers.add_parser(
+        "data-source-check",
+        help="Check the configured market-data source",
+    )
+    data_source_parser.set_defaults(func=command_data_source_check)
 
     migrate_parser = subparsers.add_parser("migrate", help="Р—Р°РїСѓСЃС‚РёС‚Рё SQLite РјС–РіСЂР°С†С–С—")
     migrate_parser.set_defaults(func=command_migrate)
