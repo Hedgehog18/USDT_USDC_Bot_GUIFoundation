@@ -181,6 +181,14 @@ def test_manage_cli_has_strategy_report_command():
     assert args.command == "strategy-report"
 
 
+def test_manage_cli_has_strategy_tuning_report_command():
+    parser = build_parser()
+    args = parser.parse_args(["strategy-tuning-report", "--top", "4"])
+
+    assert args.command == "strategy-tuning-report"
+    assert args.top == 4
+
+
 def test_manage_cli_has_decision_diagnostics_command():
     parser = build_parser()
     args = parser.parse_args(["decision-diagnostics", "--top", "3"])

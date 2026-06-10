@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 
 from analytics.decision_diagnostics_engine import DecisionDiagnosticsEngine
 from analytics.risk_diagnostics_engine import RiskDiagnosticsEngine
+from analytics.strategy_tuning_report_engine import StrategyTuningReportEngine
 from analytics.strategy_validation_engine import StrategyValidationEngine
 from analytics.validation_summary_engine import ValidationSummaryEngine
 from storage.database_manager import DatabaseManager
@@ -48,6 +49,10 @@ class AnalyticsTab(QWidget):
         self.strategy_summary = QTextEdit()
         self.strategy_summary.setReadOnly(True)
         self.strategy_summary.setMinimumHeight(190)
+
+        self.strategy_tuning = QTextEdit()
+        self.strategy_tuning.setReadOnly(True)
+        self.strategy_tuning.setMinimumHeight(220)
 
         self.validation_summary = QTextEdit()
         self.validation_summary.setReadOnly(True)
@@ -85,6 +90,7 @@ class AnalyticsTab(QWidget):
         top_layout.addWidget(self._section("Strategy Summary", self.strategy_summary), 2, 0)
         top_layout.addWidget(self._section("Decision Diagnostics", self.decision_diagnostics), 2, 1)
         top_layout.addWidget(self._section("Risk Diagnostics", self.risk_diagnostics), 3, 0, 1, 2)
+        top_layout.addWidget(self._section("Strategy Tuning Report", self.strategy_tuning), 4, 0, 1, 2)
         top_panel.setLayout(top_layout)
 
         charts_content = QWidget()
@@ -118,6 +124,7 @@ class AnalyticsTab(QWidget):
     def refresh(self) -> None:
         self.validation_summary.setPlainText("\n".join(self._validation_summary_lines()))
         self.strategy_summary.setPlainText("\n".join(self._strategy_summary_lines()))
+        self.strategy_tuning.setPlainText("\n".join(self._strategy_tuning_lines()))
         self.decision_diagnostics.setPlainText("\n".join(self._decision_diagnostics_lines()))
         self.risk_diagnostics.setPlainText("\n".join(self._risk_diagnostics_lines()))
         run = self._load_latest_backtest_run()
@@ -241,6 +248,33 @@ class AnalyticsTab(QWidget):
         else:
             lines.append("- None")
         lines.extend(["Next action:", summary.next_action])
+        return lines
+
+    def _strategy_tuning_lines(self) -> list[str]:
+        try:
+            report = StrategyTuningReportEngine(self.database).build_report(top=3)
+        except Exception as exc:
+            return [f"Could not load strategy tuning report: {exc}"]
+
+        if report.total_signals == 0:
+            return ["No tuning data available."]
+
+        lines = [
+            "Simulation only. DecisionEngine, RiskManager, config, and trades are unchanged.",
+            f"Total signals: {report.total_signals}",
+        ]
+        for item in report.thresholds:
+            lines.extend([
+                "",
+                f"min_confidence >= {item.threshold:.1f}",
+                f"Total passed: {item.total_passed}",
+                f"Pass rate: {item.pass_rate * 100:.2f}%",
+                f"BUY candidates: {item.buy_candidates}",
+                f"SELL candidates: {item.sell_candidates}",
+                f"WAIT still blocked: {item.wait_still_blocked}",
+                "Top remaining reasons:",
+                *self._reason_lines(item.top_remaining_reasons),
+            ])
         return lines
 
     def _decision_diagnostics_lines(self) -> list[str]:

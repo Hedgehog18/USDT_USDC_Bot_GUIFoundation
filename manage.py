@@ -40,6 +40,7 @@ from analytics.confidence_diagnostics_engine import ConfidenceDiagnosticsEngine
 from analytics.decision_diagnostics_engine import DecisionDiagnosticsEngine
 from analytics.risk_diagnostics_engine import RiskDiagnosticsEngine
 from analytics.statistics_engine import StatisticsEngine
+from analytics.strategy_tuning_report_engine import StrategyTuningReportEngine
 from analytics.strategy_validation_engine import StrategyValidationEngine
 from analytics.validation_summary_engine import ValidationSummaryEngine
 from app.text_encoding import clean_display_text
@@ -152,6 +153,28 @@ def command_strategy_report(args) -> None:
             print(f"- {regime}: {count}")
     else:
         print("- No market snapshots yet.")
+
+
+def command_strategy_tuning_report(args) -> None:
+    _config, _logger, database = build_context()
+    report = StrategyTuningReportEngine(database).build_report(top=args.top)
+
+    print("=== Strategy Tuning Report ===")
+    print("Simulation only. DecisionEngine, RiskManager, config, and trades are unchanged.")
+    if report.total_signals == 0:
+        print("No tuning data available.")
+        return
+
+    print(f"Total signals: {report.total_signals}")
+    for item in report.thresholds:
+        print(f"--- min_confidence >= {item.threshold:.1f} ---")
+        print(f"Total passed: {item.total_passed}")
+        print(f"Pass rate: {item.pass_rate * 100:.2f}%")
+        print(f"BUY candidates: {item.buy_candidates}")
+        print(f"SELL candidates: {item.sell_candidates}")
+        print(f"WAIT still blocked: {item.wait_still_blocked}")
+        print("Top remaining reasons:")
+        _print_reason_rows(item.top_remaining_reasons)
 
 
 def command_decision_diagnostics(args) -> None:
@@ -878,6 +901,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     strategy_report_parser = subparsers.add_parser("strategy-report", help="Show strategy validation summary")
     strategy_report_parser.set_defaults(func=command_strategy_report)
+
+    strategy_tuning_parser = subparsers.add_parser(
+        "strategy-tuning-report",
+        help="Simulate softer confidence thresholds using saved signals",
+    )
+    strategy_tuning_parser.add_argument("--top", type=int, default=5)
+    strategy_tuning_parser.set_defaults(func=command_strategy_tuning_report)
 
     decision_diagnostics_parser = subparsers.add_parser(
         "decision-diagnostics",
