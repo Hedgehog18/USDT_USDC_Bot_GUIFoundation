@@ -221,13 +221,14 @@ class RunnerTab(QWidget):
         top_layout.addWidget(summary_group)
         top_panel.setLayout(top_layout)
 
-        splitter = QSplitter(Qt.Orientation.Vertical)
-        splitter.addWidget(top_panel)
-        splitter.addWidget(monitor_group)
-        splitter.setSizes([430, 520])
+        self.main_splitter = QSplitter(Qt.Orientation.Vertical)
+        self.main_splitter.setObjectName("runner_main_splitter")
+        self.main_splitter.addWidget(top_panel)
+        self.main_splitter.addWidget(monitor_group)
+        self.main_splitter.setSizes([430, 520])
 
         layout = QVBoxLayout()
-        layout.addWidget(splitter)
+        layout.addWidget(self.main_splitter)
         self.setLayout(layout)
 
         self._update_last_run_summary()

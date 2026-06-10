@@ -77,14 +77,15 @@ class AnalyticsTab(QWidget):
         scroll_area.setWidgetResizable(True)
         scroll_area.setWidget(charts_content)
 
-        splitter = QSplitter(Qt.Orientation.Vertical)
-        splitter.addWidget(top_panel)
-        splitter.addWidget(scroll_area)
-        splitter.setSizes([240, 620])
+        self.main_splitter = QSplitter(Qt.Orientation.Vertical)
+        self.main_splitter.setObjectName("analytics_main_splitter")
+        self.main_splitter.addWidget(top_panel)
+        self.main_splitter.addWidget(scroll_area)
+        self.main_splitter.setSizes([240, 620])
 
         layout = QVBoxLayout()
         layout.addWidget(self.refresh_button)
-        layout.addWidget(splitter)
+        layout.addWidget(self.main_splitter)
         self.setLayout(layout)
 
         self.refresh()
