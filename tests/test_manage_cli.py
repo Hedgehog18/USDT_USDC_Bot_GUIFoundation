@@ -172,6 +172,15 @@ def test_manage_cli_has_decision_diagnostics_command():
     assert args.top == 3
 
 
+def test_manage_cli_has_risk_diagnostics_command():
+    parser = build_parser()
+    args = parser.parse_args(["risk-diagnostics", "--top", "4", "--latest", "2"])
+
+    assert args.command == "risk-diagnostics"
+    assert args.top == 4
+    assert args.latest == 2
+
+
 def test_manage_cli_has_gui_command():
     parser = build_parser()
     args = parser.parse_args(["gui"])

@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 from analytics.decision_diagnostics_engine import DecisionDiagnosticsEngine
+from analytics.risk_diagnostics_engine import RiskDiagnosticsEngine
 from analytics.strategy_validation_engine import StrategyValidationEngine
 from storage.database_manager import DatabaseManager
 
@@ -51,6 +52,10 @@ class AnalyticsTab(QWidget):
         self.decision_diagnostics.setReadOnly(True)
         self.decision_diagnostics.setMinimumHeight(170)
 
+        self.risk_diagnostics = QTextEdit()
+        self.risk_diagnostics.setReadOnly(True)
+        self.risk_diagnostics.setMinimumHeight(170)
+
         self.equity_figure = Figure(figsize=(8, 3.6), constrained_layout=True)
         self.equity_canvas = FigureCanvas(self.equity_figure)
 
@@ -72,6 +77,7 @@ class AnalyticsTab(QWidget):
         top_layout.addWidget(self._section("Latest Backtest Insights", self.insights), 0, 1)
         top_layout.addWidget(self._section("Strategy Summary", self.strategy_summary), 1, 0)
         top_layout.addWidget(self._section("Decision Diagnostics", self.decision_diagnostics), 1, 1)
+        top_layout.addWidget(self._section("Risk Diagnostics", self.risk_diagnostics), 2, 0, 1, 2)
         top_panel.setLayout(top_layout)
 
         charts_content = QWidget()
@@ -93,7 +99,7 @@ class AnalyticsTab(QWidget):
         self.main_splitter.setObjectName("analytics_main_splitter")
         self.main_splitter.addWidget(top_panel)
         self.main_splitter.addWidget(scroll_area)
-        self.main_splitter.setSizes([240, 620])
+        self.main_splitter.setSizes([430, 620])
 
         layout = QVBoxLayout()
         layout.addWidget(self.refresh_button)
@@ -105,6 +111,7 @@ class AnalyticsTab(QWidget):
     def refresh(self) -> None:
         self.strategy_summary.setPlainText("\n".join(self._strategy_summary_lines()))
         self.decision_diagnostics.setPlainText("\n".join(self._decision_diagnostics_lines()))
+        self.risk_diagnostics.setPlainText("\n".join(self._risk_diagnostics_lines()))
         run = self._load_latest_backtest_run()
         if run is None:
             self.summary.setPlainText("No backtest runs yet.")
@@ -235,6 +242,42 @@ class AnalyticsTab(QWidget):
             )
         else:
             lines.append("- No confidence data.")
+        return lines
+
+    def _risk_diagnostics_lines(self) -> list[str]:
+        try:
+            summary = RiskDiagnosticsEngine(self.database).build_summary(top=3, latest=5)
+        except Exception as exc:
+            return [f"Could not load risk diagnostics: {exc}"]
+
+        if summary.total_audited_decisions == 0:
+            return ["No risk diagnostics data available."]
+
+        lines = [
+            f"Total audited decisions: {summary.total_audited_decisions}",
+            f"Allowed count: {summary.allowed_count}",
+            f"Blocked count: {summary.blocked_count}",
+            f"Blocked rate: {summary.blocked_rate * 100:.2f}%",
+            "Top risk reasons:",
+            *self._reason_lines(summary.top_risk_reasons),
+            "Blocked action distribution:",
+        ]
+        if summary.blocked_action_distribution:
+            lines.extend(
+                f"- {action}: {count}"
+                for action, count in summary.blocked_action_distribution.items()
+            )
+        else:
+            lines.append("- No blocked decisions.")
+
+        lines.append("Latest blocked decisions:")
+        if summary.latest_blocked_decisions:
+            lines.extend(
+                f"- {item.timestamp} | {item.decision} | {item.risk_reason} | {item.reason}"
+                for item in summary.latest_blocked_decisions
+            )
+        else:
+            lines.append("- No blocked decisions.")
         return lines
 
     @staticmethod

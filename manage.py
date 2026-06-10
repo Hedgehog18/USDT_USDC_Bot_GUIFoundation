@@ -34,6 +34,7 @@ from portfolio.portfolio_analytics import PortfolioAnalytics
 from runner.bot_runner import BotRunner
 from storage.database_manager import DatabaseManager
 from analytics.decision_diagnostics_engine import DecisionDiagnosticsEngine
+from analytics.risk_diagnostics_engine import RiskDiagnosticsEngine
 from analytics.statistics_engine import StatisticsEngine
 from analytics.strategy_validation_engine import StrategyValidationEngine
 
@@ -166,6 +167,38 @@ def command_decision_diagnostics(args) -> None:
             print(f"- {confidence}: {count}")
     else:
         print("- No confidence data.")
+
+
+def command_risk_diagnostics(args) -> None:
+    _config, _logger, database = build_context()
+    summary = RiskDiagnosticsEngine(database).build_summary(top=args.top, latest=args.latest)
+
+    print("=== Risk Diagnostics ===")
+    if summary.total_audited_decisions == 0:
+        print("No risk diagnostics data available.")
+        return
+
+    print(f"Total audited decisions: {summary.total_audited_decisions}")
+    print(f"Allowed count: {summary.allowed_count}")
+    print(f"Blocked count: {summary.blocked_count}")
+    print(f"Blocked rate: {summary.blocked_rate * 100:.2f}%")
+    print("Top risk reasons:")
+    _print_reason_rows(summary.top_risk_reasons)
+    print("Action distribution for blocked decisions:")
+    if summary.blocked_action_distribution:
+        for action, count in summary.blocked_action_distribution.items():
+            print(f"- {action}: {count}")
+    else:
+        print("- No blocked decisions.")
+    print("Latest blocked decisions:")
+    if summary.latest_blocked_decisions:
+        for item in summary.latest_blocked_decisions:
+            print(
+                f"- {item.timestamp} | {item.decision} | "
+                f"{item.risk_reason} | {item.reason}"
+            )
+    else:
+        print("- No blocked decisions.")
 
 
 def _print_reason_rows(rows: list[tuple[str, int]]) -> None:
@@ -699,6 +732,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     decision_diagnostics_parser.add_argument("--top", type=int, default=5)
     decision_diagnostics_parser.set_defaults(func=command_decision_diagnostics)
+
+    risk_diagnostics_parser = subparsers.add_parser(
+        "risk-diagnostics",
+        help="Show risk validation diagnostics",
+    )
+    risk_diagnostics_parser.add_argument("--top", type=int, default=5)
+    risk_diagnostics_parser.add_argument("--latest", type=int, default=5)
+    risk_diagnostics_parser.set_defaults(func=command_risk_diagnostics)
 
     notifications_parser = subparsers.add_parser("notifications", help="РџРѕРєР°Р·Р°С‚Рё РїРѕРІС–РґРѕРјР»РµРЅРЅСЏ")
     notifications_parser.add_argument("--limit", type=int, default=10)
