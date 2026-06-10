@@ -38,6 +38,7 @@ from runner.bot_runner import BotRunner
 from storage.database_manager import DatabaseManager
 from analytics.confidence_diagnostics_engine import ConfidenceDiagnosticsEngine
 from analytics.decision_diagnostics_engine import DecisionDiagnosticsEngine
+from analytics.entry_zone_diagnostics_engine import EntryZoneDiagnosticsEngine
 from analytics.risk_diagnostics_engine import RiskDiagnosticsEngine
 from analytics.statistics_engine import StatisticsEngine
 from analytics.strategy_tuning_report_engine import StrategyTuningReportEngine
@@ -260,6 +261,36 @@ def command_confidence_diagnostics(args) -> None:
     print(f"- Average: {summary.center_distance.average:.4f}")
     print(f"- Min: {summary.center_distance.minimum:.4f}")
     print(f"- Max: {summary.center_distance.maximum:.4f}")
+    print("Market regimes:")
+    if summary.market_regime_distribution:
+        for regime, count in summary.market_regime_distribution.items():
+            print(f"- {regime}: {count}")
+    else:
+        print("- No market snapshots yet.")
+
+
+def command_entry_zone_diagnostics(args) -> None:
+    _config, _logger, database = build_context()
+    summary = EntryZoneDiagnosticsEngine(database).build_summary()
+
+    print("=== Entry Zone Diagnostics ===")
+    if summary.total_snapshots == 0:
+        print("No entry zone data available.")
+        return
+
+    print(f"Total snapshots: {summary.total_snapshots}")
+    print(f"Average work_position: {summary.average_work_position:.4f}")
+    print(f"Min work_position: {summary.min_work_position:.4f}")
+    print(f"Max work_position: {summary.max_work_position:.4f}")
+    print(f"Median work_position: {summary.median_work_position:.4f}")
+    print("Position buckets:")
+    for bucket, count in summary.buckets.items():
+        print(f"- {bucket}: {count}")
+    print(f"Potential BUY zone count: {summary.potential_buy_zone_count}")
+    print(f"Potential SELL zone count: {summary.potential_sell_zone_count}")
+    print(f"Center zone count: {summary.center_zone_count}")
+    print(f"Average spread: {summary.average_spread:.8f}")
+    print(f"Average market health score: {summary.average_market_health_score:.4f}")
     print("Market regimes:")
     if summary.market_regime_distribution:
         for regime, count in summary.market_regime_distribution.items():
@@ -930,6 +961,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     confidence_diagnostics_parser.add_argument("--top", type=int, default=5)
     confidence_diagnostics_parser.set_defaults(func=command_confidence_diagnostics)
+
+    entry_zone_diagnostics_parser = subparsers.add_parser(
+        "entry-zone-diagnostics",
+        help="Show saved market snapshot entry zone diagnostics",
+    )
+    entry_zone_diagnostics_parser.set_defaults(func=command_entry_zone_diagnostics)
 
     validation_summary_parser = subparsers.add_parser(
         "validation-summary",

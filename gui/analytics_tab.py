@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 from analytics.decision_diagnostics_engine import DecisionDiagnosticsEngine
+from analytics.entry_zone_diagnostics_engine import EntryZoneDiagnosticsEngine
 from analytics.risk_diagnostics_engine import RiskDiagnosticsEngine
 from analytics.strategy_tuning_report_engine import StrategyTuningReportEngine
 from analytics.strategy_validation_engine import StrategyValidationEngine
@@ -53,6 +54,10 @@ class AnalyticsTab(QWidget):
         self.strategy_tuning = QTextEdit()
         self.strategy_tuning.setReadOnly(True)
         self.strategy_tuning.setMinimumHeight(220)
+
+        self.entry_zone_diagnostics = QTextEdit()
+        self.entry_zone_diagnostics.setReadOnly(True)
+        self.entry_zone_diagnostics.setMinimumHeight(220)
 
         self.validation_summary = QTextEdit()
         self.validation_summary.setReadOnly(True)
@@ -91,6 +96,13 @@ class AnalyticsTab(QWidget):
         top_layout.addWidget(self._section("Decision Diagnostics", self.decision_diagnostics), 2, 1)
         top_layout.addWidget(self._section("Risk Diagnostics", self.risk_diagnostics), 3, 0, 1, 2)
         top_layout.addWidget(self._section("Strategy Tuning Report", self.strategy_tuning), 4, 0, 1, 2)
+        top_layout.addWidget(
+            self._section("Entry Zone Diagnostics", self.entry_zone_diagnostics),
+            5,
+            0,
+            1,
+            2,
+        )
         top_panel.setLayout(top_layout)
 
         charts_content = QWidget()
@@ -125,6 +137,7 @@ class AnalyticsTab(QWidget):
         self.validation_summary.setPlainText("\n".join(self._validation_summary_lines()))
         self.strategy_summary.setPlainText("\n".join(self._strategy_summary_lines()))
         self.strategy_tuning.setPlainText("\n".join(self._strategy_tuning_lines()))
+        self.entry_zone_diagnostics.setPlainText("\n".join(self._entry_zone_diagnostics_lines()))
         self.decision_diagnostics.setPlainText("\n".join(self._decision_diagnostics_lines()))
         self.risk_diagnostics.setPlainText("\n".join(self._risk_diagnostics_lines()))
         run = self._load_latest_backtest_run()
@@ -275,6 +288,39 @@ class AnalyticsTab(QWidget):
                 "Top remaining reasons:",
                 *self._reason_lines(item.top_remaining_reasons),
             ])
+        return lines
+
+    def _entry_zone_diagnostics_lines(self) -> list[str]:
+        try:
+            summary = EntryZoneDiagnosticsEngine(self.database).build_summary()
+        except Exception as exc:
+            return [f"Could not load entry zone diagnostics: {exc}"]
+
+        if summary.total_snapshots == 0:
+            return ["No entry zone data available."]
+
+        lines = [
+            f"Total snapshots: {summary.total_snapshots}",
+            f"BUY zone count (work_position <= 20): {summary.potential_buy_zone_count}",
+            f"SELL zone count (work_position >= 80): {summary.potential_sell_zone_count}",
+            f"Center zone count (40 <= work_position <= 60): {summary.center_zone_count}",
+            f"Avg work_position: {summary.average_work_position:.4f}",
+            f"Min work_position: {summary.min_work_position:.4f}",
+            f"Max work_position: {summary.max_work_position:.4f}",
+            f"Median work_position: {summary.median_work_position:.4f}",
+            f"Average spread: {summary.average_spread:.8f}",
+            f"Average market health score: {summary.average_market_health_score:.4f}",
+            "Position buckets:",
+        ]
+        lines.extend(f"- {bucket}: {count}" for bucket, count in summary.buckets.items())
+        lines.append("Market regimes:")
+        if summary.market_regime_distribution:
+            lines.extend(
+                f"- {regime}: {count}"
+                for regime, count in summary.market_regime_distribution.items()
+            )
+        else:
+            lines.append("- No market snapshots yet.")
         return lines
 
     def _decision_diagnostics_lines(self) -> list[str]:
