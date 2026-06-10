@@ -1,5 +1,6 @@
 from PySide6.QtWidgets import (
     QGroupBox,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -39,15 +40,16 @@ class DashboardTab(QWidget):
         header.addWidget(self.refresh_button)
 
         content = QWidget()
-        content_layout = QVBoxLayout()
-        content_layout.addWidget(self._section("System", self.system_output))
-        content_layout.addWidget(self._section("Database Summary", self.database_output))
-        content_layout.addWidget(self._section("Latest Backtest", self.backtest_output))
-        content_layout.addWidget(self._section("Latest Paper Run", self.paper_output))
-        content_layout.addWidget(self._section("Safety Events", self.safety_output))
-        content_layout.addWidget(self._section("Notifications", self.notifications_output))
-        content_layout.addWidget(self._section("Suggested Next Step", self.next_step_output))
-        content_layout.addStretch()
+        content_layout = QGridLayout()
+        content_layout.addWidget(self._section("System", self.system_output), 0, 0)
+        content_layout.addWidget(self._section("Database Summary", self.database_output), 0, 1)
+        content_layout.addWidget(self._section("Latest Backtest", self.backtest_output), 1, 0)
+        content_layout.addWidget(self._section("Latest Paper Run", self.paper_output), 1, 1)
+        content_layout.addWidget(self._section("Safety Events", self.safety_output), 2, 0)
+        content_layout.addWidget(self._section("Notifications", self.notifications_output), 2, 1)
+        content_layout.addWidget(self._section("Suggested Next Step", self.next_step_output), 3, 0, 1, 2)
+        content_layout.setColumnStretch(0, 1)
+        content_layout.setColumnStretch(1, 1)
         content.setLayout(content_layout)
 
         scroll_area = QScrollArea()

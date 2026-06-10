@@ -69,3 +69,25 @@ def test_risk_diagnostics_aggregates_audit_rows(tmp_path):
     assert summary.blocked_action_distribution == {"SELL_USDC": 2, "WAIT": 1}
     assert [item.decision for item in summary.latest_blocked_decisions] == ["SELL_USDC", "SELL_USDC"]
     assert summary.latest_blocked_decisions[0].risk_reason == "Exposure limit"
+
+
+def test_risk_diagnostics_cleans_mojibake_reasons(tmp_path):
+    database = DatabaseManager(str(tmp_path / "bot.sqlite"))
+    reason = "Торгової дії не потрібно"
+    risk_reason = "Низька надійність центру"
+
+    with database.connect() as conn:
+        _insert_audit(
+            conn,
+            "2026-01-01T00:00:00",
+            "WAIT",
+            0,
+            reason.encode("utf-8").decode("cp1251"),
+            risk_reason.encode("utf-8").decode("cp1251"),
+        )
+        conn.commit()
+
+    summary = RiskDiagnosticsEngine(database).build_summary()
+
+    assert summary.top_risk_reasons == [(risk_reason, 1)]
+    assert summary.latest_blocked_decisions[0].reason == reason

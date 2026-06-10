@@ -1,5 +1,7 @@
 ﻿import argparse
 
+import sys
+
 from backtest.backtest_comparison_engine import BacktestComparisonEngine
 from backtest.backtest_comparison_exporter import BacktestComparisonExporter
 from backtest.backtest_engine import BacktestEngine
@@ -39,7 +41,15 @@ from analytics.risk_diagnostics_engine import RiskDiagnosticsEngine
 from analytics.statistics_engine import StatisticsEngine
 from analytics.strategy_validation_engine import StrategyValidationEngine
 from analytics.validation_summary_engine import ValidationSummaryEngine
+from app.text_encoding import clean_display_text
 
+
+def configure_utf8_stdio() -> None:
+    for stream_name in ("stdout", "stderr"):
+        stream = getattr(sys, stream_name, None)
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            reconfigure(encoding="utf-8", errors="replace")
 
 
 def _parse_float_list(raw: str) -> list[float]:
@@ -231,7 +241,7 @@ def _print_reason_rows(rows: list[tuple[str, int]]) -> None:
         return
 
     for reason, count in rows:
-        print(f"- {reason}: {count}")
+        print(f"- {clean_display_text(reason)}: {count}")
 
 
 def command_notifications(args) -> None:
@@ -963,6 +973,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
+    configure_utf8_stdio()
     parser = build_parser()
     args = parser.parse_args()
     args.func(args)

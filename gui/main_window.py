@@ -1,4 +1,4 @@
-from PySide6.QtCore import QSettings
+from PySide6.QtCore import QSettings, QSize
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QMainWindow, QMessageBox, QSplitter, QTabWidget
 
@@ -24,7 +24,8 @@ class MainWindow(QMainWindow):
         self.database = DatabaseManager(self.config.database_path)
 
         self.setWindowTitle(f"USDT/USDC Bot MVP - v{VERSION}")
-        self.resize(1000, 700)
+        self.setMinimumSize(QSize(1280, 820))
+        self.resize(1500, 920)
 
         self._create_actions()
         self._create_menus()
@@ -43,6 +44,7 @@ class MainWindow(QMainWindow):
 
         self.setCentralWidget(self.tabs)
         self._restore_gui_state()
+        self._ensure_usable_window_size()
 
     def refresh_current_tab(self) -> None:
         current_widget = self.tabs.currentWidget()
@@ -129,6 +131,13 @@ class MainWindow(QMainWindow):
                     splitter.restoreState(state)
         except Exception:
             pass
+
+    def _ensure_usable_window_size(self) -> None:
+        current_size = self.size()
+        width = max(current_size.width(), 1280)
+        height = max(current_size.height(), 820)
+        if width != current_size.width() or height != current_size.height():
+            self.resize(width, height)
 
     def _stateful_splitters(self) -> list[QSplitter]:
         return [splitter for splitter in self.findChildren(QSplitter) if splitter.objectName()]

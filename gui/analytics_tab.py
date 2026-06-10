@@ -39,27 +39,27 @@ class AnalyticsTab(QWidget):
 
         self.summary = QTextEdit()
         self.summary.setReadOnly(True)
-        self.summary.setMinimumHeight(170)
+        self.summary.setMinimumHeight(190)
 
         self.insights = QTextEdit()
         self.insights.setReadOnly(True)
-        self.insights.setMinimumHeight(170)
+        self.insights.setMinimumHeight(190)
 
         self.strategy_summary = QTextEdit()
         self.strategy_summary.setReadOnly(True)
-        self.strategy_summary.setMinimumHeight(170)
+        self.strategy_summary.setMinimumHeight(190)
 
         self.validation_summary = QTextEdit()
         self.validation_summary.setReadOnly(True)
-        self.validation_summary.setMinimumHeight(150)
+        self.validation_summary.setMinimumHeight(180)
 
         self.decision_diagnostics = QTextEdit()
         self.decision_diagnostics.setReadOnly(True)
-        self.decision_diagnostics.setMinimumHeight(170)
+        self.decision_diagnostics.setMinimumHeight(190)
 
         self.risk_diagnostics = QTextEdit()
         self.risk_diagnostics.setReadOnly(True)
-        self.risk_diagnostics.setMinimumHeight(170)
+        self.risk_diagnostics.setMinimumHeight(190)
 
         self.equity_figure = Figure(figsize=(8, 3.6), constrained_layout=True)
         self.equity_canvas = FigureCanvas(self.equity_figure)
@@ -70,7 +70,8 @@ class AnalyticsTab(QWidget):
         self.pnl_figure = Figure(figsize=(8, 3.6), constrained_layout=True)
         self.pnl_canvas = FigureCanvas(self.pnl_figure)
         for canvas in (self.equity_canvas, self.drawdown_canvas, self.pnl_canvas):
-            canvas.setMinimumHeight(330)
+            canvas.setMinimumHeight(380)
+            canvas.setMinimumWidth(1100)
             canvas.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
         self.refresh_button = QPushButton("Refresh Analytics")
@@ -105,7 +106,7 @@ class AnalyticsTab(QWidget):
         self.main_splitter.setObjectName("analytics_main_splitter")
         self.main_splitter.addWidget(top_panel)
         self.main_splitter.addWidget(scroll_area)
-        self.main_splitter.setSizes([560, 620])
+        self.main_splitter.setSizes([660, 720])
 
         layout = QVBoxLayout()
         layout.addWidget(self.refresh_button)

@@ -1,6 +1,7 @@
 from collections import Counter
 from dataclasses import dataclass
 
+from app.text_encoding import clean_display_text
 from storage.database_manager import DatabaseManager
 
 
@@ -56,11 +57,11 @@ class RiskDiagnosticsEngine:
             ).fetchall()
         return [
             {
-                "timestamp": str(timestamp),
-                "decision": str(decision),
+                "timestamp": clean_display_text(timestamp),
+                "decision": clean_display_text(decision),
                 "allowed": bool(allowed),
-                "reason": str(reason),
-                "risk_reason": str(risk_reason),
+                "reason": clean_display_text(reason),
+                "risk_reason": clean_display_text(risk_reason),
             }
             for timestamp, decision, allowed, reason, risk_reason in rows
         ]

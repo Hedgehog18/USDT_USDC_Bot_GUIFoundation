@@ -105,3 +105,37 @@ def test_decision_diagnostics_falls_back_to_decision_audit(tmp_path):
     assert summary.top_wait_reasons == [("audit wait", 1)]
     assert summary.confidence_distribution == {"LOW": 1}
     assert summary.risk_blocked_count == 1
+
+
+def test_decision_diagnostics_cleans_mojibake_reasons(tmp_path):
+    database = DatabaseManager(str(tmp_path / "bot.sqlite"))
+    reason = "Низька надійність центру"
+    mojibake_reason = reason.encode("utf-8").decode("cp1251")
+
+    with database.connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO trade_signals (
+                timestamp, action, reason, confidence,
+                cycle_prediction_score, target_profit,
+                risk_allowed, risk_reason, risk_level, cycle_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "2026-01-01T00:00:00",
+                "WAIT",
+                mojibake_reason,
+                "LOW",
+                1.0,
+                0.1,
+                0,
+                "risk",
+                "LOW",
+                None,
+            ),
+        )
+        conn.commit()
+
+    summary = DecisionDiagnosticsEngine(database).build_summary()
+
+    assert summary.top_wait_reasons == [(reason, 1)]

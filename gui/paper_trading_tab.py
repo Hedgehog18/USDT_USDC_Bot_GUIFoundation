@@ -61,19 +61,22 @@ class PaperTradingTab(QWidget):
         self.long_thread: QThread | None = None
         self.long_worker: LongPaperRunWorker | None = None
 
-        self.result_output = self._create_readonly_text(180)
-        self.insights_output = self._create_readonly_text(160)
-        self.runs_output = self._create_readonly_text(190)
-        self.cycles_output = self._create_readonly_text(220)
-        self.long_runs_output = self._create_readonly_text(190)
+        self.result_output = self._create_readonly_text(220)
+        self.insights_output = self._create_readonly_text(220)
+        self.runs_output = self._create_readonly_text(250)
+        self.cycles_output = self._create_readonly_text(270)
+        self.long_runs_output = self._create_readonly_text(250)
         self.output = self.result_output
 
         self.iterations_input = QLineEdit("10")
         self.iterations_input.setPlaceholderText("Iterations")
+        self.iterations_input.setMinimumWidth(180)
         self.long_iterations_input = QLineEdit("500")
         self.long_iterations_input.setPlaceholderText("Long run iterations")
+        self.long_iterations_input.setMinimumWidth(180)
         self.long_interval_input = QLineEdit("5")
         self.long_interval_input.setPlaceholderText("Interval seconds")
+        self.long_interval_input.setMinimumWidth(180)
 
         self.start_button = QPushButton("Start Paper Simulation")
         self.start_button.clicked.connect(self.run_paper_simulation)
@@ -116,20 +119,20 @@ class PaperTradingTab(QWidget):
         self.top_splitter.setObjectName("paper_trading_top_splitter")
         self.top_splitter.addWidget(self._section("Result Output", self.result_output))
         self.top_splitter.addWidget(self._section("Latest Paper Insights", self.insights_output))
-        self.top_splitter.setSizes([620, 520])
+        self.top_splitter.setSizes([780, 700])
 
         self.bottom_splitter = QSplitter(Qt.Orientation.Horizontal)
         self.bottom_splitter.setObjectName("paper_trading_bottom_splitter")
         self.bottom_splitter.addWidget(self._section("Recent Paper Runs", self.runs_output))
         self.bottom_splitter.addWidget(self._section("Recent Paper Cycles", self.cycles_output))
         self.bottom_splitter.addWidget(self._section("Recent Long Paper Runs", self.long_runs_output))
-        self.bottom_splitter.setSizes([420, 460, 420])
+        self.bottom_splitter.setSizes([540, 620, 540])
 
         self.main_splitter = QSplitter(Qt.Orientation.Vertical)
         self.main_splitter.setObjectName("paper_trading_main_splitter")
         self.main_splitter.addWidget(self.top_splitter)
         self.main_splitter.addWidget(self.bottom_splitter)
-        self.main_splitter.setSizes([310, 430])
+        self.main_splitter.setSizes([360, 520])
 
         layout = QVBoxLayout()
         layout.addWidget(controls_group)

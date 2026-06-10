@@ -143,7 +143,9 @@ class RunnerTab(QWidget):
         self.stopped_by_user = False
 
         self.iterations_input = QLineEdit(str(getattr(self.config, "max_runner_iterations", 5)))
+        self.iterations_input.setMinimumWidth(220)
         self.interval_input = QLineEdit(str(getattr(self.config, "runner_interval_seconds", 10)))
+        self.interval_input.setMinimumWidth(220)
 
         self.start_button = QPushButton("Start Demo Runner")
         self.start_button.clicked.connect(self.start_demo_runner)
@@ -154,7 +156,7 @@ class RunnerTab(QWidget):
 
         self.status_output = QTextEdit()
         self.status_output.setReadOnly(True)
-        self.status_output.setMinimumHeight(180)
+        self.status_output.setMinimumHeight(220)
 
         self.status_label = QLabel(f"Runner status: {self.status.value}")
         self.safety_label = QLabel("Real trading disabled. Demo/Paper mode only.")
@@ -164,11 +166,11 @@ class RunnerTab(QWidget):
 
         self.summary_output = QTextEdit()
         self.summary_output.setReadOnly(True)
-        self.summary_output.setMinimumHeight(130)
+        self.summary_output.setMinimumHeight(150)
 
         self.output = QTextEdit()
         self.output.setReadOnly(True)
-        self.output.setMinimumHeight(260)
+        self.output.setMinimumHeight(320)
 
         self.refresh_button = QPushButton("Refresh Runner")
         self.refresh_button.clicked.connect(self.refresh)
@@ -190,6 +192,7 @@ class RunnerTab(QWidget):
 
         controls_group = QGroupBox("Runner Controls")
         controls_group.setLayout(controls)
+        controls_group.setMinimumHeight(82)
 
         actions = QHBoxLayout()
         actions.addWidget(self.refresh_button)
@@ -201,17 +204,20 @@ class RunnerTab(QWidget):
         status_layout.addWidget(self.status_label)
         status_layout.addWidget(self.status_output)
         status_group.setLayout(status_layout)
+        status_group.setMinimumHeight(280)
 
         summary_group = QGroupBox("Last Run Summary")
         summary_layout = QVBoxLayout()
         summary_layout.addWidget(self.summary_output)
         summary_group.setLayout(summary_layout)
+        summary_group.setMinimumHeight(185)
 
         monitor_group = QGroupBox("Monitor")
         monitor_layout = QVBoxLayout()
         monitor_layout.addLayout(actions)
         monitor_layout.addWidget(self.output)
         monitor_group.setLayout(monitor_layout)
+        monitor_group.setMinimumHeight(360)
 
         top_panel = QWidget()
         top_layout = QVBoxLayout()
@@ -220,12 +226,13 @@ class RunnerTab(QWidget):
         top_layout.addWidget(status_group)
         top_layout.addWidget(summary_group)
         top_panel.setLayout(top_layout)
+        top_panel.setMinimumHeight(540)
 
         self.main_splitter = QSplitter(Qt.Orientation.Vertical)
         self.main_splitter.setObjectName("runner_main_splitter")
         self.main_splitter.addWidget(top_panel)
         self.main_splitter.addWidget(monitor_group)
-        self.main_splitter.setSizes([430, 520])
+        self.main_splitter.setSizes([560, 440])
 
         layout = QVBoxLayout()
         layout.addWidget(self.main_splitter)

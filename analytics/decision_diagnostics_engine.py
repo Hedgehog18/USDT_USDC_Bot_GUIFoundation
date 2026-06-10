@@ -1,6 +1,7 @@
 from collections import Counter
 from dataclasses import dataclass
 
+from app.text_encoding import clean_display_text
 from storage.database_manager import DatabaseManager
 
 
@@ -55,9 +56,9 @@ class DecisionDiagnosticsEngine:
             ).fetchall()
         return [
             {
-                "decision": str(action),
-                "reason": str(reason),
-                "confidence": str(confidence),
+                "decision": clean_display_text(action),
+                "reason": clean_display_text(reason),
+                "confidence": clean_display_text(confidence),
                 "allowed": bool(risk_allowed),
             }
             for action, reason, confidence, risk_allowed in rows
@@ -74,9 +75,9 @@ class DecisionDiagnosticsEngine:
             ).fetchall()
         return [
             {
-                "decision": str(decision),
-                "reason": str(reason),
-                "confidence": str(confidence),
+                "decision": clean_display_text(decision),
+                "reason": clean_display_text(reason),
+                "confidence": clean_display_text(confidence),
                 "allowed": bool(allowed),
             }
             for decision, reason, confidence, allowed in rows
