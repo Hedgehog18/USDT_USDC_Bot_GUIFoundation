@@ -275,6 +275,14 @@ def test_manage_cli_has_risk_profitability_diagnostics_command():
     assert args.limit == 7
 
 
+def test_manage_cli_has_fee_model_report_command():
+    parser = build_parser()
+    args = parser.parse_args(["fee-model-report", "--trade-size", "12.5"])
+
+    assert args.command == "fee-model-report"
+    assert args.trade_size == 12.5
+
+
 def test_manage_cli_has_confidence_diagnostics_command():
     parser = build_parser()
     args = parser.parse_args(["confidence-diagnostics", "--top", "4"])

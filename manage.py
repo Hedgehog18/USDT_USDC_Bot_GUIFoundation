@@ -47,6 +47,7 @@ from analytics.confidence_diagnostics_engine import ConfidenceDiagnosticsEngine
 from analytics.data_source_check_engine import DataSourceCheckEngine
 from analytics.decision_diagnostics_engine import DecisionDiagnosticsEngine
 from analytics.entry_zone_diagnostics_engine import EntryZoneDiagnosticsEngine
+from analytics.fee_model_report_engine import FeeModelReportEngine
 from analytics.filter_pass_diagnostics_engine import FilterPassDiagnosticsEngine
 from analytics.order_book_diagnostics_engine import OrderBookDiagnosticsEngine
 from analytics.order_book_rule_sim_engine import OrderBookRuleSimulationEngine
@@ -417,6 +418,47 @@ def command_risk_profitability_diagnostics(args) -> None:
     for detail in report.details:
         _print_risk_profitability_detail(detail)
         print("-" * 60)
+
+
+def command_fee_model_report(args) -> None:
+    config, _logger, _database = build_context()
+    report = FeeModelReportEngine(config).build_report(trade_size=args.trade_size)
+
+    print("=== Fee Model Report ===")
+    print(f"Configured maker fee: {report.maker_fee:.6f} ({report.maker_fee * 100:.4f}%)")
+    print(f"Configured taker fee: {report.taker_fee:.6f} ({report.taker_fee * 100:.4f}%)")
+    print("")
+    print("Backtest fee model:")
+    print(report.backtest_model)
+    print("Paper fee model:")
+    print(report.paper_model)
+    print("Risk profitability fee model:")
+    print(report.risk_profitability_model)
+    print("")
+    print(f"Example calculation for trade_size={args.trade_size:g}:")
+    for scenario in report.scenarios:
+        print("")
+        print(f"{scenario.name}:")
+        print(f"  open fee rate: {scenario.open_fee_rate:.6f}")
+        print(f"  close fee rate: {scenario.close_fee_rate:.6f}")
+        print(f"  open fee: {scenario.open_fee:.8f}")
+        print(f"  close fee: {scenario.close_fee:.8f}")
+        print(f"  total fee: {scenario.total_fee:.8f}")
+        print(f"  gross profit: {scenario.gross_profit:.8f}")
+        print(f"  net profit: {scenario.net_profit:.8f}")
+    print("")
+    print(f"Risk example estimated_fees: {report.risk_example_estimated_fees:.8f}")
+    print("Observed fee check:")
+    print(report.observed_fee_rate_interpretation)
+    print("")
+    print("Fee model source:")
+    for item in report.fee_model_source:
+        print(f"- {item}")
+    print("")
+    print(f"Fee model consistency: {report.fee_model_consistency}")
+    print("Notes:")
+    for item in report.notes:
+        print(f"- {item}")
 
 
 def command_confidence_diagnostics(args) -> None:
@@ -1509,6 +1551,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     risk_profitability_parser.add_argument("--limit", type=int, default=10)
     risk_profitability_parser.set_defaults(func=command_risk_profitability_diagnostics)
+
+    fee_model_parser = subparsers.add_parser(
+        "fee-model-report",
+        help="Audit configured fee model usage across backtest, paper, and risk checks",
+    )
+    fee_model_parser.add_argument("--trade-size", type=float, default=10.0)
+    fee_model_parser.set_defaults(func=command_fee_model_report)
 
     confidence_diagnostics_parser = subparsers.add_parser(
         "confidence-diagnostics",
