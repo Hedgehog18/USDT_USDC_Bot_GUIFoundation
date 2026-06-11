@@ -255,29 +255,31 @@ def _print_risk_profitability_detail(detail, prefix: str = "") -> None:
     print(f"  reason if blocked: {detail.reason}")
 
 
-def _load_current_paper_price(config, database) -> tuple[float, str]:
+def _load_current_paper_price(config, database) -> tuple[float, str, str]:
+    now = __import__("datetime").datetime.now
     try:
         bid_ask = BinanceMarketDataProvider(base_url=config.binance_base_url).get_bid_ask(config.symbol)
-        return bid_ask.mid_price, "BINANCE"
+        return bid_ask.mid_price, "BINANCE", now().isoformat()
     except Exception:
         with database.connect() as conn:
             row = conn.execute(
                 """
-                SELECT price
+                SELECT timestamp, price
                 FROM market_snapshots
                 ORDER BY timestamp DESC
                 LIMIT 1
                 """
             ).fetchone()
         if row:
-            return float(row[0]), "LATEST_MARKET_SNAPSHOT"
-        return 1.0, "DEFAULT_1_0"
+            return float(row[1]), "LATEST_MARKET_SNAPSHOT", str(row[0])
+        return 1.0, "DEFAULT_1_0", now().isoformat()
 
 
 def _print_open_cycles_summary(report) -> None:
     print("--- Open Paper Cycles ---")
     print(f"Current price: {report.current_price:.8f}")
     print(f"Current price source: {report.current_price_source}")
+    print(f"Current price timestamp: {report.current_price_timestamp}")
     print(f"Open cycles count: {report.open_cycles_count}")
     nearest = report.nearest_to_target
     if nearest is None:
@@ -285,7 +287,7 @@ def _print_open_cycles_summary(report) -> None:
         return
     print(
         "Nearest cycle to target: "
-        f"cycle={nearest.cycle_id} profile={nearest.profile} "
+        f"db_id={nearest.db_id} cycle_id={nearest.cycle_id} profile={nearest.profile} "
         f"direction={nearest.direction} distance={nearest.distance_to_target:.8f} "
         f"({nearest.distance_to_target_percent:.5f}%)"
     )
@@ -1540,10 +1542,11 @@ def command_long_paper_run(args) -> None:
     _print_distribution(pressure.buy_zone_distribution)
     print("SELL-zone pressure distribution:")
     _print_distribution(pressure.sell_zone_distribution)
-    current_price, current_price_source = _load_current_paper_price(config, database)
+    current_price, current_price_source, current_price_timestamp = _load_current_paper_price(config, database)
     open_cycles_report = PaperOpenCycleDiagnosticsEngine(database, config).build_report(
         current_price=current_price,
         current_price_source=current_price_source,
+        current_price_timestamp=current_price_timestamp,
         limit=100,
     )
     _print_open_cycles_summary(open_cycles_report)
@@ -1603,7 +1606,7 @@ def command_long_paper_runs(args) -> None:
 
 def command_paper_cycles(args) -> None:
     _config, _logger, database = build_context()
-    rows = database.load_recent_paper_cycles(limit=args.limit)
+    rows = database.load_recent_paper_cycles_with_identity(limit=args.limit)
 
     print("=== Recent Paper Cycles ===")
     if not rows:
@@ -1611,9 +1614,9 @@ def command_paper_cycles(args) -> None:
         return
 
     for row in rows:
-        timestamp, cycle_id, direction, status, open_price, close_price, quantity, open_fee, close_fee, gross, net = row
+        db_id, timestamp, cycle_id, strategy_profile, direction, status, open_price, close_price, quantity, open_fee, close_fee, gross, net = row
         print(
-            f"{timestamp} | cycle={cycle_id} {direction} {status} "
+            f"{timestamp} | db_id={db_id} cycle_id={cycle_id} profile={strategy_profile} {direction} {status} "
             f"open={open_price:.8f} close={close_price:.8f} "
             f"qty={quantity:.6f} net={net:.8f}"
         )
@@ -1621,16 +1624,18 @@ def command_paper_cycles(args) -> None:
 
 def command_paper_open_cycles(args) -> None:
     config, _logger, database = build_context()
-    current_price, source = _load_current_paper_price(config, database)
+    current_price, source, timestamp = _load_current_paper_price(config, database)
     report = PaperOpenCycleDiagnosticsEngine(database, config).build_report(
         current_price=current_price,
         current_price_source=source,
+        current_price_timestamp=timestamp,
         limit=args.limit,
     )
 
     print("=== Paper Open Cycles ===")
     print(f"Current price: {report.current_price:.8f}")
     print(f"Current price source: {report.current_price_source}")
+    print(f"Current price timestamp: {report.current_price_timestamp}")
     print(f"Open cycles count: {report.open_cycles_count}")
     if not report.open_cycles:
         print("No open paper cycles.")
@@ -1639,7 +1644,7 @@ def command_paper_open_cycles(args) -> None:
     for item in report.open_cycles:
         close_status = "yes" if item.close_condition_met else "no"
         print(
-            f"cycle={item.cycle_id} | profile={item.profile} | "
+            f"db_id={item.db_id} | cycle_id={item.cycle_id} | profile={item.profile} | "
             f"direction={item.direction} | opened_at={item.opened_at} | "
             f"age_seconds={item.age_seconds:.0f}"
         )

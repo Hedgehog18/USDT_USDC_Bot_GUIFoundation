@@ -89,3 +89,69 @@ def test_migration_is_idempotent(tmp_path: Path):
 
     assert first
     assert second == []
+
+
+def test_migration_backfills_legacy_paper_cycle_ids(tmp_path: Path):
+    db_path = tmp_path / "bot.sqlite"
+
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE paper_cycles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                cycle_id INTEGER NOT NULL,
+                direction TEXT NOT NULL,
+                status TEXT NOT NULL,
+                open_price REAL NOT NULL,
+                close_price REAL NOT NULL,
+                quantity REAL NOT NULL,
+                open_fee REAL NOT NULL,
+                close_fee REAL NOT NULL,
+                gross_profit REAL NOT NULL,
+                net_profit REAL NOT NULL,
+                opened_at TEXT NOT NULL,
+                closed_at TEXT
+            )
+            """
+        )
+        for direction in ("BUY_USDC", "SELL_USDC", "BUY_USDC"):
+            conn.execute(
+                """
+                INSERT INTO paper_cycles (
+                    timestamp, cycle_id, direction, status, open_price,
+                    close_price, quantity, open_fee, close_fee, gross_profit,
+                    net_profit, opened_at, closed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "2026-06-11T00:00:00",
+                    1,
+                    direction,
+                    "OPEN",
+                    1.0,
+                    1.0002,
+                    10.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    "2026-06-11T00:00:00",
+                    None,
+                ),
+            )
+        conn.commit()
+
+    manager = DatabaseMigrationManager(db_path)
+    first = manager.run()
+    second = manager.run()
+
+    assert "paper_cycles.strategy_profile" in first
+    assert "paper_cycles.cycle_id_backfill" in first
+    assert second == []
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT id, cycle_id FROM paper_cycles ORDER BY id ASC"
+        ).fetchall()
+
+    assert rows == [(1, 1), (2, 2), (3, 3)]

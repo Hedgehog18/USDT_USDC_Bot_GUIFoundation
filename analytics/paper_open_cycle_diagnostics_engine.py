@@ -11,6 +11,7 @@ from trading.fee_engine import FeeEngine
 
 @dataclass(frozen=True)
 class PaperOpenCycleDiagnostic:
+    db_id: int
     cycle_id: int
     profile: str
     direction: str
@@ -30,6 +31,7 @@ class PaperOpenCycleDiagnostic:
 class PaperOpenCyclesReport:
     current_price: float
     current_price_source: str
+    current_price_timestamp: str
     open_cycles: list[PaperOpenCycleDiagnostic]
 
     @property
@@ -53,17 +55,20 @@ class PaperOpenCycleDiagnosticsEngine:
         self,
         current_price: float,
         current_price_source: str = "UNKNOWN",
+        current_price_timestamp: str = "UNKNOWN",
         limit: int = 100,
     ) -> PaperOpenCyclesReport:
         rows = self.database.load_open_paper_cycles(limit=limit)
         return PaperOpenCyclesReport(
             current_price=current_price,
             current_price_source=current_price_source,
+            current_price_timestamp=current_price_timestamp,
             open_cycles=[self._build_item(row, current_price) for row in rows],
         )
 
     def _build_item(self, row: tuple, current_price: float) -> PaperOpenCycleDiagnostic:
         (
+            db_id,
             _timestamp,
             cycle_id,
             strategy_profile,
@@ -98,6 +103,7 @@ class PaperOpenCycleDiagnosticsEngine:
         unrealized_pnl = profit.net_profit
 
         return PaperOpenCycleDiagnostic(
+            db_id=int(db_id),
             cycle_id=int(cycle_id),
             profile=clean_display_text(strategy_profile or "UNKNOWN"),
             direction=direction,

@@ -68,6 +68,19 @@ class DatabaseMigrationManager:
                     )
                     applied.append(f"{table_name}.{column.name}")
 
+            if self._table_exists(conn, "paper_cycles"):
+                existing_columns = self._get_existing_columns(conn, "paper_cycles")
+                if {"id", "cycle_id"}.issubset(existing_columns):
+                    cursor = conn.execute(
+                        """
+                        UPDATE paper_cycles
+                        SET cycle_id = id
+                        WHERE cycle_id != id
+                        """
+                    )
+                    if cursor.rowcount:
+                        applied.append("paper_cycles.cycle_id_backfill")
+
             conn.commit()
 
         return applied

@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from paper.models import PaperCycle, PaperCycleStatus, PaperOrderSide
 from paper.paper_cycle_manager import PaperCycleManager
 from paper.paper_exchange import PaperExchange
 from paper.paper_portfolio_manager import PaperPortfolioManager
@@ -31,5 +32,52 @@ def test_database_loads_open_paper_cycle_with_strategy_profile(test_config, tmp_
     rows = database.load_open_paper_cycles(limit=10)
 
     assert len(rows) == 1
-    assert rows[0][2] == "mean_reversion_v2"
-    assert rows[0][3] == "BUY_USDC"
+    row_id = cycle.id
+    assert rows[0][0] == row_id
+    assert rows[0][2] == row_id
+    assert rows[0][3] == "mean_reversion_v2"
+    assert rows[0][4] == "BUY_USDC"
+
+
+def test_database_updates_only_matching_open_paper_cycle(test_config, tmp_path: Path):
+    database = DatabaseManager(str(tmp_path / "bot.sqlite"))
+    portfolio = PaperPortfolioManager(initial_usdt=100.0, initial_usdc=100.0)
+    exchange = PaperExchange(test_config, portfolio)
+    first_manager = PaperCycleManager(test_config, exchange)
+    second_manager = PaperCycleManager(test_config, exchange)
+
+    first = first_manager.open_cycle("BUY_USDC", 1.0)
+    second = second_manager.open_cycle("SELL_USDC", 1.0005)
+    first_db_id = database.save_paper_cycle(first, strategy_profile="mean_reversion_v2")
+    second_db_id = database.save_paper_cycle(second, strategy_profile="mean_reversion_v2")
+
+    assert first_db_id != second_db_id
+    closed_first = PaperCycle(
+        id=first_db_id,
+        direction=PaperOrderSide.BUY_USDC,
+        status=PaperCycleStatus.CLOSED,
+        open_price=first.open_price,
+        close_price=first.close_price,
+        quantity=first.quantity,
+        open_fee=first.open_fee,
+        close_fee=0.0,
+        gross_profit=0.1,
+        net_profit=0.1,
+        opened_at=first.opened_at,
+        closed_at=first.opened_at,
+    )
+
+    database.save_paper_cycle(closed_first, strategy_profile="mean_reversion_v2")
+    with database.connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, cycle_id, status, net_profit
+            FROM paper_cycles
+            ORDER BY id ASC
+            """
+        ).fetchall()
+
+    assert rows == [
+        (first_db_id, first_db_id, "CLOSED", 0.1),
+        (second_db_id, second_db_id, "OPEN", 0.0),
+    ]

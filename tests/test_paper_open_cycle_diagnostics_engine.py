@@ -20,11 +20,14 @@ def test_paper_open_cycle_diagnostics_explains_cycle_distance(test_config, tmp_p
     report = PaperOpenCycleDiagnosticsEngine(database, test_config).build_report(
         current_price=1.0001,
         current_price_source="TEST",
+        current_price_timestamp="2026-06-11T00:00:00",
     )
 
     assert report.current_price_source == "TEST"
+    assert report.current_price_timestamp == "2026-06-11T00:00:00"
     assert report.open_cycles_count == 1
     item = report.open_cycles[0]
+    assert item.db_id == buy_cycle.id
     assert item.cycle_id == buy_cycle.id
     assert item.profile == "mean_reversion_v2"
     assert item.direction == "BUY_USDC"
@@ -68,9 +71,11 @@ def test_paper_open_cycle_diagnostics_detects_met_sell_close_condition(test_conf
     report = PaperOpenCycleDiagnosticsEngine(database, test_config).build_report(
         current_price=0.9997,
         current_price_source="TEST",
+        current_price_timestamp="2026-06-11T00:00:00",
     )
 
     item = report.open_cycles[0]
+    assert item.db_id == 1
     assert item.cycle_id == 42
     assert item.direction == "SELL_USDC"
     assert item.close_condition_met is True

@@ -1119,6 +1119,31 @@ class DatabaseManager:
         from datetime import datetime
 
         with self.connect() as conn:
+            if cycle.status.value != "OPEN":
+                cursor = conn.execute(
+                    """
+                    UPDATE paper_cycles
+                    SET timestamp = ?, strategy_profile = ?, status = ?,
+                        close_price = ?, close_fee = ?, gross_profit = ?,
+                        net_profit = ?, closed_at = ?
+                    WHERE id = ? AND status = 'OPEN'
+                    """,
+                    (
+                        datetime.utcnow().isoformat(),
+                        strategy_profile,
+                        cycle.status.value,
+                        cycle.close_price,
+                        cycle.close_fee,
+                        cycle.gross_profit,
+                        cycle.net_profit,
+                        cycle.closed_at.isoformat() if cycle.closed_at else None,
+                        cycle.id,
+                    ),
+                )
+                if cursor.rowcount:
+                    conn.commit()
+                    return int(cycle.id)
+
             cursor = conn.execute(
                 """
                 INSERT INTO paper_cycles (
@@ -1144,8 +1169,15 @@ class DatabaseManager:
                     cycle.closed_at.isoformat() if cycle.closed_at else None,
                 ),
             )
+            row_id = int(cursor.lastrowid)
+            if cycle.status.value == "OPEN":
+                conn.execute(
+                    "UPDATE paper_cycles SET cycle_id = ? WHERE id = ?",
+                    (row_id, row_id),
+                )
+                cycle.id = row_id
             conn.commit()
-            return int(cursor.lastrowid)
+            return row_id
 
     def load_recent_paper_cycles(self, limit: int = 20) -> list[tuple]:
         with self.connect() as conn:
@@ -1301,11 +1333,25 @@ class DatabaseManager:
                 (limit,),
             ).fetchall()
 
+    def load_recent_paper_cycles_with_identity(self, limit: int = 20) -> list[tuple]:
+        with self.connect() as conn:
+            return conn.execute(
+                """
+                SELECT id, timestamp, cycle_id, strategy_profile, direction, status,
+                       open_price, close_price, quantity, open_fee, close_fee,
+                       gross_profit, net_profit
+                FROM paper_cycles
+                ORDER BY timestamp DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+
     def load_open_paper_cycles(self, limit: int = 100) -> list[tuple]:
         with self.connect() as conn:
             return conn.execute(
                 """
-                SELECT timestamp, cycle_id, strategy_profile, direction, status,
+                SELECT id, timestamp, cycle_id, strategy_profile, direction, status,
                        open_price, close_price, quantity, open_fee, close_fee,
                        gross_profit, net_profit, opened_at, closed_at
                 FROM paper_cycles
