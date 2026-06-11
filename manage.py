@@ -46,6 +46,7 @@ from analytics.combined_entry_rule_sim_engine import CombinedEntryRuleSimulation
 from analytics.confidence_diagnostics_engine import ConfidenceDiagnosticsEngine
 from analytics.data_source_check_engine import DataSourceCheckEngine
 from analytics.decision_diagnostics_engine import DecisionDiagnosticsEngine
+from analytics.direction_outcome_diagnostics_engine import DirectionOutcomeDiagnosticsEngine
 from analytics.entry_zone_diagnostics_engine import EntryZoneDiagnosticsEngine
 from analytics.entry_zone_debug_report import EntryZoneDebugReportBuilder
 from analytics.entry_threshold_sensitivity_engine import EntryThresholdSensitivityEngine
@@ -1070,6 +1071,71 @@ def command_target_profit_sensitivity(args) -> None:
         print(f"Reason: {report.recommendation.reason}")
 
 
+def command_direction_outcome_diagnostics(args) -> None:
+    config, _logger, database = build_context()
+    current_price, source, timestamp = _load_current_paper_price(config, database)
+    report = DirectionOutcomeDiagnosticsEngine(database, config).build_report(
+        current_price=current_price,
+        profile=args.profile,
+    )
+
+    print("=== Direction Outcome Diagnostics ===")
+    print("Diagnostics only. Trading logic and open cycles are unchanged.")
+    print(f"Profile: {report.profile}")
+    print(f"Current price: {report.current_price:.8f}")
+    print(f"Current price source: {source}")
+    print(f"Current price timestamp: {timestamp}")
+    print("")
+
+    print("--- Open Cycles ---")
+    if not report.open_cycles:
+        print("No open cycles for this profile.")
+    else:
+        for item in report.open_cycles:
+            moved = "yes" if item.moved_expected_direction else "no"
+            print(
+                f"db_id={item.db_id} cycle_id={item.cycle_id} "
+                f"direction={item.direction} opened_at={item.opened_at} "
+                f"age_seconds={item.age_seconds:.0f}"
+            )
+            print(
+                f"  open_price={item.open_price:.8f} current_price={item.current_price:.8f} "
+                f"target_price={item.target_price:.8f}"
+            )
+            print(f"  price moved in expected direction: {moved}")
+            print(
+                f"  unrealized_pnl={item.unrealized_pnl:.8f} "
+                f"distance_from_open={item.distance_from_open:.8f} "
+                f"distance_to_target={item.distance_to_target:.8f}"
+            )
+
+    summary = report.open_summary
+    print("--- Open Cycle Summary ---")
+    print(f"BUY cycles count: {summary.buy_cycles_count}")
+    print(f"SELL cycles count: {summary.sell_cycles_count}")
+    print(f"Moved expected direction count: {summary.moved_expected_direction_count}")
+    print(f"Moved against direction count: {summary.moved_against_direction_count}")
+    if summary.avg_unrealized_pnl is None:
+        print("Avg unrealized pnl: N/A")
+        print("Worst unrealized pnl: N/A")
+        print("Best unrealized pnl: N/A")
+    else:
+        print(f"Avg unrealized pnl: {summary.avg_unrealized_pnl:.8f}")
+        print(f"Worst unrealized pnl: {summary.worst_unrealized_pnl:.8f}")
+        print(f"Best unrealized pnl: {summary.best_unrealized_pnl:.8f}")
+
+    print("--- Historical Direction Outcomes ---")
+    if not report.historical_outcomes:
+        print("No historical snapshot outcomes available.")
+    for item in report.historical_outcomes:
+        print(f"N={item.horizon}")
+        print(f"  Entry signals evaluated: {item.entry_signals_count}")
+        print(f"  BUY signals: {item.buy_signals_count}")
+        print(f"  SELL signals: {item.sell_signals_count}")
+        print(f"  Moved toward target count: {item.moved_expected_direction_count}")
+        print(f"  Moved toward target rate: {item.moved_expected_direction_rate * 100:.2f}%")
+
+
 def command_validation_summary(args) -> None:
     _config, _logger, database = build_context()
     summary = ValidationSummaryEngine(database).build_summary()
@@ -2087,6 +2153,17 @@ def build_parser() -> argparse.ArgumentParser:
         default="mean_reversion_v2",
     )
     target_profit_sensitivity_parser.set_defaults(func=command_target_profit_sensitivity)
+
+    direction_outcome_parser = subparsers.add_parser(
+        "direction-outcome-diagnostics",
+        help="Diagnose whether paper cycle directions are moving toward targets",
+    )
+    direction_outcome_parser.add_argument(
+        "--profile",
+        choices=("mean_reversion_v1", "mean_reversion_v2"),
+        default="mean_reversion_v2",
+    )
+    direction_outcome_parser.set_defaults(func=command_direction_outcome_diagnostics)
 
     paper_stats_parser = subparsers.add_parser("paper-stats", help="РџРѕРєР°Р·Р°С‚Рё paper trading СЃС‚Р°С‚РёСЃС‚РёРєСѓ")
     paper_stats_parser.add_argument("--limit", type=int, default=100)

@@ -274,6 +274,18 @@ def test_manage_cli_has_target_profit_sensitivity_command():
     assert args.profile == "mean_reversion_v2"
 
 
+def test_manage_cli_has_direction_outcome_diagnostics_command():
+    parser = build_parser()
+    args = parser.parse_args([
+        "direction-outcome-diagnostics",
+        "--profile",
+        "mean_reversion_v2",
+    ])
+
+    assert args.command == "direction-outcome-diagnostics"
+    assert args.profile == "mean_reversion_v2"
+
+
 def test_manage_cli_has_long_paper_runs_command():
     parser = build_parser()
     args = parser.parse_args(["long-paper-runs", "--limit", "20"])
