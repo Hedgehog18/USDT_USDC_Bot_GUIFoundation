@@ -59,6 +59,8 @@ class BotConfig:
     paper_max_losing_cycles: int = 3
     paper_min_portfolio_value: float = 80.0
 
+    strategy_profile: str = "strict_current"
+
 
 class ConfigManager:
     DEFAULT_PATH = Path("config/settings.json")
@@ -116,6 +118,7 @@ class ConfigManager:
             paper_max_drawdown=float(data.get("paper_max_drawdown", BotConfig.paper_max_drawdown)),
             paper_max_losing_cycles=int(data.get("paper_max_losing_cycles", BotConfig.paper_max_losing_cycles)),
             paper_min_portfolio_value=float(data.get("paper_min_portfolio_value", BotConfig.paper_min_portfolio_value)),
+            strategy_profile=str(data.get("strategy_profile", BotConfig.strategy_profile)),
         )
 
     @staticmethod

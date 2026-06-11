@@ -52,5 +52,7 @@
 
   "paper_max_drawdown": 0.05,
   "paper_max_losing_cycles": 3,
-  "paper_min_portfolio_value": 80.0
+  "paper_min_portfolio_value": 80.0,
+
+  "strategy_profile": "strict_current"
 }

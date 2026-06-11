@@ -275,6 +275,21 @@ def test_manage_cli_has_combined_entry_rule_sim_command():
     assert args.latest == 4
 
 
+def test_manage_cli_has_strategy_profile_sim_command():
+    parser = build_parser()
+    args = parser.parse_args([
+        "strategy-profile-sim",
+        "--profile",
+        "mean_reversion_v1",
+        "--latest",
+        "4",
+    ])
+
+    assert args.command == "strategy-profile-sim"
+    assert args.profile == "mean_reversion_v1"
+    assert args.latest == 4
+
+
 def test_manage_cli_has_validation_summary_command():
     parser = build_parser()
     args = parser.parse_args(["validation-summary"])

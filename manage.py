@@ -48,6 +48,10 @@ from analytics.order_book_diagnostics_engine import OrderBookDiagnosticsEngine
 from analytics.order_book_rule_sim_engine import OrderBookRuleSimulationEngine
 from analytics.risk_diagnostics_engine import RiskDiagnosticsEngine
 from analytics.statistics_engine import StatisticsEngine
+from analytics.strategy_profile_sim_engine import (
+    SUPPORTED_STRATEGY_PROFILES,
+    StrategyProfileSimulationEngine,
+)
 from analytics.strategy_tuning_report_engine import StrategyTuningReportEngine
 from analytics.strategy_validation_engine import StrategyValidationEngine
 from analytics.validation_summary_engine import ValidationSummaryEngine
@@ -563,6 +567,52 @@ def command_combined_entry_rule_sim(args) -> None:
                 )
         else:
             print("- No passed samples.")
+
+
+def command_strategy_profile_sim(args) -> None:
+    _config, _logger, database = build_context()
+    config = _config
+    report = StrategyProfileSimulationEngine(database, config).build_report(
+        profile=args.profile,
+        latest=args.latest,
+    )
+
+    print("=== Strategy Profile Simulation ===")
+    print("Simulation only. DecisionEngine, RiskManager, config, and trades are unchanged.")
+    print(f"Configured strategy_profile: {config.strategy_profile}")
+    print(f"Simulated profile: {report.profile}")
+    if report.total_snapshots == 0:
+        print("No strategy profile simulation data available.")
+        return
+
+    print(f"Total snapshots: {report.total_snapshots}")
+    print(f"Total entry-zone samples: {report.total_entry_zone_samples}")
+    print(f"Pass count: {report.pass_count}")
+    print(f"Pass rate: {report.pass_rate * 100:.2f}%")
+    print(f"BUY candidates: {report.buy_candidates}")
+    print(f"SELL candidates: {report.sell_candidates}")
+    print("Remaining blocking filters:")
+    if report.remaining_blocking_filters:
+        for name, count in report.remaining_blocking_filters:
+            print(f"- {name}: {count}")
+    else:
+        print("- None")
+    print("Latest candidates:")
+    if report.latest_candidates:
+        for item in report.latest_candidates:
+            print(
+                f"- {item.timestamp} | {item.direction} | "
+                f"work_position={item.work_position:.4f} | "
+                f"spread={item.spread:.8f} | "
+                f"health={item.market_health_score:.2f} | "
+                f"regime={item.market_regime} | "
+                f"volatility={item.volatility_regime} | "
+                f"micro_trend={item.micro_trend} | "
+                f"center_confidence={item.center_confidence} | "
+                f"order_book_pressure={item.order_book_pressure}"
+            )
+    else:
+        print("- No candidates.")
 
 
 def command_validation_summary(args) -> None:
@@ -1313,6 +1363,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     combined_entry_rule_sim_parser.add_argument("--latest", type=int, default=5)
     combined_entry_rule_sim_parser.set_defaults(func=command_combined_entry_rule_sim)
+
+    strategy_profile_sim_parser = subparsers.add_parser(
+        "strategy-profile-sim",
+        help="Simulate experimental strategy profiles using saved snapshots",
+    )
+    strategy_profile_sim_parser.add_argument(
+        "--profile",
+        choices=SUPPORTED_STRATEGY_PROFILES,
+        default="strict_current",
+    )
+    strategy_profile_sim_parser.add_argument("--latest", type=int, default=10)
+    strategy_profile_sim_parser.set_defaults(func=command_strategy_profile_sim)
 
     validation_summary_parser = subparsers.add_parser(
         "validation-summary",

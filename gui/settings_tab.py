@@ -38,6 +38,7 @@ class SettingsTab(QWidget):
             f"Trade history limit: {self._value('trade_history_limit')}",
             "",
             "=== Trading ===",
+            f"Strategy profile: {self._value('strategy_profile')}",
             f"Trade size percent: {self._value('trade_size_percent')}",
             f"Target profit: {self._value('target_profit')}",
             f"Max active cycles: {self._value('max_active_cycles')}",

@@ -45,3 +45,4 @@ def test_config_manager_loads_config(tmp_path: Path):
     assert manager.config.symbol == "USDCUSDT"
     assert manager.config.target_profit == 0.0002
     assert manager.config.use_real_market_data is False
+    assert manager.config.strategy_profile == "strict_current"
