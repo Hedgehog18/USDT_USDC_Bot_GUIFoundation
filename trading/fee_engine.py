@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 
 from config.config_manager import BotConfig
+from trading.fee_rate_provider import FeeRateProvider, FeeRates
 from trading.models import CycleDirection
 
 
@@ -29,6 +30,19 @@ class FeeEngine:
 
     def __init__(self, config: BotConfig) -> None:
         self.config = config
+        self.fee_rate_provider = FeeRateProvider(config)
+
+    @property
+    def effective_rates(self) -> FeeRates:
+        return self.fee_rate_provider.get_rates()
+
+    @property
+    def effective_maker_fee_percent(self) -> float:
+        return self.effective_rates.maker
+
+    @property
+    def effective_taker_fee_percent(self) -> float:
+        return self.effective_rates.taker
 
     def calculate_fees(
         self,
@@ -36,7 +50,8 @@ class FeeEngine:
         close_notional: float,
         use_taker_fee: bool = False,
     ) -> FeeCalculation:
-        fee_rate = self.config.taker_fee_percent if use_taker_fee else self.config.maker_fee_percent
+        rates = self.effective_rates
+        fee_rate = rates.taker if use_taker_fee else rates.maker
 
         open_fee = open_notional * fee_rate
         close_fee = close_notional * fee_rate

@@ -118,8 +118,11 @@ class ExchangeRulesEngine:
         else:
             gross_profit = (open_order.price - close_order.price) * close_order.quantity
 
-        fee_rate = self.config.maker_fee_percent
-        estimated_fees = (open_order.notional + close_order.notional) * fee_rate
+        fees = self.fee_engine.calculate_fees(
+            open_notional=open_order.notional,
+            close_notional=close_order.notional,
+        )
+        estimated_fees = fees.total_fee
         net_profit = gross_profit - estimated_fees
 
         if net_profit <= 0:

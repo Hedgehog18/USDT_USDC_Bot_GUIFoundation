@@ -30,7 +30,11 @@ class PaperExchange:
     ) -> PaperExecutionResult:
         parsed_side = PaperOrderSide(side)
         notional = price * quantity
-        fee = notional * self.config.taker_fee_percent
+        fee = self.fee_engine.calculate_fees(
+            open_notional=notional,
+            close_notional=0.0,
+            use_taker_fee=True,
+        ).open_fee
 
         order = PaperOrder(
             id=next(self._ids),

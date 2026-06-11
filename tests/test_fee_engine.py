@@ -1,8 +1,28 @@
 from trading.fee_engine import FeeEngine
 
 
-def test_fee_engine_calculates_fees(test_config):
+def _with_symbol(test_config, symbol: str):
+    return test_config.__class__(**{
+        **test_config.__dict__,
+        "symbol": symbol,
+    })
+
+
+def test_fee_engine_uses_zero_fee_override_for_usdcusdt(test_config):
     engine = FeeEngine(test_config)
+
+    fees = engine.calculate_fees(
+        open_notional=100.0,
+        close_notional=100.1,
+    )
+
+    assert fees.open_fee == 0.0
+    assert fees.close_fee == 0.0
+    assert fees.total_fee == 0.0
+
+
+def test_fee_engine_calculates_config_fees_for_other_symbols(test_config):
+    engine = FeeEngine(_with_symbol(test_config, "BTCUSDT"))
 
     fees = engine.calculate_fees(
         open_notional=100.0,
@@ -25,7 +45,7 @@ def test_fee_engine_calculates_buy_profit(test_config):
     )
 
     assert round(profit.gross_profit, 6) == 1.0
-    assert profit.net_profit < profit.gross_profit
+    assert profit.net_profit == profit.gross_profit
 
 
 def test_fee_engine_calculates_sell_profit(test_config):
@@ -39,7 +59,7 @@ def test_fee_engine_calculates_sell_profit(test_config):
     )
 
     assert round(profit.gross_profit, 6) == 1.0
-    assert profit.net_profit < profit.gross_profit
+    assert profit.net_profit == profit.gross_profit
 
 
 def test_exchange_rules_uses_fee_engine(test_config):
@@ -54,5 +74,5 @@ def test_exchange_rules_uses_fee_engine(test_config):
     )
 
     assert result.allowed is True
-    assert result.estimated_fees > 0
-    assert result.net_profit < result.gross_profit
+    assert result.estimated_fees == 0.0
+    assert result.net_profit == result.gross_profit

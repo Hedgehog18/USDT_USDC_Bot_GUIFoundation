@@ -4,6 +4,13 @@ from paper.paper_order_manager import PaperOrderManager
 from paper.paper_portfolio_manager import PaperPortfolioManager
 
 
+def _with_symbol(test_config, symbol: str):
+    return test_config.__class__(**{
+        **test_config.__dict__,
+        "symbol": symbol,
+    })
+
+
 def test_paper_exchange_buy_fills(test_config):
     portfolio = PaperPortfolioManager(initial_usdt=100.0, initial_usdc=0.0)
     exchange = PaperExchange(test_config, portfolio)
@@ -12,7 +19,19 @@ def test_paper_exchange_buy_fills(test_config):
 
     assert result.order.status == PaperOrderStatus.FILLED
     assert result.portfolio.usdc == 10.0
-    assert result.portfolio.usdt < 90.0
+    assert result.fee == 0.0
+    assert result.portfolio.usdt == 90.0
+
+
+def test_paper_exchange_uses_config_taker_fee_for_other_symbols(test_config):
+    portfolio = PaperPortfolioManager(initial_usdt=100.0, initial_usdc=0.0)
+    exchange = PaperExchange(_with_symbol(test_config, "BTCUSDT"), portfolio)
+
+    result = exchange.execute_market_order("BUY_USDC", price=1.0, quantity=10.0)
+
+    assert result.order.status == PaperOrderStatus.FILLED
+    assert result.fee == 0.01
+    assert result.portfolio.usdt == 89.99
 
 
 def test_paper_exchange_rejects_when_not_enough_balance(test_config):

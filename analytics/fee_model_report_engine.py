@@ -19,8 +19,12 @@ class FeeScenario:
 
 @dataclass(frozen=True)
 class FeeModelReport:
-    maker_fee: float
-    taker_fee: float
+    configured_maker_fee: float
+    configured_taker_fee: float
+    effective_maker_fee: float
+    effective_taker_fee: float
+    effective_fee_source: str
+    effective_fee_note: str
     backtest_model: str
     paper_model: str
     risk_profitability_model: str
@@ -46,11 +50,12 @@ class FeeModelReportEngine:
     ) -> FeeModelReport:
         close_price = open_price * (1 + self.config.target_profit)
         quantity = trade_size / open_price
+        rates = self.fee_engine.effective_rates
 
         scenarios = [
-            self._scenario("maker/maker", self.config.maker_fee_percent, self.config.maker_fee_percent, open_price, close_price, quantity),
-            self._scenario("maker/taker", self.config.maker_fee_percent, self.config.taker_fee_percent, open_price, close_price, quantity),
-            self._scenario("taker/taker", self.config.taker_fee_percent, self.config.taker_fee_percent, open_price, close_price, quantity),
+            self._scenario("maker/maker", rates.maker, rates.maker, open_price, close_price, quantity),
+            self._scenario("maker/taker", rates.maker, rates.taker, open_price, close_price, quantity),
+            self._scenario("taker/taker", rates.taker, rates.taker, open_price, close_price, quantity),
         ]
 
         risk = self.exchange_rules.check_profitability_after_rounding(
@@ -63,17 +68,22 @@ class FeeModelReportEngine:
         consistency = "MISMATCH"
 
         return FeeModelReport(
-            maker_fee=self.config.maker_fee_percent,
-            taker_fee=self.config.taker_fee_percent,
+            configured_maker_fee=self.config.maker_fee_percent,
+            configured_taker_fee=self.config.taker_fee_percent,
+            effective_maker_fee=rates.maker,
+            effective_taker_fee=rates.taker,
+            effective_fee_source=rates.source,
+            effective_fee_note=rates.note,
             backtest_model="FeeEngine.calculate_profit(..., use_taker_fee=False) -> maker fee for both legs",
             paper_model="PaperExchange market orders use taker fee; PaperCycleManager close PnL uses use_taker_fee=True",
-            risk_profitability_model="ExchangeRulesEngine.check_profitability_after_rounding uses maker_fee_percent for open+close notional",
+            risk_profitability_model="ExchangeRulesEngine.check_profitability_after_rounding uses effective maker fee for open+close notional",
             scenarios=scenarios,
             risk_example_estimated_fees=risk.estimated_fees,
             observed_fee_rate_interpretation=self._interpret_observed_fees(observed_estimated_fees),
             fee_model_source=[
                 "config/settings.json: maker_fee_percent, taker_fee_percent",
                 "config/config_manager.py: BotConfig.maker_fee_percent / taker_fee_percent",
+                "trading/fee_rate_provider.py: FeeRateProvider effective fee override",
                 "trading/fee_engine.py: FeeEngine.calculate_fees",
                 "trading/exchange_rules_engine.py: ExchangeRulesEngine.check_profitability_after_rounding",
                 "paper/paper_exchange.py: PaperExchange.execute_market_order",
@@ -112,23 +122,27 @@ class FeeModelReportEngine:
         )
 
     def _interpret_observed_fees(self, observed_estimated_fees: float) -> str:
-        if self.config.maker_fee_percent <= 0:
-            return "Cannot infer observed notional because maker_fee_percent <= 0."
+        configured_maker = self.config.maker_fee_percent
+        if configured_maker <= 0:
+            return "Cannot infer old observed notional because configured maker_fee_percent <= 0."
 
-        implied_open_close_notional = observed_estimated_fees / self.config.maker_fee_percent
+        implied_open_close_notional = observed_estimated_fees / configured_maker
         approximate_trade_size = implied_open_close_notional / 2
         return (
-            f"observed estimated_fees={observed_estimated_fees:.8f} / maker_fee={self.config.maker_fee_percent:.6f} "
+            f"old observed estimated_fees={observed_estimated_fees:.8f} / configured maker_fee={configured_maker:.6f} "
             f"=> open+close notional ~= {implied_open_close_notional:.8f}, "
-            f"or about {approximate_trade_size:.8f} per leg. This matches 0.1% + 0.1% on an approximately 10 USDT trade."
+            f"or about {approximate_trade_size:.8f} per leg. This matched the previous 0.1% + 0.1% assumption on an approximately 10 USDT trade."
         )
 
     def _notes(self, consistency: str) -> list[str]:
+        rates = self.fee_engine.effective_rates
         notes = [
-            "No Binance account commission schedule or USDC/USDT special-fee endpoint is queried by the current code.",
-            "Risk profitability estimated_fees are maker/maker in ExchangeRulesEngine.",
-            "Paper execution uses taker fee for market orders.",
+            "No authenticated Binance commission fetcher is implemented yet; FeeRateProvider applies a verified USDCUSDT override and falls back to local config for other symbols.",
+            "Risk profitability estimated_fees use effective maker/maker rates in ExchangeRulesEngine.",
+            "Paper execution uses effective taker fee for market orders.",
         ]
+        if rates.maker == 0.0 and rates.taker == 0.0:
+            notes.append("Effective maker/taker fees are zero for this symbol, so USDCUSDT profitability checks no longer subtract the previous 0.1% + 0.1% assumption.")
         if self.config.maker_fee_percent == self.config.taker_fee_percent:
             notes.append("Current maker and taker fee config values are equal, so the model mismatch is numerically hidden.")
         else:

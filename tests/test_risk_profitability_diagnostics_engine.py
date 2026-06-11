@@ -4,7 +4,14 @@ from analytics.risk_profitability_diagnostics_engine import RiskProfitabilityDia
 from storage.database_manager import DatabaseManager
 
 
-def test_risk_profitability_detail_explains_small_profit_block(test_config):
+def _with_symbol(test_config, symbol: str):
+    return test_config.__class__(**{
+        **test_config.__dict__,
+        "symbol": symbol,
+    })
+
+
+def test_risk_profitability_detail_uses_zero_fee_override_for_usdcusdt(test_config):
     engine = RiskProfitabilityDiagnosticsEngine(test_config)
 
     detail = engine.build_detail(
@@ -18,6 +25,22 @@ def test_risk_profitability_detail_explains_small_profit_block(test_config):
     assert detail.trade_size == 10.0
     assert detail.quantity_before_rounding > detail.quantity_after_rounding
     assert detail.gross_profit >= 0
+    assert detail.estimated_fees == 0.0
+    assert detail.net_profit == detail.gross_profit
+    assert detail.allowed is True
+    assert detail.min_notional == test_config.min_notional
+
+
+def test_risk_profitability_detail_explains_small_profit_block_for_config_fee_symbol(test_config):
+    engine = RiskProfitabilityDiagnosticsEngine(_with_symbol(test_config, "BTCUSDT"))
+
+    detail = engine.build_detail(
+        action="SELL_USDC",
+        current_price=1.0005,
+        budget_total_value=100.0,
+        reason="blocked",
+    )
+
     assert detail.estimated_fees > 0
     assert detail.net_profit <= 0
     assert detail.allowed is False
