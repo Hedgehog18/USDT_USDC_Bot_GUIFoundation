@@ -155,10 +155,12 @@ def test_manage_cli_paper_cycle_accepts_strategy_profile():
         "--profile",
         "mean_reversion_v1",
         "--debug-decisions",
+        "--debug-risk-details",
     ])
 
     assert args.profile == "mean_reversion_v1"
     assert args.debug_decisions is True
+    assert args.debug_risk_details is True
 
 
 def test_manage_cli_has_long_paper_run_command():
@@ -261,6 +263,14 @@ def test_manage_cli_has_risk_diagnostics_command():
     assert args.command == "risk-diagnostics"
     assert args.top == 4
     assert args.latest == 2
+
+
+def test_manage_cli_has_risk_profitability_diagnostics_command():
+    parser = build_parser()
+    args = parser.parse_args(["risk-profitability-diagnostics", "--limit", "7"])
+
+    assert args.command == "risk-profitability-diagnostics"
+    assert args.limit == 7
 
 
 def test_manage_cli_has_confidence_diagnostics_command():

@@ -51,6 +51,7 @@ from analytics.filter_pass_diagnostics_engine import FilterPassDiagnosticsEngine
 from analytics.order_book_diagnostics_engine import OrderBookDiagnosticsEngine
 from analytics.order_book_rule_sim_engine import OrderBookRuleSimulationEngine
 from analytics.risk_diagnostics_engine import RiskDiagnosticsEngine
+from analytics.risk_profitability_diagnostics_engine import RiskProfitabilityDiagnosticsEngine
 from analytics.statistics_engine import StatisticsEngine
 from analytics.strategy_profile_sim_engine import (
     SUPPORTED_STRATEGY_PROFILES,
@@ -115,6 +116,56 @@ def _build_decision_debug_callback(profile: str):
         )
 
     return callback, counter
+
+
+def _build_risk_profitability_debug_callback(config, database):
+    from audit.audit_engine import AuditEngine
+
+    counter = {"count": 0}
+    diagnostics = RiskProfitabilityDiagnosticsEngine(config)
+    audit_engine = AuditEngine(database)
+
+    def callback(item: dict) -> None:
+        counter["count"] += 1
+        decision = item["decision"]
+        risk = item["risk"]
+        market_state = item["market_state"]
+        portfolio = item["portfolio"]
+        detail = diagnostics.build_detail(
+            action=decision.action,
+            current_price=market_state.price,
+            budget_total_value=portfolio.total_value,
+            reason=risk.reason,
+        )
+        audit_engine.audit_decision(market_state, decision, risk)
+        _print_risk_profitability_detail(detail, prefix=f"[risk-debug] index={item['index']} | ")
+
+    return callback, counter
+
+
+def _print_risk_profitability_detail(detail, prefix: str = "") -> None:
+    header = (
+        f"{prefix}action={detail.action} | "
+        f"current_price={detail.current_price:.8f} | "
+        f"target_price={detail.target_price:.8f} | "
+        f"allowed={detail.allowed}"
+    )
+    if detail.timestamp:
+        header = f"{detail.timestamp} | {header}"
+    print(header)
+    if detail.decision_reason:
+        print(f"  decision reason: {detail.decision_reason}")
+    print(f"  trade_size: {detail.trade_size:.8f}")
+    print(f"  quantity before rounding: {detail.quantity_before_rounding:.8f}")
+    print(f"  quantity after rounding: {detail.quantity_after_rounding:.8f}")
+    print(f"  open notional before rounding: {detail.open_notional_before_rounding:.8f}")
+    print(f"  open notional after rounding: {detail.open_notional_after_rounding:.8f}")
+    print(f"  rounding impact: {detail.rounding_impact:.8f}")
+    print(f"  gross_profit: {detail.gross_profit:.8f}")
+    print(f"  estimated fees: {detail.estimated_fees:.8f}")
+    print(f"  net_profit: {detail.net_profit:.8f}")
+    print(f"  min_notional: {detail.min_notional:.8f}")
+    print(f"  reason if blocked: {detail.reason}")
 
 
 def command_run(args) -> None:
@@ -313,6 +364,25 @@ def command_risk_diagnostics(args) -> None:
             )
     else:
         print("- No blocked decisions.")
+
+
+def command_risk_profitability_diagnostics(args) -> None:
+    config, _logger, database = build_context()
+    report = RiskProfitabilityDiagnosticsEngine(config, database).build_report(limit=args.limit)
+
+    print("=== Risk Profitability Diagnostics ===")
+    if not report.details:
+        print("No blocked BUY/SELL profitability decisions found.")
+        return
+
+    if report.estimated_from_config:
+        print(
+            "Note: historical breakdown uses audit price and current config initial portfolio "
+            "to estimate trade_size."
+        )
+    for detail in report.details:
+        _print_risk_profitability_detail(detail)
+        print("-" * 60)
 
 
 def command_confidence_diagnostics(args) -> None:
@@ -1059,11 +1129,16 @@ def command_paper_cycle_sim(args) -> None:
     debug_counter = {"count": 0}
     if args.debug_decisions:
         debug_callback, debug_counter = _build_decision_debug_callback(profile)
+    risk_debug_callback = None
+    risk_debug_counter = {"count": 0}
+    if args.debug_risk_details:
+        risk_debug_callback, risk_debug_counter = _build_risk_profitability_debug_callback(config, database)
     result = PaperTradingEngine(
         config,
         database,
         bot=bot,
         decision_debug_callback=debug_callback,
+        risk_debug_callback=risk_debug_callback,
     ).run(args.iterations)
 
     logger.info(
@@ -1102,6 +1177,8 @@ def command_paper_cycle_sim(args) -> None:
     print(f"Insights TXT: {insights_path}")
     if args.debug_decisions and debug_counter["count"] == 0:
         print("[decision-debug] No potential entry points were evaluated.")
+    if args.debug_risk_details and risk_debug_counter["count"] == 0:
+        print("[risk-debug] No BUY/SELL risk profitability checks were evaluated.")
 
 
 def command_long_paper_run(args) -> None:
@@ -1391,6 +1468,13 @@ def build_parser() -> argparse.ArgumentParser:
     risk_diagnostics_parser.add_argument("--latest", type=int, default=5)
     risk_diagnostics_parser.set_defaults(func=command_risk_diagnostics)
 
+    risk_profitability_parser = subparsers.add_parser(
+        "risk-profitability-diagnostics",
+        help="Show profitability breakdown for blocked BUY/SELL risk decisions",
+    )
+    risk_profitability_parser.add_argument("--limit", type=int, default=10)
+    risk_profitability_parser.set_defaults(func=command_risk_profitability_diagnostics)
+
     confidence_diagnostics_parser = subparsers.add_parser(
         "confidence-diagnostics",
         help="Show confidence score diagnostics",
@@ -1535,6 +1619,7 @@ def build_parser() -> argparse.ArgumentParser:
         default="strict_current",
     )
     paper_cycle_sim_parser.add_argument("--debug-decisions", action="store_true")
+    paper_cycle_sim_parser.add_argument("--debug-risk-details", action="store_true")
     paper_cycle_sim_parser.set_defaults(func=command_paper_cycle_sim)
 
     long_paper_run_parser = subparsers.add_parser("long-paper-run", help="Run long paper validation workflow")

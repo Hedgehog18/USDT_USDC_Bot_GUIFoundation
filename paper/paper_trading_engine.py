@@ -36,6 +36,7 @@ class PaperTradingEngine:
         database: DatabaseManager,
         bot: BotEngine | None = None,
         decision_debug_callback: Callable[[dict], None] | None = None,
+        risk_debug_callback: Callable[[dict], None] | None = None,
     ) -> None:
         self.config = config
         self.database = database
@@ -51,6 +52,7 @@ class PaperTradingEngine:
         self.cycle_manager = PaperCycleManager(config, self.exchange)
         self.safety_engine = PaperSafetyEngine(config)
         self.decision_debug_callback = decision_debug_callback
+        self.risk_debug_callback = risk_debug_callback
 
     def run(self, iterations: int) -> PaperTradingRunResult:
         if iterations <= 0:
@@ -100,6 +102,14 @@ class PaperTradingEngine:
                     "reason": decision.reason,
                     "risk_allowed": risk.allowed,
                     "risk_reason": risk.reason,
+                })
+            if self.risk_debug_callback and decision.action in {"BUY_USDC", "SELL_USDC"}:
+                self.risk_debug_callback({
+                    "index": index,
+                    "market_state": market_state,
+                    "decision": decision,
+                    "risk": risk,
+                    "portfolio": portfolio,
                 })
 
             if not risk.allowed or decision.action not in {"BUY_USDC", "SELL_USDC"}:
