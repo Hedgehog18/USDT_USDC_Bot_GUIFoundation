@@ -262,6 +262,18 @@ def test_manage_cli_has_micro_trend_sensitivity_command():
     assert args.profile == "mean_reversion_v1"
 
 
+def test_manage_cli_has_target_profit_sensitivity_command():
+    parser = build_parser()
+    args = parser.parse_args([
+        "target-profit-sensitivity",
+        "--profile",
+        "mean_reversion_v2",
+    ])
+
+    assert args.command == "target-profit-sensitivity"
+    assert args.profile == "mean_reversion_v2"
+
+
 def test_manage_cli_has_long_paper_runs_command():
     parser = build_parser()
     args = parser.parse_args(["long-paper-runs", "--limit", "20"])

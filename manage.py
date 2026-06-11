@@ -64,6 +64,7 @@ from analytics.strategy_profile_sim_engine import (
 )
 from analytics.strategy_tuning_report_engine import StrategyTuningReportEngine
 from analytics.strategy_validation_engine import StrategyValidationEngine
+from analytics.target_profit_sensitivity_engine import TargetProfitSensitivityEngine
 from analytics.validation_summary_engine import ValidationSummaryEngine
 from app.text_encoding import clean_display_text
 
@@ -1012,6 +1013,61 @@ def command_micro_trend_sensitivity(args) -> None:
         print(f"Candidates: {recommendation.candidates_count}")
         print(f"Candidate frequency: {recommendation.candidate_frequency * 100:.2f}%")
         print(f"Reason: {recommendation.reason}")
+
+
+def command_target_profit_sensitivity(args) -> None:
+    config, _logger, database = build_context()
+    current_price, source, timestamp = _load_current_paper_price(config, database)
+    report = TargetProfitSensitivityEngine(database, config).build_report(
+        current_price=current_price,
+        profile=args.profile,
+    )
+
+    print("=== Target Profit Sensitivity ===")
+    print("Dry run only. Production target_profit and trading behavior are unchanged.")
+    print(f"Profile: {report.profile}")
+    print(f"Current price: {report.current_price:.8f}")
+    print(f"Current price source: {source}")
+    print(f"Current price timestamp: {timestamp}")
+    print(f"Configured target_profit: {report.configured_target_profit * 100:.5f}%")
+    print(
+        f"Effective fee rates: maker={report.fee_rates.maker:.6f} "
+        f"taker={report.fee_rates.taker:.6f}"
+    )
+    print(f"Fee source: {report.fee_rates.source}")
+    print("")
+
+    if not report.results or report.results[0].open_cycles_count == 0:
+        print("No open paper cycles available for this profile.")
+        return
+
+    for item in report.results:
+        print(f"--- target_profit {item.target_profit * 100:.5f}% ---")
+        print(f"Open cycles count: {item.open_cycles_count}")
+        print(f"Would close now count: {item.would_close_now_count}")
+        print(f"Would close now rate: {item.would_close_now_rate * 100:.2f}%")
+        if item.avg_distance_to_target is None:
+            print("Avg distance to target: N/A")
+            print("Estimated gross profit range: N/A")
+            print("Estimated net profit range: N/A")
+        else:
+            print(f"Avg distance to target: {item.avg_distance_to_target:.8f}")
+            print(
+                "Estimated gross profit range: "
+                f"{item.gross_profit_min:.8f} .. {item.gross_profit_max:.8f}"
+            )
+            print(
+                "Estimated net profit range: "
+                f"{item.net_profit_min:.8f} .. {item.net_profit_max:.8f}"
+            )
+        print(f"Currently profitable cycles: {item.profitable_now_count}")
+
+    print("--- Recommendation ---")
+    if report.recommendation is None:
+        print("No tested target_profit would close a currently open profitable cycle now.")
+    else:
+        print(f"Recommended target_profit: {report.recommendation.target_profit * 100:.5f}%")
+        print(f"Reason: {report.recommendation.reason}")
 
 
 def command_validation_summary(args) -> None:
@@ -2020,6 +2076,17 @@ def build_parser() -> argparse.ArgumentParser:
     paper_open_cycles_parser = subparsers.add_parser("paper-open-cycles", help="Show diagnostics for open paper cycles")
     paper_open_cycles_parser.add_argument("--limit", type=int, default=100)
     paper_open_cycles_parser.set_defaults(func=command_paper_open_cycles)
+
+    target_profit_sensitivity_parser = subparsers.add_parser(
+        "target-profit-sensitivity",
+        help="Dry-run target profit sensitivity for open paper cycles",
+    )
+    target_profit_sensitivity_parser.add_argument(
+        "--profile",
+        choices=("mean_reversion_v1", "mean_reversion_v2"),
+        default="mean_reversion_v2",
+    )
+    target_profit_sensitivity_parser.set_defaults(func=command_target_profit_sensitivity)
 
     paper_stats_parser = subparsers.add_parser("paper-stats", help="РџРѕРєР°Р·Р°С‚Рё paper trading СЃС‚Р°С‚РёСЃС‚РёРєСѓ")
     paper_stats_parser.add_argument("--limit", type=int, default=100)
