@@ -53,9 +53,11 @@ def test_manage_cli_backtest_accepts_strategy_profile():
         "100",
         "--profile",
         "mean_reversion_v1",
+        "--debug-decisions",
     ])
 
     assert args.profile == "mean_reversion_v1"
+    assert args.debug_decisions is True
 
 
 def test_manage_cli_has_backtest_runs_command():
@@ -152,9 +154,11 @@ def test_manage_cli_paper_cycle_accepts_strategy_profile():
         "3",
         "--profile",
         "mean_reversion_v1",
+        "--debug-decisions",
     ])
 
     assert args.profile == "mean_reversion_v1"
+    assert args.debug_decisions is True
 
 
 def test_manage_cli_has_long_paper_run_command():

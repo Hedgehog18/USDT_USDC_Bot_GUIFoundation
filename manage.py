@@ -98,6 +98,25 @@ def _ensure_profile_allowed_for_paper(config, profile: str) -> None:
         raise ValueError("Experimental strategy profiles are disabled in REAL mode.")
 
 
+def _build_decision_debug_callback(profile: str):
+    counter = {"count": 0}
+
+    def callback(item: dict) -> None:
+        counter["count"] += 1
+        print(
+            "[decision-debug] "
+            f"index={item['index']} | "
+            f"work_position={item['work_position']:.4f} | "
+            f"profile={profile} | "
+            f"action={item['action']} | "
+            f"reason={item['reason']} | "
+            f"risk_allowed={item['risk_allowed']} | "
+            f"risk_reason={item['risk_reason']}"
+        )
+
+    return callback, counter
+
+
 def command_run(args) -> None:
     config, logger, database = build_context()
     logger.info("CLI run command started")
@@ -726,6 +745,10 @@ def command_backtest(args) -> None:
     interval = args.interval or config.backtest_interval
     limit = args.limit or config.backtest_limit
     profile = args.profile
+    debug_callback = None
+    debug_counter = {"count": 0}
+    if args.debug_decisions:
+        debug_callback, debug_counter = _build_decision_debug_callback(profile)
 
     logger.info(
         "CLI backtest command started: symbol=%s interval=%s limit=%s profile=%s",
@@ -736,7 +759,11 @@ def command_backtest(args) -> None:
     )
 
     candles = historical.get_candles(config.symbol, interval, limit)
-    backtest_engine = BacktestEngine(config, decision_engine=_profile_decision_engine(config, profile))
+    backtest_engine = BacktestEngine(
+        config,
+        decision_engine=_profile_decision_engine(config, profile),
+        decision_debug_callback=debug_callback,
+    )
     result, trades = backtest_engine.run(candles)
     equity_engine = EquityAnalyticsEngine()
     equity_points = equity_engine.build_equity_points(backtest_engine.last_equity_curve)
@@ -796,6 +823,8 @@ def command_backtest(args) -> None:
         print("Next steps:")
         for item in insights.next_steps:
             print(f"- {item}")
+    if args.debug_decisions and debug_counter["count"] == 0:
+        print("[decision-debug] No potential entry points were evaluated.")
 
 
 def command_backtest_runs(args) -> None:
@@ -1026,7 +1055,16 @@ def command_paper_cycle_sim(args) -> None:
     profile = args.profile
     _ensure_profile_allowed_for_paper(config, profile)
     bot = _apply_profile_to_bot(BotEngine(), profile)
-    result = PaperTradingEngine(config, database, bot=bot).run(args.iterations)
+    debug_callback = None
+    debug_counter = {"count": 0}
+    if args.debug_decisions:
+        debug_callback, debug_counter = _build_decision_debug_callback(profile)
+    result = PaperTradingEngine(
+        config,
+        database,
+        bot=bot,
+        decision_debug_callback=debug_callback,
+    ).run(args.iterations)
 
     logger.info(
         "Paper cycle sim completed: iterations=%s opened=%s closed=%s safety_stops=%s value=%s profile=%s",
@@ -1062,6 +1100,8 @@ def command_paper_cycle_sim(args) -> None:
     print(f"Summary: {insights.summary}")
     print(f"Summary CSV: {summary_path}")
     print(f"Insights TXT: {insights_path}")
+    if args.debug_decisions and debug_counter["count"] == 0:
+        print("[decision-debug] No potential entry points were evaluated.")
 
 
 def command_long_paper_run(args) -> None:
@@ -1440,6 +1480,7 @@ def build_parser() -> argparse.ArgumentParser:
         choices=SUPPORTED_RUNTIME_STRATEGY_PROFILES,
         default="strict_current",
     )
+    backtest_parser.add_argument("--debug-decisions", action="store_true")
     backtest_parser.set_defaults(func=command_backtest)
 
     backtest_runs_parser = subparsers.add_parser("backtest-runs", help="РџРѕРєР°Р·Р°С‚Рё РѕСЃС‚Р°РЅРЅС– backtest-Р·Р°РїСѓСЃРєРё")
@@ -1493,6 +1534,7 @@ def build_parser() -> argparse.ArgumentParser:
         choices=SUPPORTED_RUNTIME_STRATEGY_PROFILES,
         default="strict_current",
     )
+    paper_cycle_sim_parser.add_argument("--debug-decisions", action="store_true")
     paper_cycle_sim_parser.set_defaults(func=command_paper_cycle_sim)
 
     long_paper_run_parser = subparsers.add_parser("long-paper-run", help="Run long paper validation workflow")

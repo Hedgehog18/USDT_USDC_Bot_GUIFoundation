@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from collections.abc import Callable
 
 from app.bot_engine import BotEngine
 from config.config_manager import BotConfig
@@ -34,6 +35,7 @@ class PaperTradingEngine:
         config: BotConfig,
         database: DatabaseManager,
         bot: BotEngine | None = None,
+        decision_debug_callback: Callable[[dict], None] | None = None,
     ) -> None:
         self.config = config
         self.database = database
@@ -48,6 +50,7 @@ class PaperTradingEngine:
         self.exchange = PaperExchange(config, self.portfolio_manager)
         self.cycle_manager = PaperCycleManager(config, self.exchange)
         self.safety_engine = PaperSafetyEngine(config)
+        self.decision_debug_callback = decision_debug_callback
 
     def run(self, iterations: int) -> PaperTradingRunResult:
         if iterations <= 0:
@@ -63,7 +66,7 @@ class PaperTradingEngine:
         closed = 0
         safety_stops = 0
 
-        for _index in range(iterations):
+        for index in range(iterations):
             market_state = self.bot.market_analyzer.analyze_market()
             portfolio = self.portfolio_manager.get_portfolio(market_state.price)
 
@@ -89,6 +92,15 @@ class PaperTradingEngine:
                 portfolio,
                 current_price=market_state.price,
             )
+            if self.decision_debug_callback and self._is_potential_entry_state(market_state):
+                self.decision_debug_callback({
+                    "index": index,
+                    "work_position": market_state.work_position,
+                    "action": decision.action,
+                    "reason": decision.reason,
+                    "risk_allowed": risk.allowed,
+                    "risk_reason": risk.reason,
+                })
 
             if not risk.allowed or decision.action not in {"BUY_USDC", "SELL_USDC"}:
                 continue
@@ -111,4 +123,10 @@ class PaperTradingEngine:
             safety_stops=safety_stops,
             final_portfolio=self.portfolio_manager.get_portfolio(),
             data_source=getattr(self.bot.market_analyzer, "last_data_source", "UNKNOWN"),
+        )
+
+    def _is_potential_entry_state(self, market_state) -> bool:
+        return (
+            market_state.work_position <= self.config.buy_zone_max
+            or market_state.work_position >= self.config.sell_zone_min
         )

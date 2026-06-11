@@ -1,3 +1,5 @@
+from collections.abc import Callable
+
 from config.config_manager import BotConfig
 from backtest.backtest_metrics_engine import BacktestMetricsEngine
 from backtest.models import BacktestResult, BacktestTrade
@@ -22,7 +24,12 @@ class BacktestEngine:
     - потрібен для первинної перевірки логіки сигналів.
     """
 
-    def __init__(self, config: BotConfig, decision_engine=None) -> None:
+    def __init__(
+        self,
+        config: BotConfig,
+        decision_engine=None,
+        decision_debug_callback: Callable[[dict], None] | None = None,
+    ) -> None:
         self.config = config
         self.center_engine = CenterEngine()
         self.activity_engine = ActivityEngine()
@@ -31,6 +38,7 @@ class BacktestEngine:
         self.fee_engine = FeeEngine(config)
         self.metrics_engine = BacktestMetricsEngine()
         self.last_equity_curve: list[float] = []
+        self.decision_debug_callback = decision_debug_callback
 
     def run(self, candles: list[HistoricalCandle]) -> tuple[BacktestResult, list[BacktestTrade]]:
         if len(candles) < 30:
@@ -70,6 +78,15 @@ class BacktestEngine:
                 budget,
                 current_price=current_price,
             )
+            if self.decision_debug_callback and self._is_potential_entry_state(state):
+                self.decision_debug_callback({
+                    "index": index,
+                    "work_position": state.work_position,
+                    "action": decision.action,
+                    "reason": decision.reason,
+                    "risk_allowed": risk.allowed,
+                    "risk_reason": risk.reason,
+                })
 
             if not risk.allowed:
                 equity_curve.append(usdt + usdc * current_price)
@@ -133,6 +150,9 @@ class BacktestEngine:
             equity_curve=equity_curve,
         )
         return result, trades
+
+    def _is_potential_entry_state(self, state: MarketState) -> bool:
+        return state.work_position <= self.config.buy_zone_max or state.work_position >= self.config.sell_zone_min
 
     def _build_state(self, current_price: float, prices: list[float]) -> MarketState:
         if not prices:
