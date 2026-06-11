@@ -153,12 +153,15 @@ def test_manage_cli_has_paper_cycle_commands():
     parser = build_parser()
     sim_args = parser.parse_args(["paper-cycle-sim", "--iterations", "3"])
     cycles_args = parser.parse_args(["paper-cycles", "--limit", "5"])
+    open_cycles_args = parser.parse_args(["paper-open-cycles", "--limit", "7"])
 
     assert sim_args.command == "paper-cycle-sim"
     assert sim_args.iterations == 3
     assert sim_args.profile == "strict_current"
     assert cycles_args.command == "paper-cycles"
     assert cycles_args.limit == 5
+    assert open_cycles_args.command == "paper-open-cycles"
+    assert open_cycles_args.limit == 7
 
 
 def test_manage_cli_paper_cycle_accepts_strategy_profile():

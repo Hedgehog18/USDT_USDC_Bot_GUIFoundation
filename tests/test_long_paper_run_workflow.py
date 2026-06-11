@@ -12,9 +12,10 @@ class DummyConfig:
 
 
 class FakePaperTradingEngine:
-    def __init__(self, config, database):
+    def __init__(self, config, database, strategy_profile="strict_current"):
         self.config = config
         self.database = database
+        self.strategy_profile = strategy_profile
 
     def run(self, iterations: int) -> PaperTradingRunResult:
         return PaperTradingRunResult(
@@ -44,3 +45,4 @@ def test_long_paper_run_workflow_saves_history(monkeypatch, tmp_path):
     assert rows[0][4] == 100.0
     assert rows[0][8] == result.validation_summary.overall_status
     assert rows[0][9] == result.insights.rating
+    assert result.strategy_profile == "strict_current"

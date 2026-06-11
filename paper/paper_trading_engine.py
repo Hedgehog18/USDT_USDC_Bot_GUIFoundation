@@ -39,6 +39,7 @@ class PaperTradingEngine:
         risk_debug_callback: Callable[[dict], None] | None = None,
         entry_zone_debug_callback: Callable[[dict], None] | None = None,
         force_refresh_market_data: bool = False,
+        strategy_profile: str = "strict_current",
     ) -> None:
         self.config = config
         self.database = database
@@ -57,6 +58,7 @@ class PaperTradingEngine:
         self.risk_debug_callback = risk_debug_callback
         self.entry_zone_debug_callback = entry_zone_debug_callback
         self.force_refresh_market_data = force_refresh_market_data
+        self.strategy_profile = strategy_profile
 
     def run(self, iterations: int) -> PaperTradingRunResult:
         if iterations <= 0:
@@ -102,7 +104,7 @@ class PaperTradingEngine:
                     })
                 closed_cycle = self.cycle_manager.try_close_cycle(market_state.price)
                 if closed_cycle:
-                    self.database.save_paper_cycle(closed_cycle)
+                    self.database.save_paper_cycle(closed_cycle, strategy_profile=self.strategy_profile)
                     closed += 1
                 continue
 
@@ -154,7 +156,7 @@ class PaperTradingEngine:
                 price=market_state.price,
             )
             if opened_cycle:
-                self.database.save_paper_cycle(opened_cycle)
+                self.database.save_paper_cycle(opened_cycle, strategy_profile=self.strategy_profile)
                 opened += 1
 
         if self.state_manager.current_state == PaperState.RUNNING:

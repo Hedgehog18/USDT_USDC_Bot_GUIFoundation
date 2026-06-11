@@ -274,6 +274,7 @@ class DatabaseManager:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     timestamp TEXT NOT NULL,
                     cycle_id INTEGER NOT NULL,
+                    strategy_profile TEXT DEFAULT 'UNKNOWN',
                     direction TEXT NOT NULL,
                     status TEXT NOT NULL,
                     open_price REAL NOT NULL,
@@ -1114,21 +1115,22 @@ class DatabaseManager:
             ).fetchall()
 
 
-    def save_paper_cycle(self, cycle) -> int:
+    def save_paper_cycle(self, cycle, strategy_profile: str = "UNKNOWN") -> int:
         from datetime import datetime
 
         with self.connect() as conn:
             cursor = conn.execute(
                 """
                 INSERT INTO paper_cycles (
-                    timestamp, cycle_id, direction, status, open_price, close_price,
+                    timestamp, cycle_id, strategy_profile, direction, status, open_price, close_price,
                     quantity, open_fee, close_fee, gross_profit, net_profit,
                     opened_at, closed_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     datetime.utcnow().isoformat(),
                     cycle.id,
+                    strategy_profile,
                     cycle.direction.value,
                     cycle.status.value,
                     cycle.open_price,
@@ -1294,6 +1296,21 @@ class DatabaseManager:
                        rating, summary
                 FROM paper_runs
                 ORDER BY timestamp DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+
+    def load_open_paper_cycles(self, limit: int = 100) -> list[tuple]:
+        with self.connect() as conn:
+            return conn.execute(
+                """
+                SELECT timestamp, cycle_id, strategy_profile, direction, status,
+                       open_price, close_price, quantity, open_fee, close_fee,
+                       gross_profit, net_profit, opened_at, closed_at
+                FROM paper_cycles
+                WHERE status = 'OPEN'
+                ORDER BY opened_at ASC
                 LIMIT ?
                 """,
                 (limit,),

@@ -54,6 +54,7 @@ from analytics.filter_pass_diagnostics_engine import FilterPassDiagnosticsEngine
 from analytics.micro_trend_sensitivity_engine import MicroTrendSensitivityEngine
 from analytics.order_book_diagnostics_engine import OrderBookDiagnosticsEngine
 from analytics.order_book_rule_sim_engine import OrderBookRuleSimulationEngine
+from analytics.paper_open_cycle_diagnostics_engine import PaperOpenCycleDiagnosticsEngine
 from analytics.risk_diagnostics_engine import RiskDiagnosticsEngine
 from analytics.risk_profitability_diagnostics_engine import RiskProfitabilityDiagnosticsEngine
 from analytics.statistics_engine import StatisticsEngine
@@ -252,6 +253,44 @@ def _print_risk_profitability_detail(detail, prefix: str = "") -> None:
     print(f"  net_profit: {detail.net_profit:.8f}")
     print(f"  min_notional: {detail.min_notional:.8f}")
     print(f"  reason if blocked: {detail.reason}")
+
+
+def _load_current_paper_price(config, database) -> tuple[float, str]:
+    try:
+        bid_ask = BinanceMarketDataProvider(base_url=config.binance_base_url).get_bid_ask(config.symbol)
+        return bid_ask.mid_price, "BINANCE"
+    except Exception:
+        with database.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT price
+                FROM market_snapshots
+                ORDER BY timestamp DESC
+                LIMIT 1
+                """
+            ).fetchone()
+        if row:
+            return float(row[0]), "LATEST_MARKET_SNAPSHOT"
+        return 1.0, "DEFAULT_1_0"
+
+
+def _print_open_cycles_summary(report) -> None:
+    print("--- Open Paper Cycles ---")
+    print(f"Current price: {report.current_price:.8f}")
+    print(f"Current price source: {report.current_price_source}")
+    print(f"Open cycles count: {report.open_cycles_count}")
+    nearest = report.nearest_to_target
+    if nearest is None:
+        print("Nearest cycle to target: N/A")
+        return
+    print(
+        "Nearest cycle to target: "
+        f"cycle={nearest.cycle_id} profile={nearest.profile} "
+        f"direction={nearest.direction} distance={nearest.distance_to_target:.8f} "
+        f"({nearest.distance_to_target_percent:.5f}%)"
+    )
+    print(f"Close condition met: {'yes' if nearest.close_condition_met else 'no'}")
+    print(f"Reason: {nearest.reason_not_closed}")
 
 
 def command_run(args) -> None:
@@ -1393,6 +1432,7 @@ def command_paper_cycle_sim(args) -> None:
         risk_debug_callback=risk_debug_callback,
         entry_zone_debug_callback=entry_zone_debug_callback,
         force_refresh_market_data=args.force_refresh_market_data,
+        strategy_profile=profile,
     ).run(args.iterations)
 
     logger.info(
@@ -1500,6 +1540,13 @@ def command_long_paper_run(args) -> None:
     _print_distribution(pressure.buy_zone_distribution)
     print("SELL-zone pressure distribution:")
     _print_distribution(pressure.sell_zone_distribution)
+    current_price, current_price_source = _load_current_paper_price(config, database)
+    open_cycles_report = PaperOpenCycleDiagnosticsEngine(database, config).build_report(
+        current_price=current_price,
+        current_price_source=current_price_source,
+        limit=100,
+    )
+    _print_open_cycles_summary(open_cycles_report)
     print("--- Reports ---")
     print(f"Cycles CSV: {result.report_paths.cycles_csv}")
     print(f"Safety CSV: {result.report_paths.safety_csv}")
@@ -1570,6 +1617,44 @@ def command_paper_cycles(args) -> None:
             f"open={open_price:.8f} close={close_price:.8f} "
             f"qty={quantity:.6f} net={net:.8f}"
         )
+
+
+def command_paper_open_cycles(args) -> None:
+    config, _logger, database = build_context()
+    current_price, source = _load_current_paper_price(config, database)
+    report = PaperOpenCycleDiagnosticsEngine(database, config).build_report(
+        current_price=current_price,
+        current_price_source=source,
+        limit=args.limit,
+    )
+
+    print("=== Paper Open Cycles ===")
+    print(f"Current price: {report.current_price:.8f}")
+    print(f"Current price source: {report.current_price_source}")
+    print(f"Open cycles count: {report.open_cycles_count}")
+    if not report.open_cycles:
+        print("No open paper cycles.")
+        return
+
+    for item in report.open_cycles:
+        close_status = "yes" if item.close_condition_met else "no"
+        print(
+            f"cycle={item.cycle_id} | profile={item.profile} | "
+            f"direction={item.direction} | opened_at={item.opened_at} | "
+            f"age_seconds={item.age_seconds:.0f}"
+        )
+        print(
+            f"  open_price={item.open_price:.8f} | "
+            f"target_price={item.target_price:.8f} | "
+            f"current_price={item.current_price:.8f}"
+        )
+        print(
+            f"  distance_to_target={item.distance_to_target:.8f} | "
+            f"distance_to_target_percent={item.distance_to_target_percent:.5f}% | "
+            f"unrealized_pnl={item.unrealized_pnl:.8f}"
+        )
+        print(f"  close_condition_met: {close_status}")
+        print(f"  reason_not_closed: {item.reason_not_closed}")
 
 
 def command_paper_stats(args) -> None:
@@ -1926,6 +2011,10 @@ def build_parser() -> argparse.ArgumentParser:
     paper_cycles_parser = subparsers.add_parser("paper-cycles", help="РџРѕРєР°Р·Р°С‚Рё РѕСЃС‚Р°РЅРЅС– paper cycles")
     paper_cycles_parser.add_argument("--limit", type=int, default=20)
     paper_cycles_parser.set_defaults(func=command_paper_cycles)
+
+    paper_open_cycles_parser = subparsers.add_parser("paper-open-cycles", help="Show diagnostics for open paper cycles")
+    paper_open_cycles_parser.add_argument("--limit", type=int, default=100)
+    paper_open_cycles_parser.set_defaults(func=command_paper_open_cycles)
 
     paper_stats_parser = subparsers.add_parser("paper-stats", help="РџРѕРєР°Р·Р°С‚Рё paper trading СЃС‚Р°С‚РёСЃС‚РёРєСѓ")
     paper_stats_parser.add_argument("--limit", type=int, default=100)

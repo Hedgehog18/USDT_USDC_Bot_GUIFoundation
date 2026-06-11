@@ -41,6 +41,9 @@ class DatabaseMigrationManager:
             ColumnDefinition("market_health_status", "TEXT DEFAULT 'UNKNOWN'"),
             ColumnDefinition("market_health_reason", "TEXT DEFAULT ''"),
         ],
+        "paper_cycles": [
+            ColumnDefinition("strategy_profile", "TEXT DEFAULT 'UNKNOWN'"),
+        ],
     }
 
     def __init__(self, db_path: str | Path) -> None:

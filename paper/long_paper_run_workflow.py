@@ -61,9 +61,18 @@ class LongPaperRunWorkflow:
             bot.decision_engine = StrategyProfileDecisionEngine(bot.config, strategy_profile)
 
         if bot is None:
-            engine = PaperTradingEngine(self.config, self.database)
+            engine = PaperTradingEngine(
+                self.config,
+                self.database,
+                strategy_profile=strategy_profile,
+            )
         else:
-            engine = PaperTradingEngine(self.config, self.database, bot=bot)
+            engine = PaperTradingEngine(
+                self.config,
+                self.database,
+                bot=bot,
+                strategy_profile=strategy_profile,
+            )
         if interval_seconds == 0:
             run_result = engine.run(iterations)
         else:
