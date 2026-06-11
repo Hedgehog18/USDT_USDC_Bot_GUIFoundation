@@ -40,6 +40,22 @@ def test_manage_cli_has_backtest_command():
     assert args.command == "backtest"
     assert args.interval == "1m"
     assert args.limit == 100
+    assert args.profile == "strict_current"
+
+
+def test_manage_cli_backtest_accepts_strategy_profile():
+    parser = build_parser()
+    args = parser.parse_args([
+        "backtest",
+        "--interval",
+        "1m",
+        "--limit",
+        "100",
+        "--profile",
+        "mean_reversion_v1",
+    ])
+
+    assert args.profile == "mean_reversion_v1"
 
 
 def test_manage_cli_has_backtest_runs_command():
@@ -123,8 +139,22 @@ def test_manage_cli_has_paper_cycle_commands():
 
     assert sim_args.command == "paper-cycle-sim"
     assert sim_args.iterations == 3
+    assert sim_args.profile == "strict_current"
     assert cycles_args.command == "paper-cycles"
     assert cycles_args.limit == 5
+
+
+def test_manage_cli_paper_cycle_accepts_strategy_profile():
+    parser = build_parser()
+    args = parser.parse_args([
+        "paper-cycle-sim",
+        "--iterations",
+        "3",
+        "--profile",
+        "mean_reversion_v1",
+    ])
+
+    assert args.profile == "mean_reversion_v1"
 
 
 def test_manage_cli_has_long_paper_run_command():
@@ -134,6 +164,22 @@ def test_manage_cli_has_long_paper_run_command():
     assert args.command == "long-paper-run"
     assert args.iterations == 500
     assert args.interval == 5
+    assert args.profile == "strict_current"
+
+
+def test_manage_cli_long_paper_run_accepts_strategy_profile():
+    parser = build_parser()
+    args = parser.parse_args([
+        "long-paper-run",
+        "--iterations",
+        "500",
+        "--interval",
+        "5",
+        "--profile",
+        "mean_reversion_v1",
+    ])
+
+    assert args.profile == "mean_reversion_v1"
 
 
 def test_manage_cli_has_long_paper_runs_command():

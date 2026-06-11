@@ -50,7 +50,12 @@ class BacktestReportExporter:
 
         return path
 
-    def export_summary_csv(self, run_id: int, result: BacktestResult) -> Path:
+    def export_summary_csv(
+        self,
+        run_id: int,
+        result: BacktestResult,
+        strategy_profile: str = "strict_current",
+    ) -> Path:
         path = self.reports_dir / f"backtest_run_{run_id}_summary.csv"
 
         with path.open("w", newline="", encoding="utf-8") as file:
@@ -75,6 +80,7 @@ class BacktestReportExporter:
                 "sortino_ratio",
                 "profit_factor",
                 "expectancy",
+                "strategy_profile",
             ])
             writer.writerow([
                 run_id,
@@ -96,6 +102,7 @@ class BacktestReportExporter:
                 result.sortino_ratio,
                 result.profit_factor,
                 result.expectancy,
+                strategy_profile,
             ])
 
         return path

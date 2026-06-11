@@ -35,10 +35,12 @@ def test_backtest_report_exporter_creates_files(tmp_path: Path):
     ]
 
     exporter = BacktestReportExporter(str(tmp_path))
-    summary = exporter.export_summary_csv(1, result)
+    summary = exporter.export_summary_csv(1, result, strategy_profile="mean_reversion_v1")
     trades_csv = exporter.export_trades_csv(1, result, trades)
 
     assert summary.exists()
     assert trades_csv.exists()
     assert "backtest_run_1_summary.csv" in summary.name
     assert "backtest_run_1_trades.csv" in trades_csv.name
+    assert "strategy_profile" in summary.read_text(encoding="utf-8")
+    assert "mean_reversion_v1" in summary.read_text(encoding="utf-8")

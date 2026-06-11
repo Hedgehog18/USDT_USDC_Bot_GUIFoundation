@@ -4,6 +4,7 @@ from time import sleep
 
 from analytics.validation_summary_engine import ValidationSummary
 from analytics.validation_summary_engine import ValidationSummaryEngine
+from app.bot_engine import BotEngine
 from config.config_manager import BotConfig
 from paper.paper_analytics_engine import PaperAnalytics
 from paper.paper_analytics_engine import PaperAnalyticsEngine
@@ -14,6 +15,7 @@ from paper.paper_report_exporter import PaperReportExporter
 from paper.paper_trading_engine import PaperTradingEngine
 from paper.paper_trading_engine import PaperTradingRunResult
 from storage.database_manager import DatabaseManager
+from strategy.profile_decision_engine import StrategyProfileDecisionEngine
 
 
 @dataclass(frozen=True)
@@ -34,6 +36,7 @@ class LongPaperRunResult:
     insights: PaperInsights
     validation_summary: ValidationSummary
     report_paths: LongPaperRunReportPaths
+    strategy_profile: str = "strict_current"
 
 
 class LongPaperRunWorkflow:
@@ -41,13 +44,26 @@ class LongPaperRunWorkflow:
         self.config = config
         self.database = database
 
-    def run(self, iterations: int, interval_seconds: int = 0) -> LongPaperRunResult:
+    def run(
+        self,
+        iterations: int,
+        interval_seconds: int = 0,
+        strategy_profile: str = "strict_current",
+    ) -> LongPaperRunResult:
         if iterations <= 0:
             raise ValueError("iterations must be greater than 0.")
         if interval_seconds < 0:
             raise ValueError("interval_seconds must be 0 or greater.")
 
-        engine = PaperTradingEngine(self.config, self.database)
+        bot = None
+        if strategy_profile != "strict_current":
+            bot = BotEngine()
+            bot.decision_engine = StrategyProfileDecisionEngine(bot.config, strategy_profile)
+
+        if bot is None:
+            engine = PaperTradingEngine(self.config, self.database)
+        else:
+            engine = PaperTradingEngine(self.config, self.database, bot=bot)
         if interval_seconds == 0:
             run_result = engine.run(iterations)
         else:
@@ -64,7 +80,7 @@ class LongPaperRunWorkflow:
         report_paths = LongPaperRunReportPaths(
             cycles_csv=exporter.export_cycles_csv(cycle_rows),
             safety_csv=exporter.export_safety_csv(safety_rows),
-            summary_csv=exporter.export_summary_csv(stats),
+            summary_csv=exporter.export_summary_csv(stats, strategy_profile=strategy_profile),
             insights_txt=insights_path,
         )
         validation_summary = ValidationSummaryEngine(self.database, self.config).build_summary()
@@ -89,6 +105,7 @@ class LongPaperRunWorkflow:
             insights=insights,
             validation_summary=validation_summary,
             report_paths=report_paths,
+            strategy_profile=strategy_profile,
         )
 
     @staticmethod

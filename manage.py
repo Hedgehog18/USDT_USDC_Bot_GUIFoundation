@@ -36,6 +36,10 @@ from notifications.notification_engine import NotificationEngine
 from portfolio.portfolio_analytics import PortfolioAnalytics
 from runner.bot_runner import BotRunner
 from storage.database_manager import DatabaseManager
+from strategy.profile_decision_engine import (
+    SUPPORTED_RUNTIME_STRATEGY_PROFILES,
+    StrategyProfileDecisionEngine,
+)
 from analytics.center_confidence_diagnostics_engine import CenterConfidenceDiagnosticsEngine
 from analytics.center_confidence_rule_sim_engine import CenterConfidenceRuleSimulationEngine
 from analytics.combined_entry_rule_sim_engine import CombinedEntryRuleSimulationEngine
@@ -75,6 +79,23 @@ def build_context():
     logger = AppLogger(config).configure()
     database = DatabaseManager(config.database_path)
     return config, logger, database
+
+
+def _profile_decision_engine(config, profile: str):
+    if profile == "strict_current":
+        return None
+    return StrategyProfileDecisionEngine(config, profile)
+
+
+def _apply_profile_to_bot(bot: BotEngine, profile: str) -> BotEngine:
+    if profile != "strict_current":
+        bot.decision_engine = StrategyProfileDecisionEngine(bot.config, profile)
+    return bot
+
+
+def _ensure_profile_allowed_for_paper(config, profile: str) -> None:
+    if profile != "strict_current" and config.mode.upper() == "REAL":
+        raise ValueError("Experimental strategy profiles are disabled in REAL mode.")
 
 
 def command_run(args) -> None:
@@ -704,11 +725,18 @@ def command_backtest(args) -> None:
 
     interval = args.interval or config.backtest_interval
     limit = args.limit or config.backtest_limit
+    profile = args.profile
 
-    logger.info("CLI backtest command started: symbol=%s interval=%s limit=%s", config.symbol, interval, limit)
+    logger.info(
+        "CLI backtest command started: symbol=%s interval=%s limit=%s profile=%s",
+        config.symbol,
+        interval,
+        limit,
+        profile,
+    )
 
     candles = historical.get_candles(config.symbol, interval, limit)
-    backtest_engine = BacktestEngine(config)
+    backtest_engine = BacktestEngine(config, decision_engine=_profile_decision_engine(config, profile))
     result, trades = backtest_engine.run(candles)
     equity_engine = EquityAnalyticsEngine()
     equity_points = equity_engine.build_equity_points(backtest_engine.last_equity_curve)
@@ -718,7 +746,7 @@ def command_backtest(args) -> None:
     database.save_backtest_equity_points(run_id, equity_points)
     database.save_backtest_period_analytics(run_id, periods)
     exporter = BacktestReportExporter()
-    summary_path = exporter.export_summary_csv(run_id, result)
+    summary_path = exporter.export_summary_csv(run_id, result, strategy_profile=profile)
     trades_path = exporter.export_trades_csv(run_id, result, trades)
     equity_path = exporter.export_equity_csv(run_id, equity_points)
     periods_path = exporter.export_period_analytics_csv(run_id, periods)
@@ -726,6 +754,7 @@ def command_backtest(args) -> None:
 
     print("=== Backtest ===")
     print(f"Run ID: {run_id}")
+    print(f"Strategy profile: {profile}")
     print(f"Symbol: {result.symbol}")
     print(f"Interval: {result.interval}")
     print(f"Candles: {result.candles}")
@@ -994,18 +1023,23 @@ def command_paper_orders(args) -> None:
 
 def command_paper_cycle_sim(args) -> None:
     config, logger, database = build_context()
-    result = PaperTradingEngine(config, database).run(args.iterations)
+    profile = args.profile
+    _ensure_profile_allowed_for_paper(config, profile)
+    bot = _apply_profile_to_bot(BotEngine(), profile)
+    result = PaperTradingEngine(config, database, bot=bot).run(args.iterations)
 
     logger.info(
-        "Paper cycle sim completed: iterations=%s opened=%s closed=%s safety_stops=%s value=%s",
+        "Paper cycle sim completed: iterations=%s opened=%s closed=%s safety_stops=%s value=%s profile=%s",
         result.iterations,
         result.opened_cycles,
         result.closed_cycles,
         result.safety_stops,
         result.final_portfolio.total_value,
+        profile,
     )
 
     print("=== Paper Cycle Sim ===")
+    print(f"Strategy profile: {profile}")
     print(f"Iterations: {result.iterations}")
     print(f"Opened cycles: {result.opened_cycles}")
     print(f"Closed cycles: {result.closed_cycles}")
@@ -1020,28 +1054,35 @@ def command_paper_cycle_sim(args) -> None:
     insights = PaperInsightsEngine().build(stats, safety_rows)
     paper_run_id = database.save_paper_run(result, insights)
     insights_path = PaperInsightsExporter().export_txt(paper_run_id, insights)
+    summary_path = PaperReportExporter().export_summary_csv(stats, strategy_profile=profile)
 
     print("--- Paper Insights ---")
     print(f"Run ID: {paper_run_id}")
     print(f"Rating: {insights.rating}")
     print(f"Summary: {insights.summary}")
+    print(f"Summary CSV: {summary_path}")
     print(f"Insights TXT: {insights_path}")
 
 
 def command_long_paper_run(args) -> None:
     config, logger, database = build_context()
+    profile = args.profile
+    _ensure_profile_allowed_for_paper(config, profile)
     logger.info(
-        "Long paper run started: iterations=%s interval=%s",
+        "Long paper run started: iterations=%s interval=%s profile=%s",
         args.iterations,
         args.interval,
+        profile,
     )
     result = LongPaperRunWorkflow(config, database).run(
         iterations=args.iterations,
         interval_seconds=args.interval,
+        strategy_profile=profile,
     )
 
     print("=== Long Paper Run ===")
     print("Long paper run completed. Real trading disabled.")
+    print(f"Strategy profile: {result.strategy_profile}")
     print(f"Long Run ID: {result.long_run_id}")
     print(f"Paper Run ID: {result.run_id}")
     print(f"Iterations: {result.run_result.iterations}")
@@ -1394,6 +1435,11 @@ def build_parser() -> argparse.ArgumentParser:
     backtest_parser = subparsers.add_parser("backtest", help="Р—Р°РїСѓСЃС‚РёС‚Рё С–СЃС‚РѕСЂРёС‡РЅРёР№ backtest")
     backtest_parser.add_argument("--interval", type=str, default=None)
     backtest_parser.add_argument("--limit", type=int, default=None)
+    backtest_parser.add_argument(
+        "--profile",
+        choices=SUPPORTED_RUNTIME_STRATEGY_PROFILES,
+        default="strict_current",
+    )
     backtest_parser.set_defaults(func=command_backtest)
 
     backtest_runs_parser = subparsers.add_parser("backtest-runs", help="РџРѕРєР°Р·Р°С‚Рё РѕСЃС‚Р°РЅРЅС– backtest-Р·Р°РїСѓСЃРєРё")
@@ -1442,11 +1488,21 @@ def build_parser() -> argparse.ArgumentParser:
 
     paper_cycle_sim_parser = subparsers.add_parser("paper-cycle-sim", help="Р—Р°РїСѓСЃС‚РёС‚Рё paper cycle СЃРёРјСѓР»СЏС†С–СЋ")
     paper_cycle_sim_parser.add_argument("--iterations", type=int, default=10)
+    paper_cycle_sim_parser.add_argument(
+        "--profile",
+        choices=SUPPORTED_RUNTIME_STRATEGY_PROFILES,
+        default="strict_current",
+    )
     paper_cycle_sim_parser.set_defaults(func=command_paper_cycle_sim)
 
     long_paper_run_parser = subparsers.add_parser("long-paper-run", help="Run long paper validation workflow")
     long_paper_run_parser.add_argument("--iterations", type=int, default=500)
     long_paper_run_parser.add_argument("--interval", type=int, default=5)
+    long_paper_run_parser.add_argument(
+        "--profile",
+        choices=SUPPORTED_RUNTIME_STRATEGY_PROFILES,
+        default="strict_current",
+    )
     long_paper_run_parser.set_defaults(func=command_long_paper_run)
 
     long_paper_runs_parser = subparsers.add_parser("long-paper-runs", help="Show recent long paper runs")

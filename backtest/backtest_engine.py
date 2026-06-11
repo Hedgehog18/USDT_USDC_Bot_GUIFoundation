@@ -22,11 +22,11 @@ class BacktestEngine:
     - потрібен для первинної перевірки логіки сигналів.
     """
 
-    def __init__(self, config: BotConfig) -> None:
+    def __init__(self, config: BotConfig, decision_engine=None) -> None:
         self.config = config
         self.center_engine = CenterEngine()
         self.activity_engine = ActivityEngine()
-        self.decision_engine = DecisionEngine(config)
+        self.decision_engine = decision_engine or DecisionEngine(config)
         self.risk_manager = RiskManager(config)
         self.fee_engine = FeeEngine(config)
         self.metrics_engine = BacktestMetricsEngine()

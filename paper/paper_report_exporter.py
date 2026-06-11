@@ -47,7 +47,11 @@ class PaperReportExporter:
 
         return path
 
-    def export_summary_csv(self, stats: PaperAnalytics) -> Path:
+    def export_summary_csv(
+        self,
+        stats: PaperAnalytics,
+        strategy_profile: str = "strict_current",
+    ) -> Path:
         path = self.reports_dir / "paper_summary_report.csv"
 
         with path.open("w", newline="", encoding="utf-8") as file:
@@ -62,6 +66,7 @@ class PaperReportExporter:
                 "net_profit",
                 "average_net_profit",
                 "profit_factor",
+                "strategy_profile",
             ])
             writer.writerow([
                 stats.total_cycles,
@@ -73,6 +78,7 @@ class PaperReportExporter:
                 stats.net_profit,
                 stats.average_net_profit,
                 stats.profit_factor,
+                strategy_profile,
             ])
 
         return path

@@ -24,8 +24,11 @@ def test_paper_report_exporter(tmp_path: Path):
 
     cycles_path = exporter.export_cycles_csv(rows)
     safety_path = exporter.export_safety_csv(safety)
-    summary_path = exporter.export_summary_csv(stats)
+    summary_path = exporter.export_summary_csv(stats, strategy_profile="mean_reversion_v1")
 
     assert cycles_path.exists()
     assert safety_path.exists()
     assert summary_path.exists()
+    summary_text = summary_path.read_text(encoding="utf-8")
+    assert "strategy_profile" in summary_text
+    assert "mean_reversion_v1" in summary_text
