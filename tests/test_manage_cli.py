@@ -329,6 +329,18 @@ def test_manage_cli_has_entry_confirmation_diagnostics_command():
     assert args.profile == "mean_reversion_v2"
 
 
+def test_manage_cli_has_partial_target_diagnostics_command():
+    parser = build_parser()
+    args = parser.parse_args([
+        "partial-target-diagnostics",
+        "--profile",
+        "mean_reversion_v2",
+    ])
+
+    assert args.command == "partial-target-diagnostics"
+    assert args.profile == "mean_reversion_v2"
+
+
 def test_manage_cli_has_long_paper_runs_command():
     parser = build_parser()
     args = parser.parse_args(["long-paper-runs", "--limit", "20"])

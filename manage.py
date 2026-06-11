@@ -58,6 +58,7 @@ from analytics.micro_trend_sensitivity_engine import MicroTrendSensitivityEngine
 from analytics.order_book_diagnostics_engine import OrderBookDiagnosticsEngine
 from analytics.order_book_rule_sim_engine import OrderBookRuleSimulationEngine
 from analytics.paper_open_cycle_diagnostics_engine import PaperOpenCycleDiagnosticsEngine
+from analytics.partial_target_diagnostics_engine import PartialTargetDiagnosticsEngine
 from analytics.post_entry_path_diagnostics_engine import PostEntryPathDiagnosticsEngine
 from analytics.profile_comparison_diagnostics_engine import ProfileComparisonDiagnosticsEngine
 from analytics.risk_diagnostics_engine import RiskDiagnosticsEngine
@@ -1371,6 +1372,58 @@ def command_entry_confirmation_diagnostics(args) -> None:
         print("")
 
 
+def command_partial_target_diagnostics(args) -> None:
+    config, _logger, database = build_context()
+    report = PartialTargetDiagnosticsEngine(database, config).build_report(profile=args.profile)
+
+    print("=== Partial Target Diagnostics ===")
+    print("Dry run only. Production trading logic and target_profit are unchanged.")
+    print(f"Profile: {report.profile}")
+    print(f"Base target_profit: {report.base_target_profit * 100:.5f}%")
+    print(f"Evaluation horizon: {report.horizon} snapshots")
+    print(
+        f"Effective fee rates: maker={report.fee_rates.maker:.6f} "
+        f"taker={report.fee_rates.taker:.6f}"
+    )
+    print(f"Fee source: {report.fee_rates.source}")
+    print("")
+
+    if not report.results:
+        print("No partial target data available.")
+        return
+
+    for item in report.results:
+        print(f"--- Target multiplier {item.multiplier * 100:.0f}% ---")
+        print(f"Candidate count: {item.candidate_count}")
+        print(f"Hit count: {item.hit_count}")
+        print(f"Hit rate: {item.hit_rate * 100:.2f}%")
+        if item.estimated_gross_profit_min is None:
+            print("Estimated gross profit: N/A")
+            print("Estimated net profit: N/A")
+        else:
+            print(
+                f"Estimated gross profit: "
+                f"{item.estimated_gross_profit_min:.8f} .. {item.estimated_gross_profit_max:.8f}"
+            )
+            print(
+                f"Estimated net profit: "
+                f"{item.estimated_net_profit_min:.8f} .. {item.estimated_net_profit_max:.8f}"
+            )
+        if item.average_time_to_target is None:
+            print("Average time to target: N/A")
+            print("Max adverse movement before hit: N/A")
+        else:
+            print(f"Average time to target: {item.average_time_to_target:.2f} snapshots")
+            print(f"Max adverse movement before hit: {item.max_adverse_movement_before_hit:.8f}")
+        print(f"Missed / failed count: {item.missed_failed_count}")
+        print(f"Recommendation score: {item.recommendation_score:.2f}")
+        print("")
+
+    print("--- Interpretation ---")
+    print(f"50% target significantly improves hit-rate: {report.fifty_percent_target_better}")
+    print(f"75% target still acceptable: {report.seventy_five_percent_target_acceptable}")
+
+
 def command_validation_summary(args) -> None:
     _config, _logger, database = build_context()
     summary = ValidationSummaryEngine(database).build_summary()
@@ -2438,6 +2491,17 @@ def build_parser() -> argparse.ArgumentParser:
         default="mean_reversion_v2",
     )
     entry_confirmation_parser.set_defaults(func=command_entry_confirmation_diagnostics)
+
+    partial_target_parser = subparsers.add_parser(
+        "partial-target-diagnostics",
+        help="Dry-run lower take-profit and partial target diagnostics",
+    )
+    partial_target_parser.add_argument(
+        "--profile",
+        choices=("mean_reversion_v1", "mean_reversion_v2"),
+        default="mean_reversion_v2",
+    )
+    partial_target_parser.set_defaults(func=command_partial_target_diagnostics)
 
     paper_stats_parser = subparsers.add_parser("paper-stats", help="РџРѕРєР°Р·Р°С‚Рё paper trading СЃС‚Р°С‚РёСЃС‚РёРєСѓ")
     paper_stats_parser.add_argument("--limit", type=int, default=100)
