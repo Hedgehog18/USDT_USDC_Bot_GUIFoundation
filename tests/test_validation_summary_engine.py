@@ -173,3 +173,95 @@ def test_validation_summary_warns_when_entry_zones_have_no_matching_pressure(tes
     summary = ValidationSummaryEngine(database, test_config).build_summary()
 
     assert "Entry zones detected, but order book never confirmed them." in summary.warnings
+
+
+def test_validation_summary_profile_uses_profile_paper_cycles(test_config, tmp_path):
+    database = DatabaseManager(str(tmp_path / "bot.sqlite"))
+    with database.connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO trade_signals (
+                timestamp, action, reason, confidence,
+                cycle_prediction_score, target_profit,
+                risk_allowed, risk_reason, risk_level, cycle_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("2026-01-01T00:00:00", "BUY_USDC", "test", "HIGH", 1.0, 0.1, 1, "ok", "LOW", None),
+        )
+        conn.execute(
+            """
+            INSERT INTO paper_cycles (
+                timestamp, cycle_id, strategy_profile, direction, status, open_price, close_price,
+                quantity, open_fee, close_fee, gross_profit, net_profit,
+                opened_at, closed_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "2026-01-01T00:00:00",
+                1,
+                "mean_reversion_v2_small_target",
+                "SELL_USDC",
+                "CLOSED",
+                1.001,
+                1.0008,
+                10.0,
+                0.0,
+                0.0,
+                0.002,
+                0.002,
+                "2026-01-01T00:00:00",
+                "2026-01-01T00:01:00",
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO market_snapshots (
+                timestamp, symbol, price, bid, ask, spread,
+                work_center, work_position,
+                short_center, short_position,
+                long_center, long_position,
+                center_confidence, center_alignment,
+                market_activity_score, market_regime,
+                order_book_pressure, order_book_imbalance,
+                micro_trend
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "2026-01-01T00:00:00",
+                "USDCUSDT",
+                1.0,
+                0.9999,
+                1.0001,
+                0.0002,
+                1.0,
+                85.0,
+                1.0,
+                50.0,
+                1.0,
+                50.0,
+                "LOW",
+                "ALIGNED",
+                80.0,
+                "NORMAL",
+                "BID_PRESSURE",
+                0.25,
+                "SELL_DOMINANT",
+            ),
+        )
+        conn.commit()
+
+    summary = ValidationSummaryEngine(database, test_config).build_summary(
+        profile="mean_reversion_v2_small_target",
+    )
+
+    assert summary.profile == "mean_reversion_v2_small_target"
+    assert summary.overall_status == "PROMISING"
+    assert summary.paper_cycles == 1
+    assert summary.paper_closed_cycles == 1
+    assert summary.paper_net_profit == 0.002
+    assert summary.paper_insights_rating in {"GOOD", "PROMISING"}
+    assert summary.risk_blocked_rate_available is False
+    assert "Profile-specific risk blocked rate unavailable." in summary.warnings
+    assert "Small sample size" in summary.warnings
+    assert "Entry zones detected, but order book never confirmed them." not in summary.warnings
+    assert "No profile-specific backtest trades" in summary.warnings

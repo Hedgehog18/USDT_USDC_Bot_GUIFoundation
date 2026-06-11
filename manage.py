@@ -1449,16 +1449,22 @@ def command_partial_target_diagnostics(args) -> None:
 
 def command_validation_summary(args) -> None:
     _config, _logger, database = build_context()
-    summary = ValidationSummaryEngine(database).build_summary()
+    summary = ValidationSummaryEngine(database).build_summary(profile=args.profile)
 
     print("=== Validation Summary ===")
+    print(f"Profile: {summary.profile}")
     print(f"Overall status: {summary.overall_status}")
     print(f"Strategy signals: {summary.strategy_signals}")
     print(f"Latest backtest trades: {summary.latest_backtest_trades}")
     print(f"Latest backtest net profit: {summary.latest_backtest_net_profit:.8f}")
     print(f"Paper cycles: {summary.paper_cycles}")
+    print(f"Paper closed cycles: {summary.paper_closed_cycles}")
     print(f"Paper net profit: {summary.paper_net_profit:.8f}")
-    print(f"Risk blocked rate: {summary.risk_blocked_rate * 100:.2f}%")
+    print(f"Paper insights rating: {summary.paper_insights_rating}")
+    if summary.risk_blocked_rate_available:
+        print(f"Risk blocked rate: {summary.risk_blocked_rate * 100:.2f}%")
+    else:
+        print("Risk blocked rate: N/A (profile-specific risk blocked rate unavailable)")
     print("Warnings:")
     if summary.warnings:
         for item in summary.warnings:
@@ -2366,6 +2372,11 @@ def build_parser() -> argparse.ArgumentParser:
     validation_summary_parser = subparsers.add_parser(
         "validation-summary",
         help="Show aggregate validation status",
+    )
+    validation_summary_parser.add_argument(
+        "--profile",
+        choices=SUPPORTED_RUNTIME_STRATEGY_PROFILES,
+        default="strict_current",
     )
     validation_summary_parser.set_defaults(func=command_validation_summary)
 

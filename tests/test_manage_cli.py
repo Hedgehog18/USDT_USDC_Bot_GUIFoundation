@@ -587,6 +587,19 @@ def test_manage_cli_has_validation_summary_command():
     args = parser.parse_args(["validation-summary"])
 
     assert args.command == "validation-summary"
+    assert args.profile == "strict_current"
+
+
+def test_manage_cli_validation_summary_accepts_profile():
+    parser = build_parser()
+    args = parser.parse_args([
+        "validation-summary",
+        "--profile",
+        "mean_reversion_v2_small_target",
+    ])
+
+    assert args.command == "validation-summary"
+    assert args.profile == "mean_reversion_v2_small_target"
 
 
 def test_manage_cli_has_gui_command():
