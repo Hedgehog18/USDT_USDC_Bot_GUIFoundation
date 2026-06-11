@@ -51,6 +51,7 @@ from analytics.entry_zone_debug_report import EntryZoneDebugReportBuilder
 from analytics.entry_threshold_sensitivity_engine import EntryThresholdSensitivityEngine
 from analytics.fee_model_report_engine import FeeModelReportEngine
 from analytics.filter_pass_diagnostics_engine import FilterPassDiagnosticsEngine
+from analytics.micro_trend_sensitivity_engine import MicroTrendSensitivityEngine
 from analytics.order_book_diagnostics_engine import OrderBookDiagnosticsEngine
 from analytics.order_book_rule_sim_engine import OrderBookRuleSimulationEngine
 from analytics.risk_diagnostics_engine import RiskDiagnosticsEngine
@@ -907,6 +908,71 @@ def command_entry_threshold_sensitivity(args) -> None:
             print("- None")
 
 
+def command_micro_trend_sensitivity(args) -> None:
+    config, _logger, database = build_context()
+    report = MicroTrendSensitivityEngine(database, config).build_report(profile=args.profile)
+
+    print("=== Micro Trend Sensitivity ===")
+    print("Dry run only. Production strategy thresholds and trading behavior are unchanged.")
+    print(f"Profile: {report.profile}")
+    print(
+        f"Effective fee rates: maker={report.fee_rates.maker:.6f} "
+        f"taker={report.fee_rates.taker:.6f}"
+    )
+    print(f"Fee source: {report.fee_rates.source}")
+    print("")
+
+    if not report.results or report.results[0].total_samples == 0:
+        print("No market snapshot data available.")
+        return
+
+    for item in report.results:
+        print(f"--- BUY <= {item.buy_threshold:.1f} / SELL >= {item.sell_threshold:.1f} | {item.mode} ---")
+        print(f"Total samples: {item.total_samples}")
+        print(f"Zone count: {item.zone_count}")
+        print(f"Candidates count: {item.candidates_count}")
+        print(f"Candidate frequency: {item.candidate_frequency * 100:.2f}%")
+        print(f"Risk profitability pass: {item.risk_profitability_pass_count}")
+        if item.gross_profit_min is None:
+            print("Estimated gross profit range: N/A")
+            print("Estimated net profit range: N/A")
+        else:
+            print(
+                "Estimated gross profit range: "
+                f"{item.gross_profit_min:.8f} .. {item.gross_profit_max:.8f}"
+            )
+            print(
+                "Estimated net profit range: "
+                f"{item.net_profit_min:.8f} .. {item.net_profit_max:.8f}"
+            )
+        print("Micro trend distribution:")
+        if item.micro_trend_distribution:
+            for name, count in item.micro_trend_distribution:
+                print(f"- {name}: {count}")
+        else:
+            print("- None")
+        print("Remaining blockers:")
+        if item.remaining_blockers:
+            for name, count in item.remaining_blockers:
+                print(f"- {name}: {count}")
+        else:
+            print("- None")
+
+    print("--- Recommendation ---")
+    if report.recommendation is None:
+        print("No viable threshold/micro-trend combo found in saved samples.")
+    else:
+        recommendation = report.recommendation
+        print(
+            f"BUY <= {recommendation.buy_threshold:.1f} / "
+            f"SELL >= {recommendation.sell_threshold:.1f} | "
+            f"mode={recommendation.mode}"
+        )
+        print(f"Candidates: {recommendation.candidates_count}")
+        print(f"Candidate frequency: {recommendation.candidate_frequency * 100:.2f}%")
+        print(f"Reason: {recommendation.reason}")
+
+
 def command_validation_summary(args) -> None:
     _config, _logger, database = build_context()
     summary = ValidationSummaryEngine(database).build_summary()
@@ -1748,6 +1814,17 @@ def build_parser() -> argparse.ArgumentParser:
         default="mean_reversion_v1",
     )
     entry_threshold_parser.set_defaults(func=command_entry_threshold_sensitivity)
+
+    micro_trend_parser = subparsers.add_parser(
+        "micro-trend-sensitivity",
+        help="Dry-run mean_reversion_v1 micro trend sensitivity diagnostics",
+    )
+    micro_trend_parser.add_argument(
+        "--profile",
+        choices=("mean_reversion_v1",),
+        default="mean_reversion_v1",
+    )
+    micro_trend_parser.set_defaults(func=command_micro_trend_sensitivity)
 
     validation_summary_parser = subparsers.add_parser(
         "validation-summary",
