@@ -37,6 +37,7 @@ class PaperTradingEngine:
         bot: BotEngine | None = None,
         decision_debug_callback: Callable[[dict], None] | None = None,
         risk_debug_callback: Callable[[dict], None] | None = None,
+        entry_zone_debug_callback: Callable[[dict], None] | None = None,
         force_refresh_market_data: bool = False,
     ) -> None:
         self.config = config
@@ -54,6 +55,7 @@ class PaperTradingEngine:
         self.safety_engine = PaperSafetyEngine(config)
         self.decision_debug_callback = decision_debug_callback
         self.risk_debug_callback = risk_debug_callback
+        self.entry_zone_debug_callback = entry_zone_debug_callback
         self.force_refresh_market_data = force_refresh_market_data
 
     def run(self, iterations: int) -> PaperTradingRunResult:
@@ -86,6 +88,18 @@ class PaperTradingEngine:
                 break
 
             if self.cycle_manager.has_active_cycle():
+                if self.entry_zone_debug_callback:
+                    self.entry_zone_debug_callback({
+                        "index": index,
+                        "market_state": market_state,
+                        "action": "WAIT",
+                        "reason": "active paper cycle is already open",
+                        "risk_allowed": False,
+                        "risk_reason": "Risk check skipped while active cycle is open",
+                        "risk_check_evaluated": False,
+                        "order_attempted": False,
+                        "data_source": getattr(self.bot.market_analyzer, "last_data_source", "UNKNOWN"),
+                    })
                 closed_cycle = self.cycle_manager.try_close_cycle(market_state.price)
                 if closed_cycle:
                     self.database.save_paper_cycle(closed_cycle)
@@ -98,6 +112,19 @@ class PaperTradingEngine:
                 portfolio,
                 current_price=market_state.price,
             )
+            order_attempted = risk.allowed and decision.action in {"BUY_USDC", "SELL_USDC"}
+            if self.entry_zone_debug_callback:
+                self.entry_zone_debug_callback({
+                    "index": index,
+                    "market_state": market_state,
+                    "action": decision.action,
+                    "reason": decision.reason,
+                    "risk_allowed": risk.allowed,
+                    "risk_reason": risk.reason,
+                    "risk_check_evaluated": decision.action in {"BUY_USDC", "SELL_USDC"},
+                    "order_attempted": order_attempted,
+                    "data_source": getattr(self.bot.market_analyzer, "last_data_source", "UNKNOWN"),
+                })
             if self.decision_debug_callback and self._is_potential_entry_state(market_state):
                 self.decision_debug_callback({
                     "index": index,

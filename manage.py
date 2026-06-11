@@ -47,6 +47,7 @@ from analytics.confidence_diagnostics_engine import ConfidenceDiagnosticsEngine
 from analytics.data_source_check_engine import DataSourceCheckEngine
 from analytics.decision_diagnostics_engine import DecisionDiagnosticsEngine
 from analytics.entry_zone_diagnostics_engine import EntryZoneDiagnosticsEngine
+from analytics.entry_zone_debug_report import EntryZoneDebugReportBuilder
 from analytics.fee_model_report_engine import FeeModelReportEngine
 from analytics.filter_pass_diagnostics_engine import FilterPassDiagnosticsEngine
 from analytics.order_book_diagnostics_engine import OrderBookDiagnosticsEngine
@@ -176,6 +177,54 @@ def _build_risk_profitability_debug_callback(config, database):
         _print_risk_profitability_detail(detail, prefix=f"[risk-debug] index={item['index']} | ")
 
     return callback, counter
+
+
+def _build_entry_zone_debug_callback(config):
+    builder = EntryZoneDebugReportBuilder(config)
+
+    def callback(item: dict) -> None:
+        debug_item = builder.add(item)
+        print(
+            "[entry-zone-debug] "
+            f"index={debug_item.index} | "
+            f"timestamp={debug_item.timestamp} | "
+            f"bid={debug_item.bid:.8f} | "
+            f"ask={debug_item.ask:.8f} | "
+            f"mid={debug_item.mid_price:.8f} | "
+            f"spread={debug_item.spread:.8f} | "
+            f"reference_price={debug_item.reference_price:.8f} | "
+            f"deviation={debug_item.deviation_from_mean:.8f} "
+            f"({debug_item.deviation_from_mean_percent:.5f}%) | "
+            f"work_position={debug_item.work_position:.4f} | "
+            f"buy_zone_threshold<={debug_item.buy_zone_threshold:.4f} | "
+            f"sell_zone_threshold>={debug_item.sell_zone_threshold:.4f} | "
+            f"buy_zone_active={debug_item.buy_zone_active} | "
+            f"sell_zone_active={debug_item.sell_zone_active} | "
+            f"micro_trend={debug_item.micro_trend} | "
+            f"micro_trend_result={debug_item.micro_trend_result} | "
+            f"action={debug_item.action} | "
+            f"candidate_produced={debug_item.candidate_produced} | "
+            f"risk_check_evaluated={debug_item.risk_check_evaluated} | "
+            f"order_attempted={debug_item.order_attempted} | "
+            f"data_source={debug_item.data_source} | "
+            f"reason={debug_item.reason} | "
+            f"risk_reason={debug_item.risk_reason}"
+        )
+
+    return callback, builder
+
+
+def _print_entry_zone_debug_summary(builder: EntryZoneDebugReportBuilder) -> None:
+    summary = builder.summary()
+    print("--- Entry Zone Debug Summary ---")
+    print(f"Total iterations: {summary.total_iterations}")
+    print(f"BUY zone active count: {summary.buy_zone_active_count}")
+    print(f"SELL zone active count: {summary.sell_zone_active_count}")
+    print(f"No-zone count: {summary.no_zone_count}")
+    print(f"Blocked by micro_trend count: {summary.blocked_by_micro_trend_count}")
+    print(f"Candidates produced count: {summary.candidates_produced_count}")
+    print(f"Risk checks evaluated count: {summary.risk_checks_evaluated_count}")
+    print(f"Orders attempted count: {summary.orders_attempted_count}")
 
 
 def _print_risk_profitability_detail(detail, prefix: str = "") -> None:
@@ -1213,12 +1262,17 @@ def command_paper_cycle_sim(args) -> None:
     risk_debug_counter = {"count": 0}
     if args.debug_risk_details:
         risk_debug_callback, risk_debug_counter = _build_risk_profitability_debug_callback(config, database)
+    entry_zone_debug_callback = None
+    entry_zone_debug_builder = None
+    if args.debug_entry_zones:
+        entry_zone_debug_callback, entry_zone_debug_builder = _build_entry_zone_debug_callback(config)
     result = PaperTradingEngine(
         config,
         database,
         bot=bot,
         decision_debug_callback=debug_callback,
         risk_debug_callback=risk_debug_callback,
+        entry_zone_debug_callback=entry_zone_debug_callback,
         force_refresh_market_data=args.force_refresh_market_data,
     ).run(args.iterations)
 
@@ -1256,6 +1310,8 @@ def command_paper_cycle_sim(args) -> None:
     print(f"Summary: {insights.summary}")
     print(f"Summary CSV: {summary_path}")
     print(f"Insights TXT: {insights_path}")
+    if args.debug_entry_zones and entry_zone_debug_builder is not None:
+        _print_entry_zone_debug_summary(entry_zone_debug_builder)
     if args.debug_decisions and debug_counter["count"] == 0:
         print("[decision-debug] No potential entry points were evaluated.")
     if args.debug_risk_details and risk_debug_counter["count"] == 0:
@@ -1708,6 +1764,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     paper_cycle_sim_parser.add_argument("--debug-decisions", action="store_true")
     paper_cycle_sim_parser.add_argument("--debug-risk-details", action="store_true")
+    paper_cycle_sim_parser.add_argument("--debug-entry-zones", action="store_true")
     paper_cycle_sim_parser.add_argument("--force-refresh-market-data", action="store_true")
     paper_cycle_sim_parser.set_defaults(func=command_paper_cycle_sim)
 

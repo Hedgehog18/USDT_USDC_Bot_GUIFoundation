@@ -156,12 +156,14 @@ def test_manage_cli_paper_cycle_accepts_strategy_profile():
         "mean_reversion_v1",
         "--debug-decisions",
         "--debug-risk-details",
+        "--debug-entry-zones",
         "--force-refresh-market-data",
     ])
 
     assert args.profile == "mean_reversion_v1"
     assert args.debug_decisions is True
     assert args.debug_risk_details is True
+    assert args.debug_entry_zones is True
     assert args.force_refresh_market_data is True
 
 
