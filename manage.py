@@ -47,6 +47,7 @@ from analytics.confidence_diagnostics_engine import ConfidenceDiagnosticsEngine
 from analytics.data_source_check_engine import DataSourceCheckEngine
 from analytics.decision_diagnostics_engine import DecisionDiagnosticsEngine
 from analytics.direction_outcome_diagnostics_engine import DirectionOutcomeDiagnosticsEngine
+from analytics.entry_confirmation_diagnostics_engine import EntryConfirmationDiagnosticsEngine
 from analytics.entry_zone_diagnostics_engine import EntryZoneDiagnosticsEngine
 from analytics.entry_zone_debug_report import EntryZoneDebugReportBuilder
 from analytics.entry_threshold_sensitivity_engine import EntryThresholdSensitivityEngine
@@ -1334,6 +1335,42 @@ def command_post_entry_path_diagnostics(args) -> None:
             print(f"  {mode}: {count}")
 
 
+def command_entry_confirmation_diagnostics(args) -> None:
+    config, _logger, database = build_context()
+    report = EntryConfirmationDiagnosticsEngine(database, config).build_report(profile=args.profile)
+
+    print("=== Entry Confirmation Diagnostics ===")
+    print("Dry run only. Production trading logic and profile behavior are unchanged.")
+    print(f"Profile: {report.profile}")
+    print(f"Configured target_profit: {report.target_profit * 100:.5f}%")
+    print(f"Evaluation horizon: {report.horizon} snapshots")
+    print("")
+
+    if not report.results:
+        print("No entry confirmation data available.")
+        return
+
+    for item in report.results:
+        print(f"--- {item.variant} ---")
+        print(f"Base candidate count: {item.base_candidate_count}")
+        print(f"Candidate count: {item.candidate_count}")
+        print(f"Hit target count: {item.hit_target_count}")
+        print(f"Hit target rate: {item.hit_target_rate * 100:.2f}%")
+        print(f"Halfway count: {item.halfway_count}")
+        print(f"Halfway rate: {item.halfway_rate * 100:.2f}%")
+        print(f"Immediate adverse move count: {item.immediate_adverse_move_count}")
+        print(f"Immediate adverse move rate: {item.immediate_adverse_move_rate * 100:.2f}%")
+        if item.average_favorable_movement is None:
+            print("Avg favorable movement: N/A")
+            print("Avg adverse movement: N/A")
+        else:
+            print(f"Avg favorable movement: {item.average_favorable_movement:.8f}")
+            print(f"Avg adverse movement: {item.average_adverse_movement:.8f}")
+        print(f"Missed opportunities count: {item.missed_opportunities_count}")
+        print(f"Recommendation score: {item.recommendation_score:.2f}")
+        print("")
+
+
 def command_validation_summary(args) -> None:
     _config, _logger, database = build_context()
     summary = ValidationSummaryEngine(database).build_summary()
@@ -2390,6 +2427,17 @@ def build_parser() -> argparse.ArgumentParser:
         default="mean_reversion_v2",
     )
     post_entry_path_parser.set_defaults(func=command_post_entry_path_diagnostics)
+
+    entry_confirmation_parser = subparsers.add_parser(
+        "entry-confirmation-diagnostics",
+        help="Dry-run confirmation variants before mean-reversion entries",
+    )
+    entry_confirmation_parser.add_argument(
+        "--profile",
+        choices=("mean_reversion_v1", "mean_reversion_v2"),
+        default="mean_reversion_v2",
+    )
+    entry_confirmation_parser.set_defaults(func=command_entry_confirmation_diagnostics)
 
     paper_stats_parser = subparsers.add_parser("paper-stats", help="РџРѕРєР°Р·Р°С‚Рё paper trading СЃС‚Р°С‚РёСЃС‚РёРєСѓ")
     paper_stats_parser.add_argument("--limit", type=int, default=100)
