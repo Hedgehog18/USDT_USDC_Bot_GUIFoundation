@@ -190,6 +190,7 @@ def test_manage_cli_paper_cycle_accepts_strategy_profile():
         "--debug-decisions",
         "--debug-risk-details",
         "--debug-entry-zones",
+        "--debug-close",
         "--force-refresh-market-data",
     ])
 
@@ -197,6 +198,7 @@ def test_manage_cli_paper_cycle_accepts_strategy_profile():
     assert args.debug_decisions is True
     assert args.debug_risk_details is True
     assert args.debug_entry_zones is True
+    assert args.debug_close is True
     assert args.force_refresh_market_data is True
 
 
@@ -276,9 +278,11 @@ def test_manage_cli_long_paper_run_accepts_small_target_profile():
         "5",
         "--profile",
         "mean_reversion_v2_small_target",
+        "--debug-close",
     ])
 
     assert args.profile == "mean_reversion_v2_small_target"
+    assert args.debug_close is True
 
 
 def test_manage_cli_has_entry_threshold_sensitivity_command():

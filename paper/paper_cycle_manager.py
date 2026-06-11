@@ -69,12 +69,21 @@ class PaperCycleManager:
 
         cycle = self.active_cycles[0]
 
-        if cycle.direction == PaperOrderSide.BUY_USDC and price < cycle.close_price:
+        if not self.can_close_cycle(cycle, price):
             return None
 
-        if cycle.direction == PaperOrderSide.SELL_USDC and price > cycle.close_price:
-            return None
+        return self.close_cycle(cycle, price)
 
+    def can_close_cycle(self, cycle: PaperCycle, price: float) -> bool:
+        if cycle.direction == PaperOrderSide.BUY_USDC:
+            return price >= cycle.close_price
+
+        if cycle.direction == PaperOrderSide.SELL_USDC:
+            return price <= cycle.close_price
+
+        return False
+
+    def close_cycle(self, cycle: PaperCycle, price: float) -> PaperCycle:
         close_side = (
             PaperOrderSide.SELL_USDC.value
             if cycle.direction == PaperOrderSide.BUY_USDC

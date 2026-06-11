@@ -224,6 +224,29 @@ def _build_entry_zone_debug_callback(config):
     return callback, builder
 
 
+def _build_close_debug_callback():
+    counter = {"count": 0}
+
+    def callback(item: dict) -> None:
+        counter["count"] += 1
+        print(
+            "[close-debug] "
+            f"index={item['index']} | "
+            f"db_id={item['db_id']} | "
+            f"cycle_id={item['cycle_id']} | "
+            f"profile={item['strategy_profile']} | "
+            f"direction={item['direction']} | "
+            f"current_price={item['current_price']:.8f} | "
+            f"target_price={item['target_price']:.8f} | "
+            f"close_condition_met={item['close_condition_met']} | "
+            f"close_attempted={item['close_attempted']} | "
+            f"close_result={item['close_result']} | "
+            f"reason={item['reason']}"
+        )
+
+    return callback, counter
+
+
 def _print_entry_zone_debug_summary(builder: EntryZoneDebugReportBuilder) -> None:
     summary = builder.summary()
     print("--- Entry Zone Debug Summary ---")
@@ -1836,6 +1859,10 @@ def command_paper_cycle_sim(args) -> None:
     entry_zone_debug_builder = None
     if args.debug_entry_zones:
         entry_zone_debug_callback, entry_zone_debug_builder = _build_entry_zone_debug_callback(config)
+    close_debug_callback = None
+    close_debug_counter = {"count": 0}
+    if args.debug_close:
+        close_debug_callback, close_debug_counter = _build_close_debug_callback()
     result = PaperTradingEngine(
         config,
         database,
@@ -1843,6 +1870,7 @@ def command_paper_cycle_sim(args) -> None:
         decision_debug_callback=debug_callback,
         risk_debug_callback=risk_debug_callback,
         entry_zone_debug_callback=entry_zone_debug_callback,
+        close_debug_callback=close_debug_callback,
         force_refresh_market_data=args.force_refresh_market_data,
         strategy_profile=profile,
     ).run(args.iterations)
@@ -1887,6 +1915,8 @@ def command_paper_cycle_sim(args) -> None:
         print("[decision-debug] No potential entry points were evaluated.")
     if args.debug_risk_details and risk_debug_counter["count"] == 0:
         print("[risk-debug] No BUY/SELL risk profitability checks were evaluated.")
+    if args.debug_close and close_debug_counter["count"] == 0:
+        print("[close-debug] No open paper cycles were evaluated.")
 
 
 def command_long_paper_run(args) -> None:
@@ -1899,10 +1929,15 @@ def command_long_paper_run(args) -> None:
         args.interval,
         profile,
     )
+    close_debug_callback = None
+    close_debug_counter = {"count": 0}
+    if args.debug_close:
+        close_debug_callback, close_debug_counter = _build_close_debug_callback()
     result = LongPaperRunWorkflow(config, database).run(
         iterations=args.iterations,
         interval_seconds=args.interval,
         strategy_profile=profile,
+        close_debug_callback=close_debug_callback,
     )
 
     print("=== Long Paper Run ===")
@@ -1965,6 +2000,8 @@ def command_long_paper_run(args) -> None:
     print(f"Safety CSV: {result.report_paths.safety_csv}")
     print(f"Summary CSV: {result.report_paths.summary_csv}")
     print(f"Insights TXT: {result.report_paths.insights_txt}")
+    if args.debug_close and close_debug_counter["count"] == 0:
+        print("[close-debug] No open paper cycles were evaluated.")
 
 
 def _merge_distributions(*items: dict[str, int]) -> dict[str, int]:
@@ -2406,6 +2443,7 @@ def build_parser() -> argparse.ArgumentParser:
     paper_cycle_sim_parser.add_argument("--debug-decisions", action="store_true")
     paper_cycle_sim_parser.add_argument("--debug-risk-details", action="store_true")
     paper_cycle_sim_parser.add_argument("--debug-entry-zones", action="store_true")
+    paper_cycle_sim_parser.add_argument("--debug-close", action="store_true")
     paper_cycle_sim_parser.add_argument("--force-refresh-market-data", action="store_true")
     paper_cycle_sim_parser.set_defaults(func=command_paper_cycle_sim)
 
@@ -2417,6 +2455,7 @@ def build_parser() -> argparse.ArgumentParser:
         choices=SUPPORTED_RUNTIME_STRATEGY_PROFILES,
         default="strict_current",
     )
+    long_paper_run_parser.add_argument("--debug-close", action="store_true")
     long_paper_run_parser.set_defaults(func=command_long_paper_run)
 
     long_paper_runs_parser = subparsers.add_parser("long-paper-runs", help="Show recent long paper runs")

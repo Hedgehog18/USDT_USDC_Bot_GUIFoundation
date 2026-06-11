@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from collections.abc import Callable
 from pathlib import Path
 from time import sleep
 
@@ -49,6 +50,7 @@ class LongPaperRunWorkflow:
         iterations: int,
         interval_seconds: int = 0,
         strategy_profile: str = "strict_current",
+        close_debug_callback: Callable[[dict], None] | None = None,
     ) -> LongPaperRunResult:
         if iterations <= 0:
             raise ValueError("iterations must be greater than 0.")
@@ -60,11 +62,16 @@ class LongPaperRunWorkflow:
             bot = BotEngine()
             bot.decision_engine = StrategyProfileDecisionEngine(bot.config, strategy_profile)
 
+        close_debug_kwargs = {}
+        if close_debug_callback is not None:
+            close_debug_kwargs["close_debug_callback"] = close_debug_callback
+
         if bot is None:
             engine = PaperTradingEngine(
                 self.config,
                 self.database,
                 strategy_profile=strategy_profile,
+                **close_debug_kwargs,
             )
         else:
             engine = PaperTradingEngine(
@@ -72,6 +79,7 @@ class LongPaperRunWorkflow:
                 self.database,
                 bot=bot,
                 strategy_profile=strategy_profile,
+                **close_debug_kwargs,
             )
         if interval_seconds == 0:
             run_result = engine.run(iterations)

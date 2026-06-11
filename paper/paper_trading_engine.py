@@ -1,8 +1,12 @@
 from dataclasses import dataclass
 from collections.abc import Callable
+from datetime import datetime
 
 from app.bot_engine import BotEngine
 from config.config_manager import BotConfig
+from paper.models import PaperCycle
+from paper.models import PaperCycleStatus
+from paper.models import PaperOrderSide
 from paper.models import PaperPortfolio
 from paper.paper_cycle_manager import PaperCycleManager
 from paper.paper_exchange import PaperExchange
@@ -38,6 +42,7 @@ class PaperTradingEngine:
         decision_debug_callback: Callable[[dict], None] | None = None,
         risk_debug_callback: Callable[[dict], None] | None = None,
         entry_zone_debug_callback: Callable[[dict], None] | None = None,
+        close_debug_callback: Callable[[dict], None] | None = None,
         force_refresh_market_data: bool = False,
         strategy_profile: str = "strict_current",
     ) -> None:
@@ -57,6 +62,7 @@ class PaperTradingEngine:
         self.decision_debug_callback = decision_debug_callback
         self.risk_debug_callback = risk_debug_callback
         self.entry_zone_debug_callback = entry_zone_debug_callback
+        self.close_debug_callback = close_debug_callback
         self.force_refresh_market_data = force_refresh_market_data
         self.strategy_profile = strategy_profile
 
@@ -88,6 +94,26 @@ class PaperTradingEngine:
                 safety_stops += 1
                 self.state_manager.transition_to(PaperState.SAFE_STOP, safety.reason)
                 break
+
+            closed_from_database, has_database_open_cycles = self._process_database_open_cycles(
+                current_price=market_state.price,
+                index=index,
+            )
+            closed += closed_from_database
+            if has_database_open_cycles:
+                if self.entry_zone_debug_callback:
+                    self.entry_zone_debug_callback({
+                        "index": index,
+                        "market_state": market_state,
+                        "action": "WAIT",
+                        "reason": "database paper cycle is already open",
+                        "risk_allowed": False,
+                        "risk_reason": "Risk check skipped while database cycle is open",
+                        "risk_check_evaluated": False,
+                        "order_attempted": False,
+                        "data_source": getattr(self.bot.market_analyzer, "last_data_source", "UNKNOWN"),
+                    })
+                continue
 
             if self.cycle_manager.has_active_cycle():
                 if self.entry_zone_debug_callback:
@@ -177,6 +203,99 @@ class PaperTradingEngine:
             market_state.work_position <= self.config.buy_zone_max
             or market_state.work_position >= self.config.sell_zone_min
         )
+
+    def _process_database_open_cycles(self, current_price: float, index: int) -> tuple[int, bool]:
+        rows = self.database.load_open_paper_cycles(limit=1000)
+        if not rows:
+            return 0, False
+
+        closed_count = 0
+        open_cycles_remaining = False
+        for row in rows:
+            cycle, strategy_profile, cycle_id = self._paper_cycle_from_open_row(row)
+            close_condition_met = self.cycle_manager.can_close_cycle(cycle, current_price)
+
+            if not close_condition_met:
+                open_cycles_remaining = True
+                self._emit_close_debug({
+                    "index": index,
+                    "db_id": cycle.id,
+                    "cycle_id": cycle_id,
+                    "strategy_profile": strategy_profile,
+                    "direction": cycle.direction.value,
+                    "current_price": current_price,
+                    "target_price": cycle.close_price,
+                    "close_condition_met": False,
+                    "close_attempted": False,
+                    "close_result": "SKIPPED",
+                    "reason": "Close condition is not met.",
+                })
+                continue
+
+            closed_cycle = self.cycle_manager.close_cycle(cycle, current_price)
+            self.database.save_paper_cycle(closed_cycle, strategy_profile=strategy_profile)
+            if closed_cycle.status == PaperCycleStatus.CLOSED:
+                closed_count += 1
+                result = "CLOSED"
+                reason = "Cycle closed successfully."
+            else:
+                result = closed_cycle.status.value
+                reason = "Close order was not filled."
+
+            self._emit_close_debug({
+                "index": index,
+                "db_id": closed_cycle.id,
+                "cycle_id": cycle_id,
+                "strategy_profile": strategy_profile,
+                "direction": closed_cycle.direction.value,
+                "current_price": current_price,
+                "target_price": cycle.close_price,
+                "close_condition_met": True,
+                "close_attempted": True,
+                "close_result": result,
+                "reason": reason,
+            })
+
+        return closed_count, open_cycles_remaining
+
+    def _paper_cycle_from_open_row(self, row: tuple) -> tuple[PaperCycle, str, int]:
+        (
+            db_id,
+            _timestamp,
+            cycle_id,
+            strategy_profile,
+            direction,
+            status,
+            open_price,
+            close_price,
+            quantity,
+            open_fee,
+            close_fee,
+            gross_profit,
+            net_profit,
+            opened_at,
+            closed_at,
+        ) = row
+
+        cycle = PaperCycle(
+            id=int(db_id),
+            direction=PaperOrderSide(direction),
+            status=PaperCycleStatus(status),
+            open_price=float(open_price),
+            close_price=float(close_price),
+            quantity=float(quantity),
+            open_fee=float(open_fee),
+            close_fee=float(close_fee),
+            gross_profit=float(gross_profit),
+            net_profit=float(net_profit),
+            opened_at=datetime.fromisoformat(opened_at),
+            closed_at=datetime.fromisoformat(closed_at) if closed_at else None,
+        )
+        return cycle, str(strategy_profile), int(cycle_id)
+
+    def _emit_close_debug(self, payload: dict) -> None:
+        if self.close_debug_callback:
+            self.close_debug_callback(payload)
 
     def _clear_market_data_cache(self) -> None:
         cache = getattr(self.bot, "market_data_cache", None)

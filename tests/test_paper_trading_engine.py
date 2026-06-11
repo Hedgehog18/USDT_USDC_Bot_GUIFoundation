@@ -5,15 +5,18 @@ from storage.database_manager import DatabaseManager
 
 
 class FakeMarketAnalyzer:
+    def __init__(self, price: float = 1.0):
+        self.price = price
+
     def analyze_market(self):
         from datetime import datetime
         from market.models import MarketState
 
         return MarketState(
             symbol="USDCUSDT",
-            price=1.0,
-            bid=0.99999,
-            ask=1.00001,
+            price=self.price,
+            bid=self.price - 0.00001,
+            ask=self.price + 0.00001,
             spread=0.00002,
             work_low=0.9999,
             work_high=1.0001,
@@ -73,8 +76,8 @@ class FakeRiskManager:
 
 
 class FakeBot:
-    def __init__(self):
-        self.market_analyzer = FakeMarketAnalyzer()
+    def __init__(self, price: float = 1.0):
+        self.market_analyzer = FakeMarketAnalyzer(price=price)
         self.decision_engine = FakeDecisionEngine()
         self.risk_manager = FakeRiskManager()
 
@@ -115,3 +118,52 @@ def test_paper_trading_engine_force_refresh_clears_market_cache(test_config, tmp
     ).run(2)
 
     assert bot.market_data_cache.clear_count == 2
+
+
+def test_paper_trading_engine_closes_database_open_cycle(test_config, tmp_path: Path):
+    from datetime import datetime
+    from paper.models import PaperCycle, PaperCycleStatus, PaperOrderSide
+
+    database = DatabaseManager(str(tmp_path / "bot.sqlite"))
+    open_cycle = PaperCycle(
+        id=1,
+        direction=PaperOrderSide.SELL_USDC,
+        status=PaperCycleStatus.OPEN,
+        open_price=1.0010,
+        close_price=1.0008,
+        quantity=10.0,
+        open_fee=0.0,
+        close_fee=0.0,
+        gross_profit=0.0,
+        net_profit=0.0,
+        opened_at=datetime.utcnow(),
+    )
+    row_id = database.save_paper_cycle(open_cycle, strategy_profile="mean_reversion_v2_small_target")
+    close_debug_items = []
+
+    result = PaperTradingEngine(
+        test_config,
+        database,
+        bot=FakeBot(price=1.0007),
+        close_debug_callback=close_debug_items.append,
+    ).run(1)
+
+    with database.connect() as conn:
+        row = conn.execute(
+            """
+            SELECT id, status, close_price, net_profit
+            FROM paper_cycles
+            WHERE id = ?
+            """,
+            (row_id,),
+        ).fetchone()
+
+    assert result.closed_cycles == 1
+    assert row[0] == row_id
+    assert row[1] == "CLOSED"
+    assert row[2] == 1.0007
+    assert row[3] > 0.0
+    assert close_debug_items[0]["db_id"] == row_id
+    assert close_debug_items[0]["close_condition_met"] is True
+    assert close_debug_items[0]["close_attempted"] is True
+    assert close_debug_items[0]["close_result"] == "CLOSED"
