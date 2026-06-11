@@ -52,6 +52,7 @@ from analytics.entry_zone_debug_report import EntryZoneDebugReportBuilder
 from analytics.entry_threshold_sensitivity_engine import EntryThresholdSensitivityEngine
 from analytics.fee_model_report_engine import FeeModelReportEngine
 from analytics.filter_pass_diagnostics_engine import FilterPassDiagnosticsEngine
+from analytics.holding_horizon_diagnostics_engine import HoldingHorizonDiagnosticsEngine
 from analytics.micro_trend_sensitivity_engine import MicroTrendSensitivityEngine
 from analytics.order_book_diagnostics_engine import OrderBookDiagnosticsEngine
 from analytics.order_book_rule_sim_engine import OrderBookRuleSimulationEngine
@@ -1136,6 +1137,70 @@ def command_direction_outcome_diagnostics(args) -> None:
         print(f"  Moved toward target rate: {item.moved_expected_direction_rate * 100:.2f}%")
 
 
+def command_holding_horizon_diagnostics(args) -> None:
+    config, _logger, database = build_context()
+    current_price, source, timestamp = _load_current_paper_price(config, database)
+    report = HoldingHorizonDiagnosticsEngine(database, config).build_report(
+        current_price=current_price,
+        profile=args.profile,
+    )
+
+    print("=== Holding Horizon Diagnostics ===")
+    print("Diagnostics only. Trading logic and open cycles are unchanged.")
+    print(f"Profile: {report.profile}")
+    print(f"Current price: {report.current_price:.8f}")
+    print(f"Current price source: {source}")
+    print(f"Current price timestamp: {timestamp}")
+    print(f"Configured target_profit: {report.target_profit * 100:.5f}%")
+    print("")
+
+    print("--- Historical Holding Horizons ---")
+    if not report.horizons:
+        print("No historical snapshot data available.")
+    for item in report.horizons:
+        print(f"N={item.horizon}")
+        print(f"  Candidates count: {item.candidates_count}")
+        print(f"  Hit target count: {item.hit_target_count}")
+        print(f"  Hit rate: {item.hit_rate * 100:.2f}%")
+        if item.average_time_to_target is None:
+            print("  Average time to target: N/A")
+        else:
+            print(f"  Average time to target: {item.average_time_to_target:.2f} snapshots")
+        if item.max_adverse_movement is None:
+            print("  Max adverse movement before target: N/A")
+            print("  Average adverse movement: N/A")
+        else:
+            print(f"  Max adverse movement before target: {item.max_adverse_movement:.8f}")
+            print(f"  Average adverse movement: {item.average_adverse_movement:.8f}")
+        print(f"  Expired without target count: {item.expired_without_target_count}")
+
+    print("--- Open Cycles Holding State ---")
+    if not report.open_cycles:
+        print("No open cycles for this profile.")
+    for item in report.open_cycles:
+        favorable = (
+            "N/A"
+            if item.max_observed_favorable_movement is None
+            else f"{item.max_observed_favorable_movement:.8f}"
+        )
+        adverse = (
+            "N/A"
+            if item.max_observed_adverse_movement is None
+            else f"{item.max_observed_adverse_movement:.8f}"
+        )
+        print(
+            f"db_id={item.db_id} cycle_id={item.cycle_id} direction={item.direction} "
+            f"age_seconds={item.age_seconds:.0f}"
+        )
+        print(
+            f"  open_price={item.open_price:.8f} target_price={item.target_price:.8f} "
+            f"current_price={item.current_price:.8f}"
+        )
+        print(f"  distance_to_target={item.distance_to_target:.8f}")
+        print(f"  max observed favorable movement: {favorable}")
+        print(f"  max observed adverse movement: {adverse}")
+
+
 def command_validation_summary(args) -> None:
     _config, _logger, database = build_context()
     summary = ValidationSummaryEngine(database).build_summary()
@@ -2164,6 +2229,17 @@ def build_parser() -> argparse.ArgumentParser:
         default="mean_reversion_v2",
     )
     direction_outcome_parser.set_defaults(func=command_direction_outcome_diagnostics)
+
+    holding_horizon_parser = subparsers.add_parser(
+        "holding-horizon-diagnostics",
+        help="Estimate how many snapshots are needed to hit paper targets",
+    )
+    holding_horizon_parser.add_argument(
+        "--profile",
+        choices=("mean_reversion_v1", "mean_reversion_v2"),
+        default="mean_reversion_v2",
+    )
+    holding_horizon_parser.set_defaults(func=command_holding_horizon_diagnostics)
 
     paper_stats_parser = subparsers.add_parser("paper-stats", help="РџРѕРєР°Р·Р°С‚Рё paper trading СЃС‚Р°С‚РёСЃС‚РёРєСѓ")
     paper_stats_parser.add_argument("--limit", type=int, default=100)

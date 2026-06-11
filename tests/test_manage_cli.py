@@ -286,6 +286,18 @@ def test_manage_cli_has_direction_outcome_diagnostics_command():
     assert args.profile == "mean_reversion_v2"
 
 
+def test_manage_cli_has_holding_horizon_diagnostics_command():
+    parser = build_parser()
+    args = parser.parse_args([
+        "holding-horizon-diagnostics",
+        "--profile",
+        "mean_reversion_v2",
+    ])
+
+    assert args.command == "holding-horizon-diagnostics"
+    assert args.profile == "mean_reversion_v2"
+
+
 def test_manage_cli_has_long_paper_runs_command():
     parser = build_parser()
     args = parser.parse_args(["long-paper-runs", "--limit", "20"])
