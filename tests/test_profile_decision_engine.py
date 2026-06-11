@@ -104,3 +104,13 @@ def test_profile_decision_engine_mean_reversion_v2_keeps_strict_micro_trend(test
 
     assert decision.action == "WAIT"
     assert "micro trend not confirmed" in decision.reason
+
+
+def test_profile_decision_engine_mean_reversion_v2_small_target_uses_v2_entry_rules(test_config):
+    decision = StrategyProfileDecisionEngine(test_config, "mean_reversion_v2_small_target").make_decision(
+        _state(work_position=25.0, micro_trend="BUY_DOMINANT", center_confidence="LOW")
+    )
+
+    assert decision.action == "BUY_USDC"
+    assert "mean_reversion_v2_small_target" in decision.reason
+    assert decision.target_profit == test_config.target_profit * 0.25

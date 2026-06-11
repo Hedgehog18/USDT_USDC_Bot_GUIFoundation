@@ -8,7 +8,12 @@ from config.config_manager import BotConfig
 from storage.database_manager import DatabaseManager
 
 
-SUPPORTED_STRATEGY_PROFILES = ("strict_current", "mean_reversion_v1", "mean_reversion_v2")
+SUPPORTED_STRATEGY_PROFILES = (
+    "strict_current",
+    "mean_reversion_v1",
+    "mean_reversion_v2",
+    "mean_reversion_v2_small_target",
+)
 
 
 @dataclass(frozen=True)
@@ -99,7 +104,7 @@ class StrategyProfileSimulationEngine:
         )
 
     def _profile_filters(self, profile: str, row: dict) -> dict[str, bool | None]:
-        if profile in {"mean_reversion_v1", "mean_reversion_v2"}:
+        if profile in {"mean_reversion_v1", "mean_reversion_v2", "mean_reversion_v2_small_target"}:
             return {
                 "spread_stability": row["filters"]["spread_stability"],
                 "market_health": row["filters"]["market_health"],
@@ -186,8 +191,9 @@ class StrategyProfileSimulationEngine:
         }
 
     def _zone(self, work_position: float, profile: str) -> str:
-        buy_zone_max = 25.0 if profile == "mean_reversion_v2" else self.config.buy_zone_max
-        sell_zone_min = 75.0 if profile == "mean_reversion_v2" else self.config.sell_zone_min
+        uses_v2_zones = profile in {"mean_reversion_v2", "mean_reversion_v2_small_target"}
+        buy_zone_max = 25.0 if uses_v2_zones else self.config.buy_zone_max
+        sell_zone_min = 75.0 if uses_v2_zones else self.config.sell_zone_min
         if work_position <= buy_zone_max:
             return "BUY"
         if work_position >= sell_zone_min:

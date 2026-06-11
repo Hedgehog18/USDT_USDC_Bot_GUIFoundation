@@ -6,7 +6,13 @@ from strategy.decision_engine import DecisionEngine
 from strategy.models import TradeDecision
 
 
-SUPPORTED_RUNTIME_STRATEGY_PROFILES = ("strict_current", "mean_reversion_v1", "mean_reversion_v2")
+SMALL_TARGET_MULTIPLIER = 0.25
+SUPPORTED_RUNTIME_STRATEGY_PROFILES = (
+    "strict_current",
+    "mean_reversion_v1",
+    "mean_reversion_v2",
+    "mean_reversion_v2_small_target",
+)
 
 
 class StrategyProfileDecisionEngine:
@@ -22,10 +28,10 @@ class StrategyProfileDecisionEngine:
     def make_decision(self, market_state: MarketState) -> TradeDecision:
         if self.profile == "strict_current":
             return self.strict_engine.make_decision(market_state)
-        if self.profile == "mean_reversion_v2":
+        if self.profile in {"mean_reversion_v2", "mean_reversion_v2_small_target"}:
             return self._mean_reversion_decision(
                 market_state,
-                profile_name="mean_reversion_v2",
+                profile_name=self.profile,
                 buy_zone_max=25.0,
                 sell_zone_min=75.0,
             )
@@ -87,12 +93,16 @@ class StrategyProfileDecisionEngine:
         return max(self.config.min_cycle_prediction_score, zone_depth)
 
     def _decision(self, action: str, reason: str, confidence: str, score: float) -> TradeDecision:
+        target_profit = self.config.target_profit
+        if self.profile == "mean_reversion_v2_small_target":
+            target_profit *= SMALL_TARGET_MULTIPLIER
+
         return TradeDecision(
             action=action,
             reason=reason,
             confidence=confidence,
             cycle_prediction_score=score,
             recommended_trade_size=0.0,
-            target_profit=self.config.target_profit,
+            target_profit=target_profit,
             created_at=datetime.utcnow(),
         )

@@ -32,3 +32,15 @@ def test_paper_cycle_does_not_close_before_target(test_config):
 
     assert closed is None
     assert manager.has_active_cycle() is True
+
+
+def test_paper_cycle_can_use_decision_target_profit(test_config):
+    portfolio = PaperPortfolioManager(initial_usdt=100.0, initial_usdc=100.0)
+    exchange = PaperExchange(test_config, portfolio)
+    manager = PaperCycleManager(test_config, exchange)
+
+    target_profit = test_config.target_profit * 0.25
+    cycle = manager.open_cycle("BUY_USDC", 1.0, target_profit=target_profit)
+
+    assert cycle is not None
+    assert cycle.close_price == 1.0 * (1 + target_profit)

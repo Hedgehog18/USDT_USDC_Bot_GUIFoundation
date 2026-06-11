@@ -27,10 +27,11 @@ class PaperCycleManager:
     def has_active_cycle(self) -> bool:
         return bool(self.active_cycles)
 
-    def open_cycle(self, direction: str, price: float) -> PaperCycle | None:
+    def open_cycle(self, direction: str, price: float, target_profit: float | None = None) -> PaperCycle | None:
         if self.has_active_cycle():
             return None
 
+        effective_target_profit = self.config.target_profit if target_profit is None else target_profit
         portfolio = self.exchange.portfolio_manager.get_portfolio(price)
         trade_value = portfolio.total_value * self.config.trade_size_percent
         quantity = trade_value / price
@@ -41,9 +42,9 @@ class PaperCycleManager:
             return None
 
         close_price = (
-            price * (1 + self.config.target_profit)
+            price * (1 + effective_target_profit)
             if direction == "BUY_USDC"
-            else price * (1 - self.config.target_profit)
+            else price * (1 - effective_target_profit)
         )
 
         cycle = PaperCycle(

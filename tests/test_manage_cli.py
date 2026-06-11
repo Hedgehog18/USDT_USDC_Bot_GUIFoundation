@@ -75,6 +75,21 @@ def test_manage_cli_backtest_accepts_mean_reversion_v2_profile():
     assert args.profile == "mean_reversion_v2"
 
 
+def test_manage_cli_backtest_accepts_small_target_profile():
+    parser = build_parser()
+    args = parser.parse_args([
+        "backtest",
+        "--interval",
+        "1m",
+        "--limit",
+        "100",
+        "--profile",
+        "mean_reversion_v2_small_target",
+    ])
+
+    assert args.profile == "mean_reversion_v2_small_target"
+
+
 def test_manage_cli_has_backtest_runs_command():
     parser = build_parser()
     args = parser.parse_args(["backtest-runs", "--limit", "3"])
@@ -198,6 +213,19 @@ def test_manage_cli_paper_cycle_accepts_mean_reversion_v2_profile():
     assert args.profile == "mean_reversion_v2"
 
 
+def test_manage_cli_paper_cycle_accepts_small_target_profile():
+    parser = build_parser()
+    args = parser.parse_args([
+        "paper-cycle-sim",
+        "--iterations",
+        "3",
+        "--profile",
+        "mean_reversion_v2_small_target",
+    ])
+
+    assert args.profile == "mean_reversion_v2_small_target"
+
+
 def test_manage_cli_has_long_paper_run_command():
     parser = build_parser()
     args = parser.parse_args(["long-paper-run", "--iterations", "500", "--interval", "5"])
@@ -238,6 +266,21 @@ def test_manage_cli_long_paper_run_accepts_mean_reversion_v2_profile():
     assert args.profile == "mean_reversion_v2"
 
 
+def test_manage_cli_long_paper_run_accepts_small_target_profile():
+    parser = build_parser()
+    args = parser.parse_args([
+        "long-paper-run",
+        "--iterations",
+        "500",
+        "--interval",
+        "5",
+        "--profile",
+        "mean_reversion_v2_small_target",
+    ])
+
+    assert args.profile == "mean_reversion_v2_small_target"
+
+
 def test_manage_cli_has_entry_threshold_sensitivity_command():
     parser = build_parser()
     args = parser.parse_args([
@@ -248,6 +291,18 @@ def test_manage_cli_has_entry_threshold_sensitivity_command():
 
     assert args.command == "entry-threshold-sensitivity"
     assert args.profile == "mean_reversion_v1"
+
+
+def test_manage_cli_strategy_profile_sim_accepts_small_target_profile():
+    parser = build_parser()
+    args = parser.parse_args([
+        "strategy-profile-sim",
+        "--profile",
+        "mean_reversion_v2_small_target",
+    ])
+
+    assert args.command == "strategy-profile-sim"
+    assert args.profile == "mean_reversion_v2_small_target"
 
 
 def test_manage_cli_has_micro_trend_sensitivity_command():

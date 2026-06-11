@@ -117,6 +117,7 @@ def test_strategy_profile_sim_mean_reversion_v2_uses_calibrated_zones(test_confi
     engine = StrategyProfileSimulationEngine(database, test_config)
     v1 = engine.build_report("mean_reversion_v1")
     v2 = engine.build_report("mean_reversion_v2")
+    small_target = engine.build_report("mean_reversion_v2_small_target")
 
     assert v1.total_entry_zone_samples == 0
     assert v1.pass_count == 0
@@ -125,6 +126,10 @@ def test_strategy_profile_sim_mean_reversion_v2_uses_calibrated_zones(test_confi
     assert v2.buy_candidates == 1
     assert v2.sell_candidates == 1
     assert ("micro_trend", 1) in v2.remaining_blocking_filters
+    assert small_target.total_entry_zone_samples == v2.total_entry_zone_samples
+    assert small_target.pass_count == v2.pass_count
+    assert small_target.buy_candidates == v2.buy_candidates
+    assert small_target.sell_candidates == v2.sell_candidates
 
 
 def test_strategy_profile_sim_rejects_unknown_profile(test_config, tmp_path):

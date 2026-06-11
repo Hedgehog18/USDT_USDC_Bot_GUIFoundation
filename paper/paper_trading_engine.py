@@ -154,6 +154,7 @@ class PaperTradingEngine:
             opened_cycle = self.cycle_manager.open_cycle(
                 direction=decision.action,
                 price=market_state.price,
+                target_profit=decision.target_profit,
             )
             if opened_cycle:
                 self.database.save_paper_cycle(opened_cycle, strategy_profile=self.strategy_profile)
