@@ -57,6 +57,7 @@ from analytics.micro_trend_sensitivity_engine import MicroTrendSensitivityEngine
 from analytics.order_book_diagnostics_engine import OrderBookDiagnosticsEngine
 from analytics.order_book_rule_sim_engine import OrderBookRuleSimulationEngine
 from analytics.paper_open_cycle_diagnostics_engine import PaperOpenCycleDiagnosticsEngine
+from analytics.profile_comparison_diagnostics_engine import ProfileComparisonDiagnosticsEngine
 from analytics.risk_diagnostics_engine import RiskDiagnosticsEngine
 from analytics.risk_profitability_diagnostics_engine import RiskProfitabilityDiagnosticsEngine
 from analytics.statistics_engine import StatisticsEngine
@@ -1201,6 +1202,69 @@ def command_holding_horizon_diagnostics(args) -> None:
         print(f"  max observed adverse movement: {adverse}")
 
 
+def command_profile_comparison_diagnostics(args) -> None:
+    config, _logger, database = build_context()
+    report = ProfileComparisonDiagnosticsEngine(database, config).build_report()
+
+    print("=== Profile Comparison Diagnostics ===")
+    print("Diagnostics only. Production strategy logic, config, and open cycles are unchanged.")
+    print(
+        f"Effective fee rates: maker={report.fee_rates.maker:.6f} "
+        f"taker={report.fee_rates.taker:.6f}"
+    )
+    print(f"Fee source: {report.fee_rates.source}")
+    print(f"Configured target_profit: {report.target_profit * 100:.5f}%")
+    print("")
+
+    if not report.results:
+        print("No profile comparison data available.")
+        return
+
+    for item in report.results:
+        print(f"--- {item.profile} ---")
+        print(
+            f"Rules: BUY <= {item.buy_threshold:.0f}, SELL >= {item.sell_threshold:.0f}, "
+            f"micro_trend={item.micro_trend_mode}"
+        )
+        print(f"Candidate count: {item.candidate_count}")
+        print(f"BUY count: {item.buy_count}")
+        print(f"SELL count: {item.sell_count}")
+        print(f"Candidate frequency: {item.candidate_frequency * 100:.2f}%")
+        print("Target hit rate:")
+        for hit_rate in item.target_hit_rates:
+            print(
+                f"  N={hit_rate.horizon}: "
+                f"{hit_rate.hit_target_count}/{item.candidate_count} "
+                f"({hit_rate.hit_rate * 100:.2f}%)"
+            )
+
+        if item.average_favorable_movement is None:
+            print("Average favorable movement: N/A")
+            print("Average adverse movement: N/A")
+            print("Best movement: N/A")
+            print("Worst movement: N/A")
+        else:
+            print(f"Average favorable movement: {item.average_favorable_movement:.8f}")
+            print(f"Average adverse movement: {item.average_adverse_movement:.8f}")
+            print(f"Best movement: {item.best_movement:.8f}")
+            print(f"Worst movement: {item.worst_movement:.8f}")
+
+        if item.gross_profit_min is None:
+            print("Estimated gross profit range: N/A")
+            print("Estimated net profit range: N/A")
+        else:
+            print(
+                f"Estimated gross profit range: "
+                f"{item.gross_profit_min:.8f} .. {item.gross_profit_max:.8f}"
+            )
+            print(
+                f"Estimated net profit range: "
+                f"{item.net_profit_min:.8f} .. {item.net_profit_max:.8f}"
+            )
+        print(f"Recommendation score: {item.recommendation_score:.2f}")
+        print("")
+
+
 def command_validation_summary(args) -> None:
     _config, _logger, database = build_context()
     summary = ValidationSummaryEngine(database).build_summary()
@@ -2240,6 +2304,12 @@ def build_parser() -> argparse.ArgumentParser:
         default="mean_reversion_v2",
     )
     holding_horizon_parser.set_defaults(func=command_holding_horizon_diagnostics)
+
+    profile_comparison_parser = subparsers.add_parser(
+        "profile-comparison-diagnostics",
+        help="Dry-run comparison of mean-reversion profile variants",
+    )
+    profile_comparison_parser.set_defaults(func=command_profile_comparison_diagnostics)
 
     paper_stats_parser = subparsers.add_parser("paper-stats", help="РџРѕРєР°Р·Р°С‚Рё paper trading СЃС‚Р°С‚РёСЃС‚РёРєСѓ")
     paper_stats_parser.add_argument("--limit", type=int, default=100)
