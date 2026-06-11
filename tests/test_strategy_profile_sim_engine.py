@@ -105,6 +105,28 @@ def test_strategy_profile_sim_mean_reversion_uses_basic_filters_and_micro_trend(
     assert [item.direction for item in mean_reversion.latest_candidates] == ["SELL", "BUY"]
 
 
+def test_strategy_profile_sim_mean_reversion_v2_uses_calibrated_zones(test_config, tmp_path):
+    database = DatabaseManager(str(tmp_path / "bot.sqlite"))
+    with database.connect() as conn:
+        _insert_snapshot(conn, 0, 25.0, "LOW", "ASK_PRESSURE", "BUY_DOMINANT")
+        _insert_snapshot(conn, 1, 75.0, "LOW", "BID_PRESSURE", "SELL_DOMINANT")
+        _insert_snapshot(conn, 2, 24.0, "LOW", "BID_PRESSURE", "NEUTRAL")
+        _insert_snapshot(conn, 3, 50.0, "HIGH", "BID_PRESSURE", "BUY_DOMINANT")
+        conn.commit()
+
+    engine = StrategyProfileSimulationEngine(database, test_config)
+    v1 = engine.build_report("mean_reversion_v1")
+    v2 = engine.build_report("mean_reversion_v2")
+
+    assert v1.total_entry_zone_samples == 0
+    assert v1.pass_count == 0
+    assert v2.total_entry_zone_samples == 3
+    assert v2.pass_count == 2
+    assert v2.buy_candidates == 1
+    assert v2.sell_candidates == 1
+    assert ("micro_trend", 1) in v2.remaining_blocking_filters
+
+
 def test_strategy_profile_sim_rejects_unknown_profile(test_config, tmp_path):
     database = DatabaseManager(str(tmp_path / "bot.sqlite"))
 

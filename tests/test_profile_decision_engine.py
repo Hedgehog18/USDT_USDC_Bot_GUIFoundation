@@ -77,3 +77,30 @@ def test_profile_decision_engine_mean_reversion_sell_candidate(test_config):
     )
 
     assert decision.action == "SELL_USDC"
+
+
+def test_profile_decision_engine_mean_reversion_v2_uses_calibrated_buy_zone(test_config):
+    decision = StrategyProfileDecisionEngine(test_config, "mean_reversion_v2").make_decision(
+        _state(work_position=25.0, micro_trend="BUY_DOMINANT", order_book_pressure="ASK_PRESSURE")
+    )
+
+    assert decision.action == "BUY_USDC"
+    assert "mean_reversion_v2" in decision.reason
+
+
+def test_profile_decision_engine_mean_reversion_v2_uses_calibrated_sell_zone(test_config):
+    decision = StrategyProfileDecisionEngine(test_config, "mean_reversion_v2").make_decision(
+        _state(work_position=75.0, micro_trend="SELL_DOMINANT", center_confidence="LOW")
+    )
+
+    assert decision.action == "SELL_USDC"
+    assert "mean_reversion_v2" in decision.reason
+
+
+def test_profile_decision_engine_mean_reversion_v2_keeps_strict_micro_trend(test_config):
+    decision = StrategyProfileDecisionEngine(test_config, "mean_reversion_v2").make_decision(
+        _state(work_position=25.0, micro_trend="NEUTRAL")
+    )
+
+    assert decision.action == "WAIT"
+    assert "micro trend not confirmed" in decision.reason

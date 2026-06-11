@@ -8,7 +8,7 @@ from config.config_manager import BotConfig
 from storage.database_manager import DatabaseManager
 
 
-SUPPORTED_STRATEGY_PROFILES = ("strict_current", "mean_reversion_v1")
+SUPPORTED_STRATEGY_PROFILES = ("strict_current", "mean_reversion_v1", "mean_reversion_v2")
 
 
 @dataclass(frozen=True)
@@ -52,7 +52,7 @@ class StrategyProfileSimulationEngine:
             supported = ", ".join(SUPPORTED_STRATEGY_PROFILES)
             raise ValueError(f"Unsupported strategy profile: {profile}. Supported: {supported}")
 
-        rows = [self._evaluate_row(row) for row in self._load_snapshot_rows()]
+        rows = [self._evaluate_row(row, profile) for row in self._load_snapshot_rows()]
         entry_rows = [row for row in rows if row["zone"] in {"BUY", "SELL"}]
         passed_rows = []
         blocking_filters: Counter[str] = Counter()
@@ -99,7 +99,7 @@ class StrategyProfileSimulationEngine:
         )
 
     def _profile_filters(self, profile: str, row: dict) -> dict[str, bool | None]:
-        if profile == "mean_reversion_v1":
+        if profile in {"mean_reversion_v1", "mean_reversion_v2"}:
             return {
                 "spread_stability": row["filters"]["spread_stability"],
                 "market_health": row["filters"]["market_health"],
@@ -151,7 +151,6 @@ class StrategyProfileSimulationEngine:
             result.append({
                 "timestamp": clean_display_text(timestamp),
                 "work_position": position,
-                "zone": self._zone(position),
                 "spread": self._float(spread),
                 "center_confidence": self._text(center_confidence),
                 "market_regime": self._text(market_regime),
@@ -165,10 +164,11 @@ class StrategyProfileSimulationEngine:
             })
         return result
 
-    def _evaluate_row(self, row: dict) -> dict:
-        zone = row["zone"]
+    def _evaluate_row(self, row: dict, profile: str) -> dict:
+        zone = self._zone(row["work_position"], profile)
         return {
             **row,
+            "zone": zone,
             "filters": {
                 "center_confidence": row["center_confidence"] not in {"LOW", "UNKNOWN", ""},
                 "spread_stability": 0.0 < row["spread"] <= self.config.max_allowed_spread,
@@ -185,10 +185,12 @@ class StrategyProfileSimulationEngine:
             },
         }
 
-    def _zone(self, work_position: float) -> str:
-        if work_position <= self.config.buy_zone_max:
+    def _zone(self, work_position: float, profile: str) -> str:
+        buy_zone_max = 25.0 if profile == "mean_reversion_v2" else self.config.buy_zone_max
+        sell_zone_min = 75.0 if profile == "mean_reversion_v2" else self.config.sell_zone_min
+        if work_position <= buy_zone_max:
             return "BUY"
-        if work_position >= self.config.sell_zone_min:
+        if work_position >= sell_zone_min:
             return "SELL"
         return "CENTER"
 

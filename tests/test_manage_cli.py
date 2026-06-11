@@ -60,6 +60,21 @@ def test_manage_cli_backtest_accepts_strategy_profile():
     assert args.debug_decisions is True
 
 
+def test_manage_cli_backtest_accepts_mean_reversion_v2_profile():
+    parser = build_parser()
+    args = parser.parse_args([
+        "backtest",
+        "--interval",
+        "1m",
+        "--limit",
+        "100",
+        "--profile",
+        "mean_reversion_v2",
+    ])
+
+    assert args.profile == "mean_reversion_v2"
+
+
 def test_manage_cli_has_backtest_runs_command():
     parser = build_parser()
     args = parser.parse_args(["backtest-runs", "--limit", "3"])
@@ -167,6 +182,19 @@ def test_manage_cli_paper_cycle_accepts_strategy_profile():
     assert args.force_refresh_market_data is True
 
 
+def test_manage_cli_paper_cycle_accepts_mean_reversion_v2_profile():
+    parser = build_parser()
+    args = parser.parse_args([
+        "paper-cycle-sim",
+        "--iterations",
+        "3",
+        "--profile",
+        "mean_reversion_v2",
+    ])
+
+    assert args.profile == "mean_reversion_v2"
+
+
 def test_manage_cli_has_long_paper_run_command():
     parser = build_parser()
     args = parser.parse_args(["long-paper-run", "--iterations", "500", "--interval", "5"])
@@ -190,6 +218,21 @@ def test_manage_cli_long_paper_run_accepts_strategy_profile():
     ])
 
     assert args.profile == "mean_reversion_v1"
+
+
+def test_manage_cli_long_paper_run_accepts_mean_reversion_v2_profile():
+    parser = build_parser()
+    args = parser.parse_args([
+        "long-paper-run",
+        "--iterations",
+        "500",
+        "--interval",
+        "5",
+        "--profile",
+        "mean_reversion_v2",
+    ])
+
+    assert args.profile == "mean_reversion_v2"
 
 
 def test_manage_cli_has_entry_threshold_sensitivity_command():
@@ -384,6 +427,18 @@ def test_manage_cli_has_strategy_profile_sim_command():
     assert args.command == "strategy-profile-sim"
     assert args.profile == "mean_reversion_v1"
     assert args.latest == 4
+
+
+def test_manage_cli_strategy_profile_sim_accepts_mean_reversion_v2_profile():
+    parser = build_parser()
+    args = parser.parse_args([
+        "strategy-profile-sim",
+        "--profile",
+        "mean_reversion_v2",
+    ])
+
+    assert args.command == "strategy-profile-sim"
+    assert args.profile == "mean_reversion_v2"
 
 
 def test_manage_cli_has_validation_summary_command():
