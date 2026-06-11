@@ -305,6 +305,18 @@ def test_manage_cli_has_profile_comparison_diagnostics_command():
     assert args.command == "profile-comparison-diagnostics"
 
 
+def test_manage_cli_has_post_entry_path_diagnostics_command():
+    parser = build_parser()
+    args = parser.parse_args([
+        "post-entry-path-diagnostics",
+        "--profile",
+        "mean_reversion_v2",
+    ])
+
+    assert args.command == "post-entry-path-diagnostics"
+    assert args.profile == "mean_reversion_v2"
+
+
 def test_manage_cli_has_long_paper_runs_command():
     parser = build_parser()
     args = parser.parse_args(["long-paper-runs", "--limit", "20"])

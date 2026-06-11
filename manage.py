@@ -57,6 +57,7 @@ from analytics.micro_trend_sensitivity_engine import MicroTrendSensitivityEngine
 from analytics.order_book_diagnostics_engine import OrderBookDiagnosticsEngine
 from analytics.order_book_rule_sim_engine import OrderBookRuleSimulationEngine
 from analytics.paper_open_cycle_diagnostics_engine import PaperOpenCycleDiagnosticsEngine
+from analytics.post_entry_path_diagnostics_engine import PostEntryPathDiagnosticsEngine
 from analytics.profile_comparison_diagnostics_engine import ProfileComparisonDiagnosticsEngine
 from analytics.risk_diagnostics_engine import RiskDiagnosticsEngine
 from analytics.risk_profitability_diagnostics_engine import RiskProfitabilityDiagnosticsEngine
@@ -1265,6 +1266,74 @@ def command_profile_comparison_diagnostics(args) -> None:
         print("")
 
 
+def command_post_entry_path_diagnostics(args) -> None:
+    config, _logger, database = build_context()
+    report = PostEntryPathDiagnosticsEngine(database, config).build_report(profile=args.profile)
+
+    print("=== Post Entry Path Diagnostics ===")
+    print("Diagnostics only. Trading logic, config, and open cycles are unchanged.")
+    print(f"Profile: {report.profile}")
+    print(f"Configured target_profit: {report.target_profit * 100:.5f}%")
+    print("")
+
+    if not report.candidates:
+        print("No post-entry path data available.")
+        return
+
+    print("--- Candidates ---")
+    for index, item in enumerate(report.candidates, start=1):
+        print(f"Candidate #{index}")
+        print(f"  Timestamp: {item.timestamp}")
+        print(f"  Direction: {item.direction}")
+        print(f"  Entry price: {item.entry_price:.8f}")
+        print(f"  Target price: {item.target_price:.8f}")
+        print(f"  Work position: {item.work_position:.4f}")
+        print(f"  Micro trend: {item.micro_trend}")
+        print("  Next prices:")
+        for horizon, price in item.next_prices:
+            price_text = "N/A" if price is None else f"{price:.8f}"
+            print(f"    N={horizon}: {price_text}")
+
+        favorable = (
+            "N/A"
+            if item.max_favorable_movement is None
+            else f"{item.max_favorable_movement:.8f}"
+        )
+        adverse = (
+            "N/A"
+            if item.max_adverse_movement is None
+            else f"{item.max_adverse_movement:.8f}"
+        )
+        print(f"  Max favorable movement: {favorable}")
+        print(f"  Max adverse movement: {adverse}")
+        print(f"  Did hit target: {item.did_hit_target}")
+        print(f"  Did move halfway to target: {item.did_move_halfway_to_target}")
+        print(f"  Did reverse against entry: {item.did_reverse_against_entry}")
+        print(f"  Failure mode: {item.failure_mode}")
+
+    summary = report.summary
+    print("--- Aggregate Summary ---")
+    print(f"Candidates count: {summary.candidates_count}")
+    print(f"Hit target rate: {summary.hit_target_rate * 100:.2f}%")
+    print(f"Halfway-to-target rate: {summary.halfway_to_target_rate * 100:.2f}%")
+    if summary.average_max_favorable_movement is None:
+        print("Average max favorable movement: N/A")
+        print("Average max adverse movement: N/A")
+        print("Average time to best favorable movement: N/A")
+    else:
+        print(f"Average max favorable movement: {summary.average_max_favorable_movement:.8f}")
+        print(f"Average max adverse movement: {summary.average_max_adverse_movement:.8f}")
+        print(
+            "Average time to best favorable movement: "
+            f"{summary.average_time_to_best_favorable_movement:.2f} snapshots"
+        )
+    print(f"Common failure mode: {summary.common_failure_mode}")
+    if summary.failure_modes:
+        print("Failure modes:")
+        for mode, count in summary.failure_modes:
+            print(f"  {mode}: {count}")
+
+
 def command_validation_summary(args) -> None:
     _config, _logger, database = build_context()
     summary = ValidationSummaryEngine(database).build_summary()
@@ -2310,6 +2379,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Dry-run comparison of mean-reversion profile variants",
     )
     profile_comparison_parser.set_defaults(func=command_profile_comparison_diagnostics)
+
+    post_entry_path_parser = subparsers.add_parser(
+        "post-entry-path-diagnostics",
+        help="Show price paths after mean-reversion entry candidates",
+    )
+    post_entry_path_parser.add_argument(
+        "--profile",
+        choices=("mean_reversion_v1", "mean_reversion_v2"),
+        default="mean_reversion_v2",
+    )
+    post_entry_path_parser.set_defaults(func=command_post_entry_path_diagnostics)
 
     paper_stats_parser = subparsers.add_parser("paper-stats", help="РџРѕРєР°Р·Р°С‚Рё paper trading СЃС‚Р°С‚РёСЃС‚РёРєСѓ")
     paper_stats_parser.add_argument("--limit", type=int, default=100)
