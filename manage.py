@@ -48,6 +48,7 @@ from analytics.data_source_check_engine import DataSourceCheckEngine
 from analytics.decision_diagnostics_engine import DecisionDiagnosticsEngine
 from analytics.entry_zone_diagnostics_engine import EntryZoneDiagnosticsEngine
 from analytics.entry_zone_debug_report import EntryZoneDebugReportBuilder
+from analytics.entry_threshold_sensitivity_engine import EntryThresholdSensitivityEngine
 from analytics.fee_model_report_engine import FeeModelReportEngine
 from analytics.filter_pass_diagnostics_engine import FilterPassDiagnosticsEngine
 from analytics.order_book_diagnostics_engine import OrderBookDiagnosticsEngine
@@ -852,6 +853,58 @@ def command_strategy_profile_sim(args) -> None:
             )
     else:
         print("- No candidates.")
+
+
+def command_entry_threshold_sensitivity(args) -> None:
+    config, _logger, database = build_context()
+    report = EntryThresholdSensitivityEngine(database, config).build_report(profile=args.profile)
+
+    print("=== Entry Threshold Sensitivity ===")
+    print("Dry run only. Production strategy thresholds and trading behavior are unchanged.")
+    print(f"Profile: {report.profile}")
+    print(
+        f"Configured thresholds: BUY <= {report.configured_buy_threshold:.1f} / "
+        f"SELL >= {report.configured_sell_threshold:.1f}"
+    )
+    print(
+        f"Effective fee rates: maker={report.fee_rates.maker:.6f} "
+        f"taker={report.fee_rates.taker:.6f}"
+    )
+    print(f"Fee source: {report.fee_rates.source}")
+    print("")
+
+    if not report.variants or report.variants[0].total_samples == 0:
+        print("No market snapshot data available.")
+        return
+
+    for item in report.variants:
+        print(f"--- BUY <= {item.buy_threshold:.1f} / SELL >= {item.sell_threshold:.1f} ---")
+        print(f"Total samples: {item.total_samples}")
+        print(f"BUY zone count: {item.buy_zone_count}")
+        print(f"SELL zone count: {item.sell_zone_count}")
+        print(f"Candidate count: {item.candidate_count}")
+        print(f"Micro trend pass count: {item.micro_trend_pass_count}")
+        print(f"Risk profitability pass count: {item.risk_profitability_pass_count}")
+        print(f"Min notional/order sizing pass count: {item.min_notional_pass_count}")
+        print(f"Expected trade frequency estimate: {item.expected_trade_frequency * 100:.2f}%")
+        if item.gross_profit_min is None:
+            print("Estimated gross profit range: N/A")
+            print("Estimated net profit range: N/A")
+        else:
+            print(
+                "Estimated gross profit range: "
+                f"{item.gross_profit_min:.8f} .. {item.gross_profit_max:.8f}"
+            )
+            print(
+                "Estimated net profit range: "
+                f"{item.net_profit_min:.8f} .. {item.net_profit_max:.8f}"
+            )
+        print("Remaining blockers:")
+        if item.remaining_blockers:
+            for name, count in item.remaining_blockers:
+                print(f"- {name}: {count}")
+        else:
+            print("- None")
 
 
 def command_validation_summary(args) -> None:
@@ -1684,6 +1737,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     strategy_profile_sim_parser.add_argument("--latest", type=int, default=10)
     strategy_profile_sim_parser.set_defaults(func=command_strategy_profile_sim)
+
+    entry_threshold_parser = subparsers.add_parser(
+        "entry-threshold-sensitivity",
+        help="Dry-run mean_reversion_v1 entry threshold sensitivity diagnostics",
+    )
+    entry_threshold_parser.add_argument(
+        "--profile",
+        choices=("mean_reversion_v1",),
+        default="mean_reversion_v1",
+    )
+    entry_threshold_parser.set_defaults(func=command_entry_threshold_sensitivity)
 
     validation_summary_parser = subparsers.add_parser(
         "validation-summary",

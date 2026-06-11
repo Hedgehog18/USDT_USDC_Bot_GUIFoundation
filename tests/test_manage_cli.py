@@ -192,6 +192,18 @@ def test_manage_cli_long_paper_run_accepts_strategy_profile():
     assert args.profile == "mean_reversion_v1"
 
 
+def test_manage_cli_has_entry_threshold_sensitivity_command():
+    parser = build_parser()
+    args = parser.parse_args([
+        "entry-threshold-sensitivity",
+        "--profile",
+        "mean_reversion_v1",
+    ])
+
+    assert args.command == "entry-threshold-sensitivity"
+    assert args.profile == "mean_reversion_v1"
+
+
 def test_manage_cli_has_long_paper_runs_command():
     parser = build_parser()
     args = parser.parse_args(["long-paper-runs", "--limit", "20"])
