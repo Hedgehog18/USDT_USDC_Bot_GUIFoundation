@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 import requests
@@ -59,15 +60,21 @@ class BinanceMarketDataProvider:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.cache = cache
+        self.last_debug_events: list[dict[str, Any]] = []
+
+    def reset_debug_events(self) -> None:
+        self.last_debug_events.clear()
 
     def get_bid_ask(self, symbol: str) -> BidAsk:
         cache_key = f"bid_ask:{symbol}"
         cached = self.cache.get(cache_key) if self.cache else None
         if cached is not None:
+            self._record_debug_event("bid_ask", "CACHE", cache_key)
             return cached
 
         data = self._get("/api/v3/ticker/bookTicker", {"symbol": symbol})
         result = BidAsk(bid=float(data["bidPrice"]), ask=float(data["askPrice"]))
+        self._record_debug_event("bid_ask", "BINANCE", cache_key)
 
         if self.cache:
             self.cache.set(cache_key, result)
@@ -78,6 +85,7 @@ class BinanceMarketDataProvider:
         cache_key = f"klines:{symbol}:{interval}:{limit}"
         cached = self.cache.get(cache_key) if self.cache else None
         if cached is not None:
+            self._record_debug_event("klines", "CACHE", cache_key)
             return cached
 
         data = self._get(
@@ -85,6 +93,7 @@ class BinanceMarketDataProvider:
             {"symbol": symbol, "interval": interval, "limit": limit},
         )
         result = KlineCloseData(closes=[float(row[4]) for row in data])
+        self._record_debug_event("klines", "BINANCE", cache_key)
 
         if self.cache:
             self.cache.set(cache_key, result)
@@ -96,6 +105,7 @@ class BinanceMarketDataProvider:
         cache_key = f"order_book:{symbol}:{limit}"
         cached = self.cache.get(cache_key) if self.cache else None
         if cached is not None:
+            self._record_debug_event("order_book", "CACHE", cache_key)
             return cached
 
         data = self._get("/api/v3/depth", {"symbol": symbol, "limit": limit})
@@ -103,6 +113,7 @@ class BinanceMarketDataProvider:
             bids=[(float(price), float(qty)) for price, qty in data.get("bids", [])],
             asks=[(float(price), float(qty)) for price, qty in data.get("asks", [])],
         )
+        self._record_debug_event("order_book", "BINANCE", cache_key)
 
         if self.cache:
             self.cache.set(cache_key, result)
@@ -113,6 +124,7 @@ class BinanceMarketDataProvider:
         cache_key = f"recent_trades:{symbol}:{limit}"
         cached = self.cache.get(cache_key) if self.cache else None
         if cached is not None:
+            self._record_debug_event("recent_trades", "CACHE", cache_key)
             return cached
 
         data = self._get("/api/v3/trades", {"symbol": symbol, "limit": limit})
@@ -124,11 +136,21 @@ class BinanceMarketDataProvider:
             )
             for row in data
         ]
+        self._record_debug_event("recent_trades", "BINANCE", cache_key)
 
         if self.cache:
             self.cache.set(cache_key, result)
 
         return result
+
+    def _record_debug_event(self, method: str, source: str, cache_key: str) -> None:
+        self.last_debug_events.append({
+            "timestamp": datetime.utcnow().isoformat(),
+            "method": method,
+            "source": source,
+            "cache_key": cache_key,
+            "cache_hit": source == "CACHE",
+        })
 
     def _get(self, path: str, params: dict[str, Any]) -> Any:
         url = f"{self.base_url}{path}"

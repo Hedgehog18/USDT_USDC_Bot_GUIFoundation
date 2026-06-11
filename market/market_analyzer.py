@@ -34,24 +34,66 @@ class MarketAnalyzer:
         self.fallback_callback = fallback_callback
         self.last_data_source = "UNKNOWN"
         self.last_fallback_error = ""
+        self.last_debug_info: dict = {}
 
     def analyze_market(self) -> MarketState:
+        self._reset_provider_debug()
         if self.use_real_data:
             try:
                 state = self._analyze_real_market()
                 self.last_data_source = "BINANCE"
                 self.last_fallback_error = ""
+                self._update_debug_info("BINANCE")
                 return state
             except BinanceMarketDataError as exc:
                 # Тимчасовий fallback, щоб Demo не падав при відсутності інтернету.
                 self.last_data_source = "FALLBACK"
                 self.last_fallback_error = str(exc)
+                self.last_debug_info = {
+                    "data_source": "FALLBACK",
+                    "cache_hits": 0,
+                    "cache_misses": 0,
+                    "last_fetch_timestamp": "",
+                    "events": [],
+                    "fallback_error": str(exc),
+                }
                 self._notify_fallback(str(exc))
                 return self._analyze_mock_market()
 
         self.last_data_source = "MOCK"
         self.last_fallback_error = ""
+        self.last_debug_info = {
+            "data_source": "MOCK",
+            "cache_hits": 0,
+            "cache_misses": 0,
+            "last_fetch_timestamp": "",
+            "events": [],
+            "fallback_error": "",
+        }
         return self._analyze_mock_market()
+
+    def _reset_provider_debug(self) -> None:
+        reset = getattr(self.provider, "reset_debug_events", None)
+        if callable(reset):
+            reset()
+
+    def _update_debug_info(self, data_source: str) -> None:
+        events = list(getattr(self.provider, "last_debug_events", []))
+        self.last_debug_info = {
+            "data_source": data_source,
+            "cache_hits": sum(1 for item in events if item.get("cache_hit")),
+            "cache_misses": sum(1 for item in events if not item.get("cache_hit")),
+            "last_fetch_timestamp": self._latest_fetch_timestamp(events),
+            "events": events,
+            "fallback_error": "",
+        }
+
+    @staticmethod
+    def _latest_fetch_timestamp(events: list[dict]) -> str:
+        for item in reversed(events):
+            if item.get("source") == "BINANCE":
+                return str(item.get("timestamp", ""))
+        return ""
 
     def _notify_fallback(self, message: str) -> None:
         if self.fallback_callback is None:

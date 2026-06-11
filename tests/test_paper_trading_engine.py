@@ -79,6 +79,20 @@ class FakeBot:
         self.risk_manager = FakeRiskManager()
 
 
+class FakeCache:
+    def __init__(self):
+        self.clear_count = 0
+
+    def clear(self):
+        self.clear_count += 1
+
+
+class FakeBotWithCache(FakeBot):
+    def __init__(self):
+        super().__init__()
+        self.market_data_cache = FakeCache()
+
+
 def test_paper_trading_engine_runs(test_config, tmp_path: Path):
     database = DatabaseManager(str(tmp_path / "bot.sqlite"))
     result = PaperTradingEngine(test_config, database, bot=FakeBot()).run(2)
@@ -87,3 +101,17 @@ def test_paper_trading_engine_runs(test_config, tmp_path: Path):
     assert result.opened_cycles == 0
     assert result.final_portfolio.total_value > 0
     assert database.count_rows("paper_safety_events") == 2
+
+
+def test_paper_trading_engine_force_refresh_clears_market_cache(test_config, tmp_path: Path):
+    database = DatabaseManager(str(tmp_path / "bot.sqlite"))
+    bot = FakeBotWithCache()
+
+    PaperTradingEngine(
+        test_config,
+        database,
+        bot=bot,
+        force_refresh_market_data=True,
+    ).run(2)
+
+    assert bot.market_data_cache.clear_count == 2

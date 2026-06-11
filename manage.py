@@ -104,15 +104,49 @@ def _build_decision_debug_callback(profile: str):
 
     def callback(item: dict) -> None:
         counter["count"] += 1
+        market_state = item.get("market_state")
+        market_debug = item.get("market_debug_info") or {}
+        cache_hits = market_debug.get("cache_hits", "N/A")
+        cache_misses = market_debug.get("cache_misses", "N/A")
+        last_fetch = market_debug.get("last_fetch_timestamp") or "N/A"
+        fallback_error = market_debug.get("fallback_error") or ""
+        fallback_part = f" | fallback_error={fallback_error}" if fallback_error else ""
+        if market_state is None:
+            print(
+                "[decision-debug] "
+                f"index={item['index']} | "
+                f"work_position={item['work_position']:.4f} | "
+                f"profile={profile} | "
+                f"action={item['action']} | "
+                f"reason={item['reason']} | "
+                f"risk_allowed={item['risk_allowed']} | "
+                f"risk_reason={item['risk_reason']}"
+            )
+            return
+
         print(
             "[decision-debug] "
             f"index={item['index']} | "
-            f"work_position={item['work_position']:.4f} | "
+            f"timestamp={market_state.created_at.isoformat()} | "
+            f"price={market_state.price:.8f} | "
+            f"bid={market_state.bid:.8f} | "
+            f"ask={market_state.ask:.8f} | "
+            f"spread={market_state.spread:.8f} | "
+            f"work_position={market_state.work_position:.4f} | "
+            f"short_position={market_state.short_position:.4f} | "
+            f"long_position={market_state.long_position:.4f} | "
+            f"micro_trend={market_state.micro_trend} | "
+            f"order_book_pressure={market_state.order_book_pressure} | "
+            f"data_source={item.get('data_source', 'UNKNOWN')} | "
+            f"cache_hits={cache_hits} | "
+            f"cache_misses={cache_misses} | "
+            f"last_fetch={last_fetch} | "
             f"profile={profile} | "
             f"action={item['action']} | "
             f"reason={item['reason']} | "
             f"risk_allowed={item['risk_allowed']} | "
             f"risk_reason={item['risk_reason']}"
+            f"{fallback_part}"
         )
 
     return callback, counter
@@ -1139,6 +1173,7 @@ def command_paper_cycle_sim(args) -> None:
         bot=bot,
         decision_debug_callback=debug_callback,
         risk_debug_callback=risk_debug_callback,
+        force_refresh_market_data=args.force_refresh_market_data,
     ).run(args.iterations)
 
     logger.info(
@@ -1620,6 +1655,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     paper_cycle_sim_parser.add_argument("--debug-decisions", action="store_true")
     paper_cycle_sim_parser.add_argument("--debug-risk-details", action="store_true")
+    paper_cycle_sim_parser.add_argument("--force-refresh-market-data", action="store_true")
     paper_cycle_sim_parser.set_defaults(func=command_paper_cycle_sim)
 
     long_paper_run_parser = subparsers.add_parser("long-paper-run", help="Run long paper validation workflow")

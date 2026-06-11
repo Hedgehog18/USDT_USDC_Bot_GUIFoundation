@@ -37,6 +37,7 @@ class PaperTradingEngine:
         bot: BotEngine | None = None,
         decision_debug_callback: Callable[[dict], None] | None = None,
         risk_debug_callback: Callable[[dict], None] | None = None,
+        force_refresh_market_data: bool = False,
     ) -> None:
         self.config = config
         self.database = database
@@ -53,6 +54,7 @@ class PaperTradingEngine:
         self.safety_engine = PaperSafetyEngine(config)
         self.decision_debug_callback = decision_debug_callback
         self.risk_debug_callback = risk_debug_callback
+        self.force_refresh_market_data = force_refresh_market_data
 
     def run(self, iterations: int) -> PaperTradingRunResult:
         if iterations <= 0:
@@ -69,6 +71,8 @@ class PaperTradingEngine:
         safety_stops = 0
 
         for index in range(iterations):
+            if self.force_refresh_market_data:
+                self._clear_market_data_cache()
             market_state = self.bot.market_analyzer.analyze_market()
             portfolio = self.portfolio_manager.get_portfolio(market_state.price)
 
@@ -97,11 +101,14 @@ class PaperTradingEngine:
             if self.decision_debug_callback and self._is_potential_entry_state(market_state):
                 self.decision_debug_callback({
                     "index": index,
+                    "market_state": market_state,
                     "work_position": market_state.work_position,
                     "action": decision.action,
                     "reason": decision.reason,
                     "risk_allowed": risk.allowed,
                     "risk_reason": risk.reason,
+                    "data_source": getattr(self.bot.market_analyzer, "last_data_source", "UNKNOWN"),
+                    "market_debug_info": getattr(self.bot.market_analyzer, "last_debug_info", {}),
                 })
             if self.risk_debug_callback and decision.action in {"BUY_USDC", "SELL_USDC"}:
                 self.risk_debug_callback({
@@ -140,3 +147,15 @@ class PaperTradingEngine:
             market_state.work_position <= self.config.buy_zone_max
             or market_state.work_position >= self.config.sell_zone_min
         )
+
+    def _clear_market_data_cache(self) -> None:
+        cache = getattr(self.bot, "market_data_cache", None)
+        clear = getattr(cache, "clear", None)
+        if callable(clear):
+            clear()
+
+        provider = getattr(getattr(self.bot, "market_analyzer", None), "provider", None)
+        provider_cache = getattr(provider, "cache", None)
+        provider_clear = getattr(provider_cache, "clear", None)
+        if callable(provider_clear):
+            provider_clear()
