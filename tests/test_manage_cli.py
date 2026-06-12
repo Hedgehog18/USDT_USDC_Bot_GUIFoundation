@@ -345,6 +345,18 @@ def test_manage_cli_has_exit_risk_diagnostics_command():
     assert args.profile == "mean_reversion_v2_small_target"
 
 
+def test_manage_cli_has_max_holding_sensitivity_command():
+    parser = build_parser()
+    args = parser.parse_args([
+        "max-holding-sensitivity",
+        "--profile",
+        "mean_reversion_v2_small_target",
+    ])
+
+    assert args.command == "max-holding-sensitivity"
+    assert args.profile == "mean_reversion_v2_small_target"
+
+
 def test_manage_cli_has_direction_outcome_diagnostics_command():
     parser = build_parser()
     args = parser.parse_args([

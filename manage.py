@@ -55,6 +55,7 @@ from analytics.exit_risk_diagnostics_engine import ExitRiskDiagnosticsEngine
 from analytics.fee_model_report_engine import FeeModelReportEngine
 from analytics.filter_pass_diagnostics_engine import FilterPassDiagnosticsEngine
 from analytics.holding_horizon_diagnostics_engine import HoldingHorizonDiagnosticsEngine
+from analytics.max_holding_sensitivity_engine import MaxHoldingSensitivityEngine
 from analytics.micro_trend_sensitivity_engine import MicroTrendSensitivityEngine
 from analytics.order_book_diagnostics_engine import OrderBookDiagnosticsEngine
 from analytics.order_book_rule_sim_engine import OrderBookRuleSimulationEngine
@@ -1503,6 +1504,46 @@ def command_exit_risk_diagnostics(args) -> None:
     print(report.recommendation)
 
 
+def command_max_holding_sensitivity(args) -> None:
+    config, _logger, database = build_context()
+    current_price, source, timestamp = _load_current_paper_price(config, database)
+    report = MaxHoldingSensitivityEngine(database, config).build_report(
+        profile=args.profile,
+        current_price=current_price,
+        current_price_source=source,
+        current_price_timestamp=timestamp,
+    )
+
+    print("=== Max Holding Sensitivity ===")
+    print(f"Profile: {report.profile}")
+    print(f"Current price: {report.current_price:.8f}")
+    print(f"Current price source: {report.current_price_source}")
+    print(f"Current price timestamp: {report.current_price_timestamp}")
+    print(f"Total cycles: {report.total_cycles}")
+    print("")
+    if not report.results:
+        print("No max holding sensitivity data available.")
+        return
+
+    for item in report.results:
+        print(f"--- Max holding: {_format_duration(item.max_age_seconds)} ---")
+        print(f"Cycles affected: {item.cycles_affected}")
+        print(f"Would close by timeout: {item.would_close_by_timeout}")
+        print(f"Timeout close estimated PnL: {item.timeout_close_estimated_pnl:.8f}")
+        print(f"Realized target closes: {item.realized_target_closes}")
+        print(f"Combined PnL: {item.combined_pnl:.8f}")
+        print(f"Win rate including timeout closes: {item.win_rate_including_timeouts * 100:.2f}%")
+        print(f"Worst timeout loss: {_format_optional_float(item.worst_timeout_loss)}")
+        print(f"Recommendation score: {item.recommendation_score:.8f}")
+        print("")
+
+    print("--- Recommendation ---")
+    if report.recommended_max_age_seconds is None:
+        print("No recommendation: no cycles available.")
+    else:
+        print(f"Best tested max holding: {_format_duration(report.recommended_max_age_seconds)}")
+
+
 def _format_duration(seconds: float | int) -> str:
     seconds = int(seconds)
     hours, remainder = divmod(seconds, 3600)
@@ -2642,6 +2683,17 @@ def build_parser() -> argparse.ArgumentParser:
         default="mean_reversion_v2_small_target",
     )
     exit_risk_parser.set_defaults(func=command_exit_risk_diagnostics)
+
+    max_holding_sensitivity_parser = subparsers.add_parser(
+        "max-holding-sensitivity",
+        help="Dry-run max holding time sensitivity for paper cycles",
+    )
+    max_holding_sensitivity_parser.add_argument(
+        "--profile",
+        choices=SUPPORTED_RUNTIME_STRATEGY_PROFILES,
+        default="mean_reversion_v2_small_target",
+    )
+    max_holding_sensitivity_parser.set_defaults(func=command_max_holding_sensitivity)
 
     paper_stats_parser = subparsers.add_parser("paper-stats", help="РџРѕРєР°Р·Р°С‚Рё paper trading СЃС‚Р°С‚РёСЃС‚РёРєСѓ")
     paper_stats_parser.add_argument("--limit", type=int, default=100)
