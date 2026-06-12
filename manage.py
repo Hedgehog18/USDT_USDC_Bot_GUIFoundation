@@ -51,6 +51,7 @@ from analytics.entry_confirmation_diagnostics_engine import EntryConfirmationDia
 from analytics.entry_zone_diagnostics_engine import EntryZoneDiagnosticsEngine
 from analytics.entry_zone_debug_report import EntryZoneDebugReportBuilder
 from analytics.entry_threshold_sensitivity_engine import EntryThresholdSensitivityEngine
+from analytics.exit_risk_diagnostics_engine import ExitRiskDiagnosticsEngine
 from analytics.fee_model_report_engine import FeeModelReportEngine
 from analytics.filter_pass_diagnostics_engine import FilterPassDiagnosticsEngine
 from analytics.holding_horizon_diagnostics_engine import HoldingHorizonDiagnosticsEngine
@@ -1447,6 +1448,84 @@ def command_partial_target_diagnostics(args) -> None:
     print(f"75% target still acceptable: {report.seventy_five_percent_target_acceptable}")
 
 
+def command_exit_risk_diagnostics(args) -> None:
+    config, _logger, database = build_context()
+    current_price, source, timestamp = _load_current_paper_price(config, database)
+    report = ExitRiskDiagnosticsEngine(database, config).build_report(
+        profile=args.profile,
+        current_price=current_price,
+        current_price_source=source,
+        current_price_timestamp=timestamp,
+    )
+
+    print("=== Exit Risk Diagnostics ===")
+    print(f"Profile: {report.profile}")
+    print(f"Current price: {report.current_price:.8f}")
+    print(f"Current price source: {report.current_price_source}")
+    print(f"Current price timestamp: {report.current_price_timestamp}")
+    print("")
+    print("--- Open cycles risk ---")
+    if not report.open_cycles:
+        print("No open cycles for this profile.")
+    for item in report.open_cycles:
+        print(
+            f"db_id={item.db_id} | direction={item.direction} | profile={item.profile} | "
+            f"age={_format_duration(item.age_seconds)}"
+        )
+        print(
+            f"  open_price={item.open_price:.8f} | current_price={item.current_price:.8f} | "
+            f"target_price={item.target_price:.8f}"
+        )
+        print(
+            f"  unrealized_pnl={item.unrealized_pnl:.8f} | "
+            f"distance_to_target={item.distance_to_target:.8f} | "
+            f"adverse_move={item.adverse_move_percent:.5f}%"
+        )
+        print("  would_stop_at:")
+        for threshold, would_stop in item.would_stop_at.items():
+            print(f"  - {threshold:.3f}%: {'yes' if would_stop else 'no'}")
+    print("")
+    print("--- Historical closed/open cycles summary ---")
+    summary = report.historical_summary
+    print(f"Closed net profit: {summary.closed_net_profit:.8f}")
+    print(f"Open unrealized pnl: {summary.open_unrealized_pnl:.8f}")
+    print(f"Combined realized + unrealized pnl: {summary.combined_realized_unrealized_pnl:.8f}")
+    print(f"Best closed profit: {_format_optional_float(summary.best_closed_profit)}")
+    print(f"Worst open unrealized loss: {_format_optional_float(summary.worst_open_unrealized_loss)}")
+    print(f"Avg holding time closed cycles: {_format_optional_duration(summary.avg_holding_time_closed_seconds)}")
+    print(f"Avg age open cycles: {_format_optional_duration(summary.avg_age_open_seconds)}")
+    print("")
+    print("--- Max holding simulation ---")
+    for item in report.max_holding_results:
+        print(f"{_format_duration(item.max_age_seconds)}: would_timeout={item.would_timeout_count}")
+    print("")
+    print("--- Recommendation ---")
+    print(report.recommendation)
+
+
+def _format_duration(seconds: float | int) -> str:
+    seconds = int(seconds)
+    hours, remainder = divmod(seconds, 3600)
+    minutes, remaining_seconds = divmod(remainder, 60)
+    if hours:
+        return f"{hours}h {minutes}m {remaining_seconds}s"
+    if minutes:
+        return f"{minutes}m {remaining_seconds}s"
+    return f"{remaining_seconds}s"
+
+
+def _format_optional_duration(seconds: float | None) -> str:
+    if seconds is None:
+        return "N/A"
+    return _format_duration(seconds)
+
+
+def _format_optional_float(value: float | None) -> str:
+    if value is None:
+        return "N/A"
+    return f"{value:.8f}"
+
+
 def command_validation_summary(args) -> None:
     _config, _logger, database = build_context()
     summary = ValidationSummaryEngine(database).build_summary(profile=args.profile)
@@ -2552,6 +2631,17 @@ def build_parser() -> argparse.ArgumentParser:
         default="mean_reversion_v2",
     )
     partial_target_parser.set_defaults(func=command_partial_target_diagnostics)
+
+    exit_risk_parser = subparsers.add_parser(
+        "exit-risk-diagnostics",
+        help="Dry-run stop-loss and max-holding diagnostics for paper cycles",
+    )
+    exit_risk_parser.add_argument(
+        "--profile",
+        choices=SUPPORTED_RUNTIME_STRATEGY_PROFILES,
+        default="mean_reversion_v2_small_target",
+    )
+    exit_risk_parser.set_defaults(func=command_exit_risk_diagnostics)
 
     paper_stats_parser = subparsers.add_parser("paper-stats", help="РџРѕРєР°Р·Р°С‚Рё paper trading СЃС‚Р°С‚РёСЃС‚РёРєСѓ")
     paper_stats_parser.add_argument("--limit", type=int, default=100)

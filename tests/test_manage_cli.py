@@ -333,6 +333,18 @@ def test_manage_cli_has_target_profit_sensitivity_command():
     assert args.profile == "mean_reversion_v2"
 
 
+def test_manage_cli_has_exit_risk_diagnostics_command():
+    parser = build_parser()
+    args = parser.parse_args([
+        "exit-risk-diagnostics",
+        "--profile",
+        "mean_reversion_v2_small_target",
+    ])
+
+    assert args.command == "exit-risk-diagnostics"
+    assert args.profile == "mean_reversion_v2_small_target"
+
+
 def test_manage_cli_has_direction_outcome_diagnostics_command():
     parser = build_parser()
     args = parser.parse_args([
