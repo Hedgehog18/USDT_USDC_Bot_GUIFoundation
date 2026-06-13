@@ -80,6 +80,7 @@ from analytics.strategy_profile_sim_engine import (
 )
 from analytics.strategy_tuning_report_engine import StrategyTuningReportEngine
 from analytics.strategy_validation_engine import StrategyValidationEngine
+from analytics.target_rebase_diagnostics_engine import TargetRebaseDiagnosticsEngine
 from analytics.target_profit_sensitivity_engine import TargetProfitSensitivityEngine
 from analytics.trend_alignment_diagnostics_engine import TrendAlignmentDiagnosticsEngine
 from analytics.trend_strength_diagnostics_engine import TrendStrengthDiagnosticsEngine
@@ -1402,6 +1403,49 @@ def command_range_shift_diagnostics(args) -> None:
         )
     print("")
     print("Recommendation note: diagnostics only; no targets are rebased and no cycles are closed.")
+
+
+def command_target_rebase_diagnostics(args) -> None:
+    config, _logger, database = build_context()
+    report = TargetRebaseDiagnosticsEngine(database, config).build_report(profile=args.profile)
+
+    print("=== Target Rebase Diagnostics ===")
+    print("Dry-run only. Runtime targets, strategy config, and paper cycles are unchanged.")
+    print(f"Profile: {report.profile}")
+    print("")
+
+    print("=== Open Cycles ===")
+    if not report.open_cycles:
+        print("No open cycles for profile.")
+    for item in report.open_cycles:
+        print(
+            f"db_id={item.db_id} | cycle_id={item.cycle_id} | {item.direction} | "
+            f"open={item.open_price:.8f} | original_target={item.original_target:.8f} | "
+            f"current={item.current_price:.8f}"
+        )
+        print(
+            f"  observed_1h_low={_format_optional_float(item.observed_1h_low)} | "
+            f"observed_1h_high={_format_optional_float(item.observed_1h_high)} | "
+            f"current_work_center={_format_optional_float(item.current_work_center)}"
+        )
+        print(
+            f"  target_outside_1h_range={'yes' if item.target_outside_1h_range else 'no'} | "
+            f"suggested_rebased_target={_format_optional_float(item.suggested_rebased_target)} | "
+            "estimated_rebased_profit_or_loss="
+            f"{_format_optional_float(item.estimated_rebased_profit_or_loss)} | "
+            f"would_close_if_rebased_now={'yes' if item.would_close_if_rebased_now else 'no'}"
+        )
+    print("")
+
+    print("=== Dry-run Rebase Scenarios ===")
+    for item in report.scenarios:
+        print(f"--- {item.name} ---")
+        print(f"Affected cycles: {item.affected_cycles}")
+        print(f"Would close now: {item.would_close_now}")
+        print(f"Estimated PnL: {item.estimated_pnl:.8f}")
+        print(f"Remaining open exposure: {item.remaining_open_exposure}")
+        print(f"Recommendation score: {item.recommendation_score:.2f}")
+        print("")
 
 
 def command_holding_horizon_diagnostics(args) -> None:
@@ -3406,6 +3450,17 @@ def build_parser() -> argparse.ArgumentParser:
         default="mean_reversion_v2_small_target",
     )
     range_shift_parser.set_defaults(func=command_range_shift_diagnostics)
+
+    target_rebase_parser = subparsers.add_parser(
+        "target-rebase-diagnostics",
+        help="Dry-run target rebase options for stalled paper cycles",
+    )
+    target_rebase_parser.add_argument(
+        "--profile",
+        choices=SUPPORTED_RUNTIME_STRATEGY_PROFILES,
+        default="mean_reversion_v2_small_target",
+    )
+    target_rebase_parser.set_defaults(func=command_target_rebase_diagnostics)
 
     holding_horizon_parser = subparsers.add_parser(
         "holding-horizon-diagnostics",

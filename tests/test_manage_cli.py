@@ -541,6 +541,18 @@ def test_manage_cli_has_range_shift_diagnostics_command():
     assert args.profile == "mean_reversion_v2_small_target"
 
 
+def test_manage_cli_has_target_rebase_diagnostics_command():
+    parser = build_parser()
+    args = parser.parse_args([
+        "target-rebase-diagnostics",
+        "--profile",
+        "mean_reversion_v2_small_target",
+    ])
+
+    assert args.command == "target-rebase-diagnostics"
+    assert args.profile == "mean_reversion_v2_small_target"
+
+
 def test_manage_cli_has_holding_horizon_diagnostics_command():
     parser = build_parser()
     args = parser.parse_args([
