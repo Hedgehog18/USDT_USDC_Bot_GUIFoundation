@@ -1,6 +1,7 @@
 ﻿import argparse
 
 import sys
+import time
 
 from backtest.backtest_comparison_engine import BacktestComparisonEngine
 from backtest.backtest_comparison_exporter import BacktestComparisonExporter
@@ -2276,6 +2277,79 @@ def command_paper_open_cycles(args) -> None:
         print(f"  reason_not_closed: {item.reason_not_closed}")
 
 
+def command_paper_close_watch(args) -> None:
+    config, _logger, database = build_context()
+    interval = int(args.interval)
+    max_checks = int(args.max_checks)
+    if interval <= 0:
+        raise ValueError("--interval must be greater than 0.")
+    if max_checks <= 0:
+        raise ValueError("--max-checks must be greater than 0.")
+
+    print("=== Paper Close Watch ===")
+    print(f"Profile: {args.profile}")
+    print(f"Interval seconds: {interval}")
+    print(f"Max checks: {max_checks}")
+    print("Read-only diagnostics. This command does not close paper cycles.")
+    print("")
+
+    for check_index in range(1, max_checks + 1):
+        current_price, source, timestamp = _load_current_paper_price(config, database)
+        report = PaperOpenCycleDiagnosticsEngine(database, config).build_report(
+            current_price=current_price,
+            current_price_source=source,
+            current_price_timestamp=timestamp,
+            limit=1000,
+        )
+        open_cycles = [item for item in report.open_cycles if item.profile == args.profile]
+        nearest = min(open_cycles, key=lambda item: abs(item.distance_to_target_percent)) if open_cycles else None
+        close_ready = [item for item in open_cycles if item.close_condition_met]
+
+        print(f"--- Check {check_index}/{max_checks} ---")
+        print(f"Timestamp: {timestamp}")
+        print(f"Current price: {current_price:.8f}")
+        print(f"Current price source: {source}")
+        print(f"Open cycles count: {len(open_cycles)}")
+        if nearest is None:
+            print("Nearest cycle to target: N/A")
+            print("Distance to target: N/A")
+            print("Unrealized PnL: N/A")
+            print("Close condition met: no")
+        else:
+            print(
+                "Nearest cycle to target: "
+                f"db_id={nearest.db_id} cycle_id={nearest.cycle_id} "
+                f"direction={nearest.direction} opened_at={nearest.opened_at}"
+            )
+            print(
+                "Distance to target: "
+                f"{nearest.distance_to_target:.8f} "
+                f"({nearest.distance_to_target_percent:.5f}%)"
+            )
+            print(f"Unrealized PnL: {nearest.unrealized_pnl:.8f}")
+            print(f"Close condition met: {'yes' if nearest.close_condition_met else 'no'}")
+            print(f"Reason: {nearest.reason_not_closed}")
+
+        if close_ready:
+            print("")
+            print("*** CLOSE CONDITION DETECTED ***")
+            for item in close_ready:
+                print(
+                    f"db_id={item.db_id} cycle_id={item.cycle_id} "
+                    f"direction={item.direction} target={item.target_price:.8f} "
+                    f"current={item.current_price:.8f} unrealized_pnl={item.unrealized_pnl:.8f}"
+                )
+            print("This watch command did not close anything.")
+            print("Run long-paper-run or paper close execution to process eligible cycles.")
+            if args.stop_on_close_condition:
+                print("Stopping because --stop-on-close-condition was set.")
+                break
+        print("")
+
+        if check_index < max_checks:
+            time.sleep(interval)
+
+
 def command_paper_stats(args) -> None:
     _config, _logger, database = build_context()
     rows = database.load_recent_paper_cycles(limit=args.limit)
@@ -2641,6 +2715,20 @@ def build_parser() -> argparse.ArgumentParser:
     paper_open_cycles_parser = subparsers.add_parser("paper-open-cycles", help="Show diagnostics for open paper cycles")
     paper_open_cycles_parser.add_argument("--limit", type=int, default=100)
     paper_open_cycles_parser.set_defaults(func=command_paper_open_cycles)
+
+    paper_close_watch_parser = subparsers.add_parser(
+        "paper-close-watch",
+        help="Watch open paper cycles and report close-condition readiness",
+    )
+    paper_close_watch_parser.add_argument(
+        "--profile",
+        choices=SUPPORTED_RUNTIME_STRATEGY_PROFILES,
+        default="mean_reversion_v2_small_target",
+    )
+    paper_close_watch_parser.add_argument("--interval", type=int, default=60)
+    paper_close_watch_parser.add_argument("--max-checks", type=int, default=480)
+    paper_close_watch_parser.add_argument("--stop-on-close-condition", action="store_true")
+    paper_close_watch_parser.set_defaults(func=command_paper_close_watch)
 
     target_profit_sensitivity_parser = subparsers.add_parser(
         "target-profit-sensitivity",

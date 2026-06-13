@@ -169,6 +169,16 @@ def test_manage_cli_has_paper_cycle_commands():
     sim_args = parser.parse_args(["paper-cycle-sim", "--iterations", "3"])
     cycles_args = parser.parse_args(["paper-cycles", "--limit", "5"])
     open_cycles_args = parser.parse_args(["paper-open-cycles", "--limit", "7"])
+    close_watch_args = parser.parse_args([
+        "paper-close-watch",
+        "--profile",
+        "mean_reversion_v2_small_target",
+        "--interval",
+        "10",
+        "--max-checks",
+        "3",
+        "--stop-on-close-condition",
+    ])
 
     assert sim_args.command == "paper-cycle-sim"
     assert sim_args.iterations == 3
@@ -177,6 +187,11 @@ def test_manage_cli_has_paper_cycle_commands():
     assert cycles_args.limit == 5
     assert open_cycles_args.command == "paper-open-cycles"
     assert open_cycles_args.limit == 7
+    assert close_watch_args.command == "paper-close-watch"
+    assert close_watch_args.profile == "mean_reversion_v2_small_target"
+    assert close_watch_args.interval == 10
+    assert close_watch_args.max_checks == 3
+    assert close_watch_args.stop_on_close_condition is True
 
 
 def test_manage_cli_paper_cycle_accepts_strategy_profile():
