@@ -108,6 +108,18 @@ class MLDatasetExporter:
                 "market_regime": state.market_regime,
                 "volatility_regime": state.volatility_regime,
                 "spread": self._format_float(state.spread),
+                "return_1": self._format_float(self._return_n(candles, index, 1)),
+                "return_3": self._format_float(self._return_n(candles, index, 3)),
+                "return_5": self._format_float(self._return_n(candles, index, 5)),
+                "rolling_high_low_range_5": self._format_float(self._rolling_high_low_range(candles, index, 5)),
+                "rolling_high_low_range_10": self._format_float(self._rolling_high_low_range(candles, index, 10)),
+                "distance_to_work_center": self._format_float(candle.close - state.work_center),
+                "distance_to_short_center": self._format_float(candle.close - state.short_center),
+                "distance_to_long_center": self._format_float(candle.close - state.long_center),
+                "candle_body": self._format_float(candle.close - candle.open),
+                "candle_range": self._format_float(candle.high - candle.low),
+                "upper_wick": self._format_float(candle.high - max(candle.open, candle.close)),
+                "lower_wick": self._format_float(min(candle.open, candle.close) - candle.low),
                 "candidate_direction": candidate_direction,
                 "target_price": self._format_float(target_price) if target_price is not None else "",
                 "target_hit_5": int(horizon_hits[5]),
@@ -205,6 +217,18 @@ class MLDatasetExporter:
         return max(movements), min(movements)
 
     @staticmethod
+    def _return_n(candles: list[HistoricalCandle], index: int, periods: int) -> float:
+        previous = candles[index - periods].close
+        if previous == 0:
+            return 0.0
+        return (candles[index].close - previous) / previous
+
+    @staticmethod
+    def _rolling_high_low_range(candles: list[HistoricalCandle], index: int, periods: int) -> float:
+        window = candles[index - periods + 1:index + 1]
+        return max(candle.high for candle in window) - min(candle.low for candle in window)
+
+    @staticmethod
     def _timestamp(open_time: int) -> str:
         return datetime.fromtimestamp(open_time / 1000, tz=timezone.utc).isoformat()
 
@@ -228,6 +252,18 @@ class MLDatasetExporter:
             "market_regime",
             "volatility_regime",
             "spread",
+            "return_1",
+            "return_3",
+            "return_5",
+            "rolling_high_low_range_5",
+            "rolling_high_low_range_10",
+            "distance_to_work_center",
+            "distance_to_short_center",
+            "distance_to_long_center",
+            "candle_body",
+            "candle_range",
+            "upper_wick",
+            "lower_wick",
             "candidate_direction",
             "target_price",
             "target_hit_5",

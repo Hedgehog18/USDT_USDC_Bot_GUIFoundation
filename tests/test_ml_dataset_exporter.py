@@ -52,6 +52,18 @@ def test_ml_dataset_exporter_writes_expected_columns(test_config, tmp_path):
     assert first["market_regime"]
     assert first["volatility_regime"]
     assert first["spread"]
+    assert first["return_1"]
+    assert first["return_3"]
+    assert first["return_5"]
+    assert first["rolling_high_low_range_5"]
+    assert first["rolling_high_low_range_10"]
+    assert first["distance_to_work_center"]
+    assert first["distance_to_short_center"]
+    assert first["distance_to_long_center"]
+    assert first["candle_body"]
+    assert first["candle_range"]
+    assert first["upper_wick"]
+    assert first["lower_wick"]
     assert first["candidate_direction"] in {"WAIT", "BUY_USDC", "SELL_USDC"}
     assert first["target_hit_5"] in {"0", "1"}
     assert first["target_hit_10"] in {"0", "1"}

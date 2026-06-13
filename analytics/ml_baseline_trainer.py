@@ -18,6 +18,26 @@ from sklearn.metrics import (
 from sklearn.pipeline import Pipeline
 
 
+NUMERIC_FEATURES = (
+    "work_position",
+    "short_position",
+    "long_position",
+    "spread",
+    "return_1",
+    "return_3",
+    "return_5",
+    "rolling_high_low_range_5",
+    "rolling_high_low_range_10",
+    "distance_to_work_center",
+    "distance_to_short_center",
+    "distance_to_long_center",
+    "candle_body",
+    "candle_range",
+    "upper_wick",
+    "lower_wick",
+)
+
+
 @dataclass(frozen=True)
 class MLFeatureImportance:
     name: str
@@ -188,15 +208,14 @@ class MLBaselineTrainer:
 
     @staticmethod
     def _features(row: dict[str, str]) -> dict[str, float | str]:
-        return {
-            "work_position": MLBaselineTrainer._float(row.get("work_position")),
-            "short_position": MLBaselineTrainer._float(row.get("short_position")),
-            "long_position": MLBaselineTrainer._float(row.get("long_position")),
-            "spread": MLBaselineTrainer._float(row.get("spread")),
+        features: dict[str, float | str] = {
             "volatility_regime": row.get("volatility_regime") or "UNKNOWN",
             "direction": row.get("candidate_direction") or "UNKNOWN",
             "hour_of_day": MLBaselineTrainer._hour(row.get("timestamp", "")),
         }
+        for name in NUMERIC_FEATURES:
+            features[name] = MLBaselineTrainer._float(row.get(name))
+        return features
 
     @staticmethod
     def _label(row: dict[str, str]) -> int:
