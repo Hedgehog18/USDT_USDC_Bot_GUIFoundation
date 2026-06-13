@@ -81,6 +81,7 @@ from analytics.strategy_tuning_report_engine import StrategyTuningReportEngine
 from analytics.strategy_validation_engine import StrategyValidationEngine
 from analytics.target_profit_sensitivity_engine import TargetProfitSensitivityEngine
 from analytics.trend_alignment_diagnostics_engine import TrendAlignmentDiagnosticsEngine
+from analytics.trend_strength_diagnostics_engine import TrendStrengthDiagnosticsEngine
 from analytics.validation_summary_engine import ValidationSummaryEngine
 from app.text_encoding import clean_display_text
 
@@ -1269,6 +1270,59 @@ def command_trend_filter_sim(args) -> None:
         print("")
 
 
+def command_trend_strength_diagnostics(args) -> None:
+    config, _logger, database = build_context()
+    report = TrendStrengthDiagnosticsEngine(database, config).build_report(profile=args.profile)
+
+    print("=== 1h Trend Strength Diagnostics ===")
+    print("Dry-run only. Runtime profile, strategy config, and paper cycles are unchanged.")
+    print(f"Profile: {report.profile}")
+    print("")
+
+    print("=== Candidates ===")
+    if not report.candidates:
+        print("No candidates available.")
+    for item in report.candidates:
+        print(
+            f"{item.timestamp} | {item.direction} | entry={item.entry_price:.8f} | "
+            f"future/current={_format_optional_float(item.comparison_price)} | "
+            f"trend={item.trend_label} | change={_format_optional_float(item.one_hour_change)} | "
+            f"change_pct={_format_optional_percent(item.one_hour_change_percent)} | "
+            f"slope={_format_optional_float(item.one_hour_slope)} | "
+            f"range=[{_format_optional_float(item.rolling_min)}, {_format_optional_float(item.rolling_max)}] | "
+            f"range_pos={_format_optional_percent(item.position_inside_range)} | "
+            f"near_top={item.near_top_of_range} | near_bottom={item.near_bottom_of_range} | "
+            f"outcome={item.outcome}"
+        )
+    print("")
+
+    print("=== Open Cycles ===")
+    if not report.open_cycles:
+        print("No open cycles for profile.")
+    for item in report.open_cycles:
+        print(
+            f"db_id={item.db_id} | {item.timestamp} | {item.direction} | entry={item.entry_price:.8f} | "
+            f"current={_format_optional_float(item.comparison_price)} | trend={item.trend_label} | "
+            f"change_pct={_format_optional_percent(item.one_hour_change_percent)} | "
+            f"range_pos={_format_optional_percent(item.position_inside_range)} | "
+            f"near_top={item.near_top_of_range} | near_bottom={item.near_bottom_of_range} | "
+            f"outcome={item.outcome}"
+        )
+    print("")
+
+    print("=== Flat Relabel Threshold Simulation ===")
+    for item in report.simulations:
+        print(f"--- {item.name} ---")
+        print(f"Candidates total: {item.candidates_total}")
+        print(f"Candidates kept: {item.candidates_kept}")
+        print(f"Candidates blocked: {item.candidates_blocked}")
+        print(f"Bad open cycle blocked: {'yes' if item.bad_open_cycle_blocked else 'no'}")
+        print(f"Hit target count: {item.hit_target_count}")
+        print(f"Hit target rate: {item.hit_target_rate * 100:.2f}%")
+        print(f"Recommendation score: {item.recommendation_score:.2f}")
+        print("")
+
+
 def command_holding_horizon_diagnostics(args) -> None:
     config, _logger, database = build_context()
     current_price, source, timestamp = _load_current_paper_price(config, database)
@@ -1852,6 +1906,12 @@ def _format_optional_float(value: float | None) -> str:
     if value is None:
         return "N/A"
     return f"{value:.8f}"
+
+
+def _format_optional_percent(value: float | None) -> str:
+    if value is None:
+        return "N/A"
+    return f"{value * 100:.4f}%"
 
 
 def command_validation_summary(args) -> None:
@@ -3243,6 +3303,17 @@ def build_parser() -> argparse.ArgumentParser:
         default="mean_reversion_v2_small_target",
     )
     trend_filter_sim_parser.set_defaults(func=command_trend_filter_sim)
+
+    trend_strength_parser = subparsers.add_parser(
+        "trend-strength-diagnostics",
+        help="Show 1h trend strength and flat-trend threshold diagnostics",
+    )
+    trend_strength_parser.add_argument(
+        "--profile",
+        choices=SUPPORTED_RUNTIME_STRATEGY_PROFILES,
+        default="mean_reversion_v2_small_target",
+    )
+    trend_strength_parser.set_defaults(func=command_trend_strength_diagnostics)
 
     holding_horizon_parser = subparsers.add_parser(
         "holding-horizon-diagnostics",

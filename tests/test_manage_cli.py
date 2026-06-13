@@ -517,6 +517,18 @@ def test_manage_cli_has_trend_alignment_commands():
     assert sim_args.profile == "mean_reversion_v2_small_target"
 
 
+def test_manage_cli_has_trend_strength_diagnostics_command():
+    parser = build_parser()
+    args = parser.parse_args([
+        "trend-strength-diagnostics",
+        "--profile",
+        "mean_reversion_v2_small_target",
+    ])
+
+    assert args.command == "trend-strength-diagnostics"
+    assert args.profile == "mean_reversion_v2_small_target"
+
+
 def test_manage_cli_has_holding_horizon_diagnostics_command():
     parser = build_parser()
     args = parser.parse_args([
