@@ -61,6 +61,7 @@ from analytics.holding_horizon_diagnostics_engine import HoldingHorizonDiagnosti
 from analytics.max_holding_sensitivity_engine import MaxHoldingSensitivityEngine
 from analytics.ml_dataset_coverage_engine import MLDatasetCoverageEngine
 from analytics.ml_dataset_exporter import MLDatasetExporter, SUPPORTED_DATASET_MODES
+from analytics.ml_dataset_summary_engine import MLDatasetSummaryEngine
 from analytics.micro_trend_sensitivity_engine import MicroTrendSensitivityEngine
 from analytics.order_book_diagnostics_engine import OrderBookDiagnosticsEngine
 from analytics.order_book_rule_sim_engine import OrderBookRuleSimulationEngine
@@ -1681,6 +1682,46 @@ def command_ml_dataset_coverage(args) -> None:
     print(f"Recommendation: {report.recommendation}")
 
 
+def command_ml_dataset_summary(args) -> None:
+    report = MLDatasetSummaryEngine().build_report(args.file)
+
+    print("=== ML Dataset Summary ===")
+    print(f"File: {report.file_path}")
+    print(f"Total rows: {report.total_rows}")
+    print(f"Candidate rows: {report.candidate_rows}")
+    print(f"Target hit positive count: {report.target_hit_positive_count}")
+    print(f"Target hit negative count: {report.target_hit_negative_count}")
+    print(f"Positive rate: {report.positive_rate * 100:.2f}%")
+    print("BUY/SELL distribution:")
+    if report.direction_distribution:
+        for direction, count in report.direction_distribution.items():
+            print(f"- {direction}: {count}")
+    else:
+        print("- No candidate directions")
+    _print_ml_dataset_group_summary("Target hit rate by direction", report.target_hit_rate_by_direction)
+    _print_ml_dataset_group_summary(
+        "Target hit rate by work_position bucket",
+        report.target_hit_rate_by_work_position_bucket,
+    )
+    _print_ml_dataset_group_summary(
+        "Target hit rate by volatility regime",
+        report.target_hit_rate_by_volatility_regime,
+    )
+    _print_ml_dataset_group_summary("Target hit rate by hour of day", report.target_hit_rate_by_hour)
+
+
+def _print_ml_dataset_group_summary(title: str, rows) -> None:
+    print(f"{title}:")
+    if not rows:
+        print("- No candidate data")
+        return
+    for row in rows:
+        print(
+            f"- {row.name}: total={row.total} positive={row.positives} "
+            f"rate={row.positive_rate * 100:.2f}%"
+        )
+
+
 def _format_duration(seconds: float | int) -> str:
     seconds = int(seconds)
     hours, remainder = divmod(seconds, 3600)
@@ -2987,6 +3028,13 @@ def build_parser() -> argparse.ArgumentParser:
         default="profile",
     )
     ml_dataset_coverage_parser.set_defaults(func=command_ml_dataset_coverage)
+
+    ml_dataset_summary_parser = subparsers.add_parser(
+        "ml-dataset-summary",
+        help="Summarize target-hit rates in an exported ML dataset CSV",
+    )
+    ml_dataset_summary_parser.add_argument("--file", required=True)
+    ml_dataset_summary_parser.set_defaults(func=command_ml_dataset_summary)
 
     paper_stats_parser = subparsers.add_parser("paper-stats", help="РџРѕРєР°Р·Р°С‚Рё paper trading СЃС‚Р°С‚РёСЃС‚РёРєСѓ")
     paper_stats_parser.add_argument("--limit", type=int, default=100)

@@ -434,6 +434,18 @@ def test_manage_cli_has_ml_dataset_coverage_command():
     assert args.dataset_mode == "no_micro_trend"
 
 
+def test_manage_cli_has_ml_dataset_summary_command():
+    parser = build_parser()
+    args = parser.parse_args([
+        "ml-dataset-summary",
+        "--file",
+        "data/ml/usdcusdt_1m_mean_reversion_v2_small_target_no_micro_trend.csv",
+    ])
+
+    assert args.command == "ml-dataset-summary"
+    assert args.file == "data/ml/usdcusdt_1m_mean_reversion_v2_small_target_no_micro_trend.csv"
+
+
 def test_manage_cli_has_direction_outcome_diagnostics_command():
     parser = build_parser()
     args = parser.parse_args([
