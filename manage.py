@@ -2,6 +2,7 @@
 
 import sys
 import time
+from datetime import datetime
 
 from backtest.backtest_comparison_engine import BacktestComparisonEngine
 from backtest.backtest_comparison_exporter import BacktestComparisonExporter
@@ -290,10 +291,8 @@ def _print_risk_profitability_detail(detail, prefix: str = "") -> None:
 
 
 def _load_current_paper_price(config, database) -> tuple[float, str, str]:
-    now = __import__("datetime").datetime.now
     try:
-        bid_ask = BinanceMarketDataProvider(base_url=config.binance_base_url).get_bid_ask(config.symbol)
-        return bid_ask.mid_price, "BINANCE", now().isoformat()
+        return _load_binance_paper_price(config)
     except Exception:
         with database.connect() as conn:
             row = conn.execute(
@@ -306,7 +305,29 @@ def _load_current_paper_price(config, database) -> tuple[float, str, str]:
             ).fetchone()
         if row:
             return float(row[1]), "LATEST_MARKET_SNAPSHOT", str(row[0])
-        return 1.0, "DEFAULT_1_0", now().isoformat()
+        return 1.0, "DEFAULT_1_0", datetime.now().isoformat()
+
+
+def _load_binance_paper_price(config) -> tuple[float, str, str]:
+    bid_ask = BinanceMarketDataProvider(base_url=config.binance_base_url).get_bid_ask(config.symbol)
+    return bid_ask.mid_price, "BINANCE", datetime.now().isoformat()
+
+
+def _price_age_seconds(timestamp: str) -> float | None:
+    try:
+        parsed = datetime.fromisoformat(str(timestamp))
+    except ValueError:
+        return None
+    now = datetime.now(tz=parsed.tzinfo) if parsed.tzinfo else datetime.now()
+    return max(0.0, (now - parsed).total_seconds())
+
+
+def _is_stale_price_source(source: str, age_seconds: float | None) -> bool:
+    if source == "BINANCE":
+        return False
+    if source in {"LATEST_MARKET_SNAPSHOT", "DEFAULT_1_0"}:
+        return True
+    return age_seconds is None or age_seconds > 60.0
 
 
 def _print_open_cycles_summary(report) -> None:
@@ -2290,11 +2311,29 @@ def command_paper_close_watch(args) -> None:
     print(f"Profile: {args.profile}")
     print(f"Interval seconds: {interval}")
     print(f"Max checks: {max_checks}")
+    print(f"Require Binance: {'yes' if args.require_binance else 'no'}")
     print("Read-only diagnostics. This command does not close paper cycles.")
     print("")
 
     for check_index in range(1, max_checks + 1):
-        current_price, source, timestamp = _load_current_paper_price(config, database)
+        print(f"--- Check {check_index}/{max_checks} ---")
+        if args.require_binance:
+            try:
+                current_price, source, timestamp = _load_binance_paper_price(config)
+            except Exception as exc:
+                print(f"Timestamp: {datetime.now().isoformat()}")
+                print("WARNING: Binance price fetch failed.")
+                print(f"Error: {exc}")
+                print("Skipping close-condition evaluation because --require-binance is enabled.")
+                print("")
+                if check_index < max_checks:
+                    time.sleep(interval)
+                continue
+        else:
+            current_price, source, timestamp = _load_current_paper_price(config, database)
+
+        age_seconds = _price_age_seconds(timestamp)
+        stale = _is_stale_price_source(source, age_seconds)
         report = PaperOpenCycleDiagnosticsEngine(database, config).build_report(
             current_price=current_price,
             current_price_source=source,
@@ -2305,10 +2344,11 @@ def command_paper_close_watch(args) -> None:
         nearest = min(open_cycles, key=lambda item: abs(item.distance_to_target_percent)) if open_cycles else None
         close_ready = [item for item in open_cycles if item.close_condition_met]
 
-        print(f"--- Check {check_index}/{max_checks} ---")
-        print(f"Timestamp: {timestamp}")
+        print(f"Price timestamp: {timestamp}")
         print(f"Current price: {current_price:.8f}")
-        print(f"Current price source: {source}")
+        print(f"Data source: {source}")
+        print(f"Stale: {'yes' if stale else 'no'}")
+        print(f"Age seconds: {age_seconds:.0f}" if age_seconds is not None else "Age seconds: N/A")
         print(f"Open cycles count: {len(open_cycles)}")
         if nearest is None:
             print("Nearest cycle to target: N/A")
@@ -2727,6 +2767,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     paper_close_watch_parser.add_argument("--interval", type=int, default=60)
     paper_close_watch_parser.add_argument("--max-checks", type=int, default=480)
+    paper_close_watch_parser.add_argument("--require-binance", action="store_true")
     paper_close_watch_parser.add_argument("--stop-on-close-condition", action="store_true")
     paper_close_watch_parser.set_defaults(func=command_paper_close_watch)
 

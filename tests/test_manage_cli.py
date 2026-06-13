@@ -177,6 +177,7 @@ def test_manage_cli_has_paper_cycle_commands():
         "10",
         "--max-checks",
         "3",
+        "--require-binance",
         "--stop-on-close-condition",
     ])
 
@@ -191,6 +192,7 @@ def test_manage_cli_has_paper_cycle_commands():
     assert close_watch_args.profile == "mean_reversion_v2_small_target"
     assert close_watch_args.interval == 10
     assert close_watch_args.max_checks == 3
+    assert close_watch_args.require_binance is True
     assert close_watch_args.stop_on_close_condition is True
 
 
