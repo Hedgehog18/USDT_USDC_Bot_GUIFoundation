@@ -1262,6 +1262,9 @@ def command_trend_filter_sim(args) -> None:
             f"{'yes' if item.would_block_current_bad_buy_cycle else 'no'}"
         )
         print(f"Estimated PnL impact: {item.estimated_pnl_impact:.8f}")
+        print(f"Hit target count: {item.hit_target_count}")
+        print(f"Hit target rate: {item.hit_target_rate * 100:.2f}%")
+        print(f"Recommendation score: {item.recommendation_score:.2f}")
         print(f"Recommendation: {item.recommendation}")
         print("")
 

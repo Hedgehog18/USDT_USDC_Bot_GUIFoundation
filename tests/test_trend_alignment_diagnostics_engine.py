@@ -57,6 +57,24 @@ def test_trend_filter_simulation_blocks_against_trend_buy_candidate(test_config,
     assert by_name["no_trend_filter"].candidates_kept == 1
     assert by_name["block_buy_if_1h_down"].candidates_blocked == 1
     assert by_name["require_entry_aligned_with_1h"].candidates_blocked == 1
+    assert by_name["soft_block_against_1h"].candidates_blocked == 1
+    assert by_name["soft_block_against_1h"].would_block_current_bad_buy_cycle is False
+
+
+def test_soft_trend_filter_allows_flat_trend_candidate(test_config, tmp_path: Path) -> None:
+    database = DatabaseManager(str(tmp_path / "bot.sqlite"))
+    start = datetime(2026, 6, 10, 10, 0, 0)
+    _insert_snapshot(database, start, price=1.00000, work_position=50.0, micro_trend="NEUTRAL")
+    _insert_snapshot(database, start + timedelta(hours=1), price=1.00001, work_position=20.0, micro_trend="BUY_DOMINANT")
+
+    report = TrendAlignmentDiagnosticsEngine(database, test_config).build_filter_simulation(
+        profile="mean_reversion_v2_small_target"
+    )
+    by_name = {item.name: item for item in report.results}
+
+    assert by_name["soft_block_against_1h"].candidates_kept == 1
+    assert by_name["soft_block_against_1h"].candidates_blocked == 0
+    assert by_name["require_entry_aligned_with_1h"].candidates_blocked == 1
 
 
 def _insert_snapshot(

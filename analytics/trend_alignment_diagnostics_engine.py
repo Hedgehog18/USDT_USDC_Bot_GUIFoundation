@@ -17,7 +17,9 @@ TREND_FILTER_PROFILES = (
     "block_buy_if_1h_down",
     "block_sell_if_1h_up",
     "require_entry_aligned_with_1h",
+    "soft_block_against_1h",
 )
+TREND_FILTER_HIT_HORIZON = 30
 
 
 @dataclass(frozen=True)
@@ -76,6 +78,9 @@ class TrendFilterSimulationResult:
     candidates_blocked: int
     would_block_current_bad_buy_cycle: bool
     estimated_pnl_impact: float
+    hit_target_count: int
+    hit_target_rate: float
+    recommendation_score: float
     recommendation: str
 
 
@@ -104,16 +109,21 @@ class TrendAlignmentDiagnosticsEngine:
     def build_filter_simulation(self, *, profile: str) -> TrendFilterSimulationReport:
         snapshots = self._load_snapshots()
         candidates = [
-            (snapshot, self._entry_direction(snapshot, profile), self._trend_at(snapshots, snapshot.timestamp))
-            for snapshot in snapshots
+            (
+                index,
+                snapshot,
+                self._entry_direction(snapshot, profile),
+                self._trend_at(snapshots, snapshot.timestamp),
+            )
+            for index, snapshot in enumerate(snapshots)
         ]
         candidates = [
             item for item in candidates
-            if item[1] in {"BUY_USDC", "SELL_USDC"}
+            if item[2] in {"BUY_USDC", "SELL_USDC"}
         ]
         current_bad_buy = self._current_bad_buy_cycle(profile)
         results = [
-            self._simulate_filter(name, candidates, current_bad_buy, profile)
+            self._simulate_filter(name, candidates, current_bad_buy, profile, snapshots)
             for name in TREND_FILTER_PROFILES
         ]
         return TrendFilterSimulationReport(
@@ -220,20 +230,32 @@ class TrendAlignmentDiagnosticsEngine:
     def _simulate_filter(
         self,
         name: str,
-        candidates: list[tuple[TrendSnapshot, str, str]],
+        candidates: list[tuple[int, TrendSnapshot, str, str]],
         current_bad_buy: dict | None,
         profile: str,
+        snapshots: list[TrendSnapshot],
     ) -> TrendFilterSimulationResult:
         kept = [
             item for item in candidates
-            if self._trend_filter_pass(name, direction=item[1], trend=item[2])
+            if self._trend_filter_pass(name, direction=item[2], trend=item[3])
         ]
         blocked = len(candidates) - len(kept)
         blocked_pnl = [
             self._estimate_candidate_pnl(snapshot, direction, profile=profile)
-            for snapshot, direction, trend in candidates
+            for _index, snapshot, direction, trend in candidates
             if not self._trend_filter_pass(name, direction=direction, trend=trend)
         ]
+        hit_target_count = sum(
+            1
+            for index, snapshot, direction, _trend in kept
+            if self._hits_target_within_horizon(
+                direction=direction,
+                target_price=self._target_price(snapshot, direction, profile),
+                snapshots=snapshots,
+                start_index=index,
+            )
+        )
+        hit_target_rate = hit_target_count / len(kept) if kept else 0.0
         would_block_bad_buy = False
         if current_bad_buy is not None:
             would_block_bad_buy = not self._trend_filter_pass(
@@ -249,6 +271,14 @@ class TrendAlignmentDiagnosticsEngine:
             candidates_blocked=blocked,
             would_block_current_bad_buy_cycle=would_block_bad_buy,
             estimated_pnl_impact=-sum(blocked_pnl),
+            hit_target_count=hit_target_count,
+            hit_target_rate=hit_target_rate,
+            recommendation_score=self._recommendation_score(
+                total=len(candidates),
+                kept=len(kept),
+                hit_target_rate=hit_target_rate,
+                would_block_bad_buy=would_block_bad_buy,
+            ),
             recommendation=self._recommendation(name, len(candidates), len(kept), would_block_bad_buy),
         )
 
@@ -370,10 +400,7 @@ class TrendAlignmentDiagnosticsEngine:
         )
 
     def _estimate_candidate_pnl(self, snapshot: TrendSnapshot, direction: str, profile: str) -> float:
-        target_profit = self.config.target_profit
-        if profile == "mean_reversion_v2_small_target":
-            target_profit = self.config.target_profit * SMALL_TARGET_MULTIPLIER
-        target_price = snapshot.price * (1 + target_profit) if direction == "BUY_USDC" else snapshot.price * (1 - target_profit)
+        target_price = self._target_price(snapshot, direction, profile)
         quantity = (self.config.backtest_initial_usdt * self.config.trade_size_percent) / snapshot.price
         return self.fee_engine.calculate_profit(
             direction=direction,
@@ -382,6 +409,29 @@ class TrendAlignmentDiagnosticsEngine:
             quantity=quantity,
             use_taker_fee=True,
         ).net_profit
+
+    def _target_price(self, snapshot: TrendSnapshot, direction: str, profile: str) -> float:
+        target_profit = self.config.target_profit
+        if profile == "mean_reversion_v2_small_target":
+            target_profit = self.config.target_profit * SMALL_TARGET_MULTIPLIER
+        if direction == "BUY_USDC":
+            return snapshot.price * (1 + target_profit)
+        return snapshot.price * (1 - target_profit)
+
+    @staticmethod
+    def _hits_target_within_horizon(
+        *,
+        direction: str,
+        target_price: float,
+        snapshots: list[TrendSnapshot],
+        start_index: int,
+    ) -> bool:
+        future = snapshots[start_index + 1:start_index + 1 + TREND_FILTER_HIT_HORIZON]
+        if direction == "BUY_USDC":
+            return any(snapshot.price >= target_price for snapshot in future)
+        if direction == "SELL_USDC":
+            return any(snapshot.price <= target_price for snapshot in future)
+        return False
 
     @staticmethod
     def _trend_filter_pass(name: str, *, direction: str, trend: str) -> bool:
@@ -393,6 +443,8 @@ class TrendAlignmentDiagnosticsEngine:
             return not (direction == "SELL_USDC" and trend == "UP")
         if name == "require_entry_aligned_with_1h":
             return TrendAlignmentDiagnosticsEngine._is_aligned(direction, trend)
+        if name == "soft_block_against_1h":
+            return not TrendAlignmentDiagnosticsEngine._is_against(direction, trend)
         return True
 
     @staticmethod
@@ -416,9 +468,26 @@ class TrendAlignmentDiagnosticsEngine:
             return "No candidate data available."
         if name == "require_entry_aligned_with_1h" and kept == 0:
             return "Too strict for current sample."
+        if name == "soft_block_against_1h" and would_block_bad_buy:
+            return "Promising soft filter: blocks against-trend entries while preserving flat/aligned candidates."
         if would_block_bad_buy:
             return "Promising: blocks the current adverse BUY cycle."
         return "Diagnostic only; compare with realized paper outcomes."
+
+    @staticmethod
+    def _recommendation_score(
+        *,
+        total: int,
+        kept: int,
+        hit_target_rate: float,
+        would_block_bad_buy: bool,
+    ) -> float:
+        if total == 0:
+            return 0.0
+        kept_rate = kept / total
+        block_bad_bonus = 20.0 if would_block_bad_buy else 0.0
+        score = (hit_target_rate * 55.0) + (kept_rate * 25.0) + block_bad_bonus
+        return round(max(0.0, min(100.0, score)), 2)
 
     @staticmethod
     def _parse_timestamp(value) -> datetime:
