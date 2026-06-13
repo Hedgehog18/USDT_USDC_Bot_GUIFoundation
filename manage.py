@@ -70,6 +70,7 @@ from analytics.paper_open_cycle_diagnostics_engine import PaperOpenCycleDiagnost
 from analytics.partial_target_diagnostics_engine import PartialTargetDiagnosticsEngine
 from analytics.post_entry_path_diagnostics_engine import PostEntryPathDiagnosticsEngine
 from analytics.profile_comparison_diagnostics_engine import ProfileComparisonDiagnosticsEngine
+from analytics.range_shift_diagnostics_engine import RangeShiftDiagnosticsEngine
 from analytics.risk_diagnostics_engine import RiskDiagnosticsEngine
 from analytics.risk_profitability_diagnostics_engine import RiskProfitabilityDiagnosticsEngine
 from analytics.statistics_engine import StatisticsEngine
@@ -1321,6 +1322,86 @@ def command_trend_strength_diagnostics(args) -> None:
         print(f"Hit target rate: {item.hit_target_rate * 100:.2f}%")
         print(f"Recommendation score: {item.recommendation_score:.2f}")
         print("")
+
+
+def command_range_shift_diagnostics(args) -> None:
+    config, _logger, database = build_context()
+    report = RangeShiftDiagnosticsEngine(database, config).build_report(profile=args.profile)
+
+    print("=== Range Shift Diagnostics ===")
+    print("Dry-run only. Runtime profile, strategy config, and paper cycles are unchanged.")
+    print(f"Profile: {report.profile}")
+    print("")
+
+    print("=== Open Cycles ===")
+    if not report.open_cycles:
+        print("No open cycles for profile.")
+    for item in report.open_cycles:
+        print(
+            f"db_id={item.db_id} | cycle_id={item.cycle_id} | {item.direction} | "
+            f"opened_at={item.opened_at}"
+        )
+        print(
+            f"  open={item.open_price:.8f} | current={item.current_price:.8f} | "
+            f"target={item.target_price:.8f}"
+        )
+        print(
+            "  work_center: "
+            f"entry={_format_optional_float(item.work_center_at_entry)} | "
+            f"current={_format_optional_float(item.current_work_center)}"
+        )
+        print(
+            "  short_center: "
+            f"entry={_format_optional_float(item.short_center_at_entry)} | "
+            f"current={_format_optional_float(item.current_short_center)}"
+        )
+        print(
+            "  long_center: "
+            f"entry={_format_optional_float(item.long_center_at_entry)} | "
+            f"current={_format_optional_float(item.current_long_center)}"
+        )
+        print(
+            f"  center_shift={_format_optional_float(item.center_shift_amount)} | "
+            f"center_shift_pct={_format_optional_percent(item.center_shift_percent)} | "
+            f"direction={item.center_shift_direction}"
+        )
+        print(
+            "  current_observed_1h_range="
+            f"[{_format_optional_float(item.current_work_range_min)}, "
+            f"{_format_optional_float(item.current_work_range_max)}]"
+        )
+        print(
+            "  target_outside_current_work_range="
+            f"{'yes' if item.target_outside_current_work_range else 'no'} | "
+            "open_price_no_longer_realistic_mean_reversion_target="
+            f"{'yes' if item.open_price_no_longer_realistic_mean_reversion_target else 'no'}"
+        )
+    print("")
+
+    print("=== Closed Cycles Center Shift ===")
+    closed = report.closed_summary
+    print(f"Closed cycles evaluated: {closed.closed_cycles_count}")
+    print(f"Average center shift to close: {_format_optional_float(closed.average_center_shift_to_close)}")
+    print(f"Successful average center shift: {_format_optional_float(closed.successful_average_center_shift)}")
+    if not closed.center_shift_distribution:
+        print("Center shift distribution: N/A")
+    else:
+        print("Center shift distribution:")
+        for bucket, count in closed.center_shift_distribution:
+            print(f"  {bucket}: {count}")
+    print("")
+
+    print("=== Dry-run Stale/Rebase Thresholds ===")
+    for item in report.threshold_simulations:
+        ids = ", ".join(str(value) for value in item.stale_cycle_ids) if item.stale_cycle_ids else "N/A"
+        print(
+            f"threshold={item.threshold_percent:.3f}% | "
+            f"stale_open_cycles={item.stale_open_cycles} | "
+            f"rebase_target_candidates={item.rebase_target_candidates} | "
+            f"stale_db_ids={ids}"
+        )
+    print("")
+    print("Recommendation note: diagnostics only; no targets are rebased and no cycles are closed.")
 
 
 def command_holding_horizon_diagnostics(args) -> None:
@@ -3314,6 +3395,17 @@ def build_parser() -> argparse.ArgumentParser:
         default="mean_reversion_v2_small_target",
     )
     trend_strength_parser.set_defaults(func=command_trend_strength_diagnostics)
+
+    range_shift_parser = subparsers.add_parser(
+        "range-shift-diagnostics",
+        help="Show paper cycle diagnostics for center/range shifts after entry",
+    )
+    range_shift_parser.add_argument(
+        "--profile",
+        choices=SUPPORTED_RUNTIME_STRATEGY_PROFILES,
+        default="mean_reversion_v2_small_target",
+    )
+    range_shift_parser.set_defaults(func=command_range_shift_diagnostics)
 
     holding_horizon_parser = subparsers.add_parser(
         "holding-horizon-diagnostics",
