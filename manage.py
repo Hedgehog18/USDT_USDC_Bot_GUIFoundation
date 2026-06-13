@@ -59,6 +59,7 @@ from analytics.fee_model_report_engine import FeeModelReportEngine
 from analytics.filter_pass_diagnostics_engine import FilterPassDiagnosticsEngine
 from analytics.holding_horizon_diagnostics_engine import HoldingHorizonDiagnosticsEngine
 from analytics.max_holding_sensitivity_engine import MaxHoldingSensitivityEngine
+from analytics.ml_baseline_trainer import MLBaselineTrainer
 from analytics.ml_dataset_coverage_engine import MLDatasetCoverageEngine
 from analytics.ml_dataset_exporter import MLDatasetExporter, SUPPORTED_DATASET_MODES
 from analytics.ml_dataset_summary_engine import MLDatasetSummaryEngine
@@ -1710,6 +1711,38 @@ def command_ml_dataset_summary(args) -> None:
     _print_ml_dataset_group_summary("Target hit rate by hour of day", report.target_hit_rate_by_hour)
 
 
+def command_train_ml_baseline(args) -> None:
+    report = MLBaselineTrainer().train(args.file)
+
+    print("=== ML Baseline Training Report ===")
+    print(f"Dataset file: {report.file_path}")
+    print(f"Train rows: {report.train_rows}")
+    print(f"Test rows: {report.test_rows}")
+    print(f"Positive rate train: {report.train_positive_rate * 100:.2f}%")
+    print(f"Positive rate test: {report.test_positive_rate * 100:.2f}%")
+    print(f"Precision: {_format_ml_metric(report.precision)}")
+    print(f"Recall: {_format_ml_metric(report.recall)}")
+    print(f"F1: {_format_ml_metric(report.f1)}")
+    print(f"ROC-AUC: {_format_ml_metric(report.roc_auc)}")
+    print(f"PR-AUC: {_format_ml_metric(report.pr_auc)}")
+    print("Confusion matrix [actual 0/1 rows, predicted 0/1 columns]:")
+    for row in report.confusion_matrix:
+        print(f"- {row}")
+    print("Top feature importances:")
+    if report.top_feature_importances:
+        for item in report.top_feature_importances:
+            print(f"- {item.name}: {item.importance:.6f}")
+    else:
+        print("- N/A")
+    if report.warning:
+        print(f"Warning: {report.warning}")
+    print(f"Output: {report.output_path}")
+
+
+def _format_ml_metric(value: float | None) -> str:
+    return "N/A" if value is None else f"{value:.4f}"
+
+
 def _print_ml_dataset_group_summary(title: str, rows) -> None:
     print(f"{title}:")
     if not rows:
@@ -3035,6 +3068,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ml_dataset_summary_parser.add_argument("--file", required=True)
     ml_dataset_summary_parser.set_defaults(func=command_ml_dataset_summary)
+
+    train_ml_baseline_parser = subparsers.add_parser(
+        "train-ml-baseline",
+        help="Train an offline baseline ML model and export an analysis report",
+    )
+    train_ml_baseline_parser.add_argument("--file", required=True)
+    train_ml_baseline_parser.set_defaults(func=command_train_ml_baseline)
 
     paper_stats_parser = subparsers.add_parser("paper-stats", help="РџРѕРєР°Р·Р°С‚Рё paper trading СЃС‚Р°С‚РёСЃС‚РёРєСѓ")
     paper_stats_parser.add_argument("--limit", type=int, default=100)

@@ -446,6 +446,18 @@ def test_manage_cli_has_ml_dataset_summary_command():
     assert args.file == "data/ml/usdcusdt_1m_mean_reversion_v2_small_target_no_micro_trend.csv"
 
 
+def test_manage_cli_has_train_ml_baseline_command():
+    parser = build_parser()
+    args = parser.parse_args([
+        "train-ml-baseline",
+        "--file",
+        "data/ml/usdcusdt_1m_mean_reversion_v2_small_target_no_micro_trend.csv",
+    ])
+
+    assert args.command == "train-ml-baseline"
+    assert args.file == "data/ml/usdcusdt_1m_mean_reversion_v2_small_target_no_micro_trend.csv"
+
+
 def test_manage_cli_has_direction_outcome_diagnostics_command():
     parser = build_parser()
     args = parser.parse_args([
