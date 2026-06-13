@@ -257,6 +257,9 @@ def test_manage_cli_has_collect_closed_cycles_command():
         "1",
         "--max-iterations",
         "20",
+        "--require-binance",
+        "--print-every",
+        "2",
         "--no-beep",
     ])
 
@@ -265,6 +268,8 @@ def test_manage_cli_has_collect_closed_cycles_command():
     assert args.target == 5
     assert args.interval == 1
     assert args.max_iterations == 20
+    assert args.require_binance is True
+    assert args.print_every == 2
     assert args.beep is False
 
 

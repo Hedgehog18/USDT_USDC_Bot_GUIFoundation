@@ -2267,8 +2267,10 @@ def command_collect_closed_cycles(args) -> None:
         raise ValueError("--interval must be 0 or greater.")
     if args.max_iterations is not None and args.max_iterations <= 0:
         raise ValueError("--max-iterations must be greater than 0 when provided.")
+    if args.print_every <= 0:
+        raise ValueError("--print-every must be greater than 0.")
 
-    logger.info(
+    logger.debug(
         "Closed cycle collection watcher started: profile=%s target=%s interval=%s max_iterations=%s",
         profile,
         args.target,
@@ -2282,7 +2284,14 @@ def command_collect_closed_cycles(args) -> None:
     print("Mode: DEMO/PAPER only. Real trading disabled.")
 
     stats = database.load_paper_cycle_collection_stats(profile)
-    _print_closed_cycle_collection_progress(stats, args.target, data_source="N/A", iteration=0)
+    _print_closed_cycle_collection_progress(
+        stats,
+        args.target,
+        iteration=0,
+        price_info=None,
+        nearest_open_cycle=None,
+        action_taken="waiting",
+    )
     if int(stats["closed_cycles"]) >= args.target:
         print("SUCCESS: target closed cycles already reached.")
         if args.beep:
@@ -2296,6 +2305,22 @@ def command_collect_closed_cycles(args) -> None:
             break
 
         iteration += 1
+        price_info = _load_collection_price_info(config, database, require_binance=args.require_binance)
+        if price_info is None:
+            stats = database.load_paper_cycle_collection_stats(profile)
+            if _should_print_collection_iteration(iteration, args.print_every):
+                print(
+                    f"[collection {iteration}] WARNING: Binance price unavailable; "
+                    "iteration skipped because --require-binance is enabled. "
+                    f"CLOSED {int(stats['closed_cycles'])} / {args.target} | "
+                    f"open cycles: {int(stats['open_cycles'])} | "
+                    "action_taken: skipped_no_live_price"
+                )
+            if args.interval:
+                time.sleep(args.interval)
+            continue
+
+        before_stats = database.load_paper_cycle_collection_stats(profile)
         bot = _apply_profile_to_bot(BotEngine(), profile)
         result = PaperTradingEngine(
             config,
@@ -2304,12 +2329,17 @@ def command_collect_closed_cycles(args) -> None:
             strategy_profile=profile,
         ).run(1)
         stats = database.load_paper_cycle_collection_stats(profile)
-        _print_closed_cycle_collection_progress(
-            stats,
-            args.target,
-            data_source=result.data_source,
-            iteration=iteration,
-        )
+        action_taken = _collection_action_taken(before_stats, stats, result)
+        nearest_open_cycle = _nearest_collection_open_cycle(config, database, profile, price_info[0], price_info[1], price_info[2])
+        if _should_print_collection_iteration(iteration, args.print_every) or int(stats["closed_cycles"]) >= args.target:
+            _print_closed_cycle_collection_progress(
+                stats,
+                args.target,
+                iteration=iteration,
+                price_info=price_info,
+                nearest_open_cycle=nearest_open_cycle,
+                action_taken=action_taken,
+            )
 
         if int(stats["closed_cycles"]) >= args.target:
             print("SUCCESS: target closed cycles reached.")
@@ -2325,17 +2355,81 @@ def _print_closed_cycle_collection_progress(
     stats: dict[str, float | int],
     target: int,
     *,
-    data_source: str,
     iteration: int,
+    price_info: tuple[float, str, str] | None,
+    nearest_open_cycle,
+    action_taken: str,
 ) -> None:
-    print(
-        f"[collection {iteration}] "
-        f"CLOSED {int(stats['closed_cycles'])} / {target} | "
-        f"open cycles: {int(stats['open_cycles'])} | "
-        f"net profit: {float(stats['net_profit']):.8f} | "
-        f"win rate: {float(stats['win_rate']) * 100:.2f}% | "
-        f"current price source: {data_source}"
+    current_price, data_source, price_timestamp = price_info if price_info else (None, "N/A", "N/A")
+    parts = [
+        f"[collection {iteration}]",
+        f"CLOSED {int(stats['closed_cycles'])} / {target}",
+        f"open cycles: {int(stats['open_cycles'])}",
+        f"net profit: {float(stats['net_profit']):.8f}",
+        f"win rate: {float(stats['win_rate']) * 100:.2f}%",
+        f"current_price: {_format_collection_float(current_price)}",
+        f"price_timestamp: {price_timestamp}",
+        f"data_source: {data_source}",
+    ]
+    if nearest_open_cycle is None:
+        parts.extend([
+            "nearest_open_cycle_db_id: N/A",
+            "direction: N/A",
+            "target_price: N/A",
+            "distance_to_target: N/A",
+            "unrealized_pnl: N/A",
+            "close_condition_met: N/A",
+        ])
+    else:
+        parts.extend([
+            f"nearest_open_cycle_db_id: {nearest_open_cycle.db_id}",
+            f"direction: {nearest_open_cycle.direction}",
+            f"target_price: {nearest_open_cycle.target_price:.8f}",
+            f"distance_to_target: {nearest_open_cycle.distance_to_target:.8f}",
+            f"unrealized_pnl: {nearest_open_cycle.unrealized_pnl:.8f}",
+            f"close_condition_met: {'yes' if nearest_open_cycle.close_condition_met else 'no'}",
+        ])
+    parts.append(f"action_taken: {action_taken}")
+    print(" | ".join(parts))
+
+
+def _load_collection_price_info(config, database, *, require_binance: bool) -> tuple[float, str, str] | None:
+    if require_binance:
+        try:
+            return _load_binance_paper_price(config)
+        except Exception as exc:
+            print(f"WARNING: Binance price fetch failed: {exc}")
+            return None
+    return _load_current_paper_price(config, database)
+
+
+def _nearest_collection_open_cycle(config, database, profile: str, current_price: float, source: str, timestamp: str):
+    report = PaperOpenCycleDiagnosticsEngine(database, config).build_report(
+        current_price=current_price,
+        current_price_source=source,
+        current_price_timestamp=timestamp,
+        limit=1000,
     )
+    matching = [item for item in report.open_cycles if item.profile == profile]
+    if not matching:
+        return None
+    return min(matching, key=lambda item: abs(item.distance_to_target_percent))
+
+
+def _collection_action_taken(before_stats: dict[str, float | int], after_stats: dict[str, float | int], result) -> str:
+    if int(after_stats["closed_cycles"]) > int(before_stats["closed_cycles"]) or result.closed_cycles > 0:
+        return "closed"
+    if result.opened_cycles > 0:
+        return "opened"
+    return "waiting"
+
+
+def _should_print_collection_iteration(iteration: int, print_every: int) -> bool:
+    return print_every <= 1 or iteration % print_every == 0
+
+
+def _format_collection_float(value: float | None) -> str:
+    return "N/A" if value is None else f"{value:.8f}"
 
 
 def _beep_success() -> None:
@@ -2988,6 +3082,8 @@ def build_parser() -> argparse.ArgumentParser:
     collect_closed_cycles_parser.add_argument("--interval", type=int, default=1)
     collect_closed_cycles_parser.add_argument("--max-iterations", type=int, default=None)
     collect_closed_cycles_parser.add_argument("--beep", action=argparse.BooleanOptionalAction, default=True)
+    collect_closed_cycles_parser.add_argument("--require-binance", action="store_true")
+    collect_closed_cycles_parser.add_argument("--print-every", type=int, default=1)
     collect_closed_cycles_parser.set_defaults(func=command_collect_closed_cycles)
 
     long_paper_run_parser = subparsers.add_parser("long-paper-run", help="Run long paper validation workflow")

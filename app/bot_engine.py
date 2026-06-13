@@ -51,7 +51,7 @@ class BotEngine:
         self.notification_engine = NotificationEngine(self.database)
         self.audit_engine = AuditEngine(self.database)
         self.recovery_manager = RecoveryManager(self.database, self.cycle_manager)
-        self.logger.info("BotEngine initialized")
+        self.logger.debug("BotEngine initialized")
         self.health_check = HealthCheck(
             config=self.config,
             database=self.database,
