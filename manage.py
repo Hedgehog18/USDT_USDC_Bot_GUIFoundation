@@ -59,6 +59,7 @@ from analytics.fee_model_report_engine import FeeModelReportEngine
 from analytics.filter_pass_diagnostics_engine import FilterPassDiagnosticsEngine
 from analytics.holding_horizon_diagnostics_engine import HoldingHorizonDiagnosticsEngine
 from analytics.max_holding_sensitivity_engine import MaxHoldingSensitivityEngine
+from analytics.ml_dataset_exporter import MLDatasetExporter
 from analytics.micro_trend_sensitivity_engine import MicroTrendSensitivityEngine
 from analytics.order_book_diagnostics_engine import OrderBookDiagnosticsEngine
 from analytics.order_book_rule_sim_engine import OrderBookRuleSimulationEngine
@@ -1607,6 +1608,33 @@ def command_exit_rule_sim(args) -> None:
     print(f"Best tested exit rule: {report.recommended_rule or 'N/A'}")
 
 
+def command_build_ml_dataset(args) -> None:
+    config, _logger, _database = build_context()
+    provider = BinanceMarketDataProvider(base_url=config.binance_base_url)
+    historical = HistoricalDataProvider(provider)
+    candles = historical.get_candles(
+        symbol=args.symbol,
+        interval=args.interval,
+        limit=args.limit,
+    )
+    result = MLDatasetExporter(config).export(
+        candles=candles,
+        symbol=args.symbol,
+        interval=args.interval,
+        profile=args.profile,
+    )
+
+    print("=== ML Dataset Export ===")
+    print(f"Symbol: {args.symbol}")
+    print(f"Interval: {args.interval}")
+    print(f"Limit requested: {args.limit}")
+    print(f"Candles loaded: {len(candles)}")
+    print(f"Profile: {args.profile}")
+    print(f"Rows written: {result.rows_written}")
+    print(f"Candidate rows: {result.candidate_rows}")
+    print(f"Output: {result.path}")
+
+
 def _format_duration(seconds: float | int) -> str:
     seconds = int(seconds)
     hours, remainder = divmod(seconds, 3600)
@@ -2875,6 +2903,20 @@ def build_parser() -> argparse.ArgumentParser:
         default="mean_reversion_v2_small_target",
     )
     exit_rule_sim_parser.set_defaults(func=command_exit_rule_sim)
+
+    build_ml_dataset_parser = subparsers.add_parser(
+        "build-ml-dataset",
+        help="Export a supervised historical ML dataset for future model research",
+    )
+    build_ml_dataset_parser.add_argument("--symbol", default="USDCUSDT")
+    build_ml_dataset_parser.add_argument("--interval", default="1m")
+    build_ml_dataset_parser.add_argument("--limit", type=int, default=5000)
+    build_ml_dataset_parser.add_argument(
+        "--profile",
+        choices=SUPPORTED_RUNTIME_STRATEGY_PROFILES,
+        default="mean_reversion_v2_small_target",
+    )
+    build_ml_dataset_parser.set_defaults(func=command_build_ml_dataset)
 
     paper_stats_parser = subparsers.add_parser("paper-stats", help="РџРѕРєР°Р·Р°С‚Рё paper trading СЃС‚Р°С‚РёСЃС‚РёРєСѓ")
     paper_stats_parser.add_argument("--limit", type=int, default=100)

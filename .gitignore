@@ -22,3 +22,4 @@ Thumbs.db
 # Generated reports
 reports/*.csv
 reports/*.txt
+data/ml/*.csv
