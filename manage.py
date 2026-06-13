@@ -60,7 +60,7 @@ from analytics.filter_pass_diagnostics_engine import FilterPassDiagnosticsEngine
 from analytics.holding_horizon_diagnostics_engine import HoldingHorizonDiagnosticsEngine
 from analytics.max_holding_sensitivity_engine import MaxHoldingSensitivityEngine
 from analytics.ml_dataset_coverage_engine import MLDatasetCoverageEngine
-from analytics.ml_dataset_exporter import MLDatasetExporter
+from analytics.ml_dataset_exporter import MLDatasetExporter, SUPPORTED_DATASET_MODES
 from analytics.micro_trend_sensitivity_engine import MicroTrendSensitivityEngine
 from analytics.order_book_diagnostics_engine import OrderBookDiagnosticsEngine
 from analytics.order_book_rule_sim_engine import OrderBookRuleSimulationEngine
@@ -1623,6 +1623,7 @@ def command_build_ml_dataset(args) -> None:
         symbol=args.symbol,
         interval=args.interval,
         profile=args.profile,
+        dataset_mode=args.dataset_mode,
     )
 
     print("=== ML Dataset Export ===")
@@ -1631,6 +1632,7 @@ def command_build_ml_dataset(args) -> None:
     print(f"Limit requested: {args.limit}")
     print(f"Candles loaded: {len(candles)}")
     print(f"Profile: {args.profile}")
+    print(f"Dataset mode: {args.dataset_mode}")
     print(f"Rows written: {result.rows_written}")
     print(f"Candidate rows: {result.candidate_rows}")
     print(f"Output: {result.path}")
@@ -1645,7 +1647,11 @@ def command_ml_dataset_coverage(args) -> None:
         interval=args.interval,
         limit=args.limit,
     )
-    report = MLDatasetCoverageEngine(config).build_report(candles=candles, profile=args.profile)
+    report = MLDatasetCoverageEngine(config).build_report(
+        candles=candles,
+        profile=args.profile,
+        dataset_mode=args.dataset_mode,
+    )
 
     print("=== ML Dataset Coverage ===")
     print(f"Symbol: {args.symbol}")
@@ -1653,6 +1659,7 @@ def command_ml_dataset_coverage(args) -> None:
     print(f"Limit requested: {args.limit}")
     print(f"Candles loaded: {len(candles)}")
     print(f"Profile: {report.profile}")
+    print(f"Dataset mode: {report.dataset_mode}")
     print(f"Total rows: {report.total_rows}")
     print(f"Candidate rows: {report.candidate_rows}")
     print(f"BUY zone count: {report.buy_zone_count}")
@@ -2955,6 +2962,11 @@ def build_parser() -> argparse.ArgumentParser:
         choices=SUPPORTED_RUNTIME_STRATEGY_PROFILES,
         default="mean_reversion_v2_small_target",
     )
+    build_ml_dataset_parser.add_argument(
+        "--dataset-mode",
+        choices=SUPPORTED_DATASET_MODES,
+        default="profile",
+    )
     build_ml_dataset_parser.set_defaults(func=command_build_ml_dataset)
 
     ml_dataset_coverage_parser = subparsers.add_parser(
@@ -2968,6 +2980,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--profile",
         choices=SUPPORTED_RUNTIME_STRATEGY_PROFILES,
         default="mean_reversion_v2_small_target",
+    )
+    ml_dataset_coverage_parser.add_argument(
+        "--dataset-mode",
+        choices=SUPPORTED_DATASET_MODES,
+        default="profile",
     )
     ml_dataset_coverage_parser.set_defaults(func=command_ml_dataset_coverage)
 

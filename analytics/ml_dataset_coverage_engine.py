@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from backtest.backtest_engine import BacktestEngine
 from backtest.historical_data_provider import HistoricalCandle
 from config.config_manager import BotConfig
+from analytics.ml_dataset_exporter import SUPPORTED_DATASET_MODES
 from market.models import MarketState
 from strategy.profile_decision_engine import StrategyProfileDecisionEngine
 
@@ -13,6 +14,7 @@ from strategy.profile_decision_engine import StrategyProfileDecisionEngine
 @dataclass(frozen=True)
 class MLDatasetCoverageReport:
     profile: str
+    dataset_mode: str
     total_rows: int
     candidate_rows: int
     buy_zone_count: int
@@ -32,10 +34,18 @@ class MLDatasetCoverageEngine:
     def __init__(self, config: BotConfig) -> None:
         self.config = config
 
-    def build_report(self, *, candles: list[HistoricalCandle], profile: str) -> MLDatasetCoverageReport:
+    def build_report(
+        self,
+        *,
+        candles: list[HistoricalCandle],
+        profile: str,
+        dataset_mode: str = "profile",
+    ) -> MLDatasetCoverageReport:
+        self._validate_dataset_mode(dataset_mode)
         if len(candles) < 31:
             return MLDatasetCoverageReport(
                 profile=profile,
+                dataset_mode=dataset_mode,
                 total_rows=0,
                 candidate_rows=0,
                 buy_zone_count=0,
@@ -69,7 +79,13 @@ class MLDatasetCoverageEngine:
             window = closes[max(0, index - 30):index]
             state = state_builder._build_state(current_price=candle.close, prices=window)
             decision = decision_engine.make_decision(state)
-            if decision.action in {"BUY_USDC", "SELL_USDC"}:
+            candidate_direction = self._candidate_direction(
+                state=state,
+                profile=profile,
+                dataset_mode=dataset_mode,
+                profile_action=decision.action,
+            )
+            if candidate_direction in {"BUY_USDC", "SELL_USDC"}:
                 candidate_rows += 1
 
             work_positions.append(state.work_position)
@@ -88,11 +104,12 @@ class MLDatasetCoverageEngine:
                 micro_trend_pass_count += 1
             if self._safety_filters_pass(state):
                 safety_filters_pass_count += 1
-            if decision.action in {"BUY_USDC", "SELL_USDC"}:
+            if candidate_direction in {"BUY_USDC", "SELL_USDC"}:
                 all_filters_pass_count += 1
 
         return MLDatasetCoverageReport(
             profile=profile,
+            dataset_mode=dataset_mode,
             total_rows=len(work_positions),
             candidate_rows=candidate_rows,
             buy_zone_count=buy_zone_count,
@@ -106,6 +123,7 @@ class MLDatasetCoverageEngine:
             safety_filters_pass_count=safety_filters_pass_count,
             all_filters_pass_count=all_filters_pass_count,
             recommendation=self._recommendation(
+                dataset_mode=dataset_mode,
                 total_rows=len(work_positions),
                 entry_zone_pass_count=entry_zone_pass_count,
                 micro_trend_pass_count=micro_trend_pass_count,
@@ -130,6 +148,25 @@ class MLDatasetCoverageEngine:
             or (is_sell_zone and state.micro_trend == "SELL_DOMINANT")
         )
 
+    def _candidate_direction(
+        self,
+        *,
+        state: MarketState,
+        profile: str,
+        dataset_mode: str,
+        profile_action: str,
+    ) -> str:
+        if dataset_mode == "profile":
+            return profile_action if profile_action in {"BUY_USDC", "SELL_USDC"} else "WAIT"
+
+        if not self._safety_filters_pass(state):
+            return "WAIT"
+        if state.work_position <= self._buy_zone_max(profile):
+            return "BUY_USDC"
+        if state.work_position >= self._sell_zone_min(profile):
+            return "SELL_USDC"
+        return "WAIT"
+
     def _safety_filters_pass(self, state: MarketState) -> bool:
         return (
             0.0 < state.spread <= self.config.max_allowed_spread
@@ -142,6 +179,7 @@ class MLDatasetCoverageEngine:
     @staticmethod
     def _recommendation(
         *,
+        dataset_mode: str,
         total_rows: int,
         entry_zone_pass_count: int,
         micro_trend_pass_count: int,
@@ -154,10 +192,18 @@ class MLDatasetCoverageEngine:
             return "change interval or relax thresholds: no historical rows entered BUY/SELL zones."
         if safety_filters_pass_count == 0:
             return "dataset not suitable: safety filters reject all rows."
-        if micro_trend_pass_count == 0:
+        if dataset_mode == "profile" and micro_trend_pass_count == 0:
             return "dataset not suitable: historical klines do not provide confirming micro_trend for this profile."
         if all_filters_pass_count == 0:
             return "relax thresholds: entry zones exist but no row passes all profile filters."
         if all_filters_pass_count < 20:
             return "increase limit: very few candidate rows for supervised learning."
+        if dataset_mode == "no_micro_trend" and micro_trend_pass_count == 0:
+            return "dataset suitable for exploratory labels; micro_trend is intentionally ignored."
         return "dataset suitable for exploratory ML labeling."
+
+    @staticmethod
+    def _validate_dataset_mode(dataset_mode: str) -> None:
+        if dataset_mode not in SUPPORTED_DATASET_MODES:
+            supported = ", ".join(SUPPORTED_DATASET_MODES)
+            raise ValueError(f"Unsupported dataset mode: {dataset_mode}. Supported: {supported}")

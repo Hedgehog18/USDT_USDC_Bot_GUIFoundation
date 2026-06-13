@@ -398,6 +398,8 @@ def test_manage_cli_has_build_ml_dataset_command():
         "1000",
         "--profile",
         "mean_reversion_v2_small_target",
+        "--dataset-mode",
+        "no_micro_trend",
     ])
 
     assert args.command == "build-ml-dataset"
@@ -405,6 +407,7 @@ def test_manage_cli_has_build_ml_dataset_command():
     assert args.interval == "1m"
     assert args.limit == 1000
     assert args.profile == "mean_reversion_v2_small_target"
+    assert args.dataset_mode == "no_micro_trend"
 
 
 def test_manage_cli_has_ml_dataset_coverage_command():
@@ -419,6 +422,8 @@ def test_manage_cli_has_ml_dataset_coverage_command():
         "1000",
         "--profile",
         "mean_reversion_v2_small_target",
+        "--dataset-mode",
+        "no_micro_trend",
     ])
 
     assert args.command == "ml-dataset-coverage"
@@ -426,6 +431,7 @@ def test_manage_cli_has_ml_dataset_coverage_command():
     assert args.interval == "1m"
     assert args.limit == 1000
     assert args.profile == "mean_reversion_v2_small_target"
+    assert args.dataset_mode == "no_micro_trend"
 
 
 def test_manage_cli_has_direction_outcome_diagnostics_command():

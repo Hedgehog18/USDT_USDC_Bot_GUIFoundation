@@ -8,10 +8,12 @@ from pathlib import Path
 from backtest.backtest_engine import BacktestEngine
 from backtest.historical_data_provider import HistoricalCandle
 from config.config_manager import BotConfig
-from strategy.profile_decision_engine import StrategyProfileDecisionEngine
+from market.models import MarketState
+from strategy.profile_decision_engine import SMALL_TARGET_MULTIPLIER, StrategyProfileDecisionEngine
 
 
 HORIZONS = (5, 10, 20, 30)
+SUPPORTED_DATASET_MODES = ("profile", "no_micro_trend")
 
 
 @dataclass(frozen=True)
@@ -35,11 +37,14 @@ class MLDatasetExporter:
         symbol: str,
         interval: str,
         profile: str,
+        dataset_mode: str = "profile",
     ) -> MLDatasetExportResult:
+        self._validate_dataset_mode(dataset_mode)
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        output_path = self.output_dir / f"{symbol.lower()}_{interval}_{profile}.csv"
+        mode_suffix = "" if dataset_mode == "profile" else f"_{dataset_mode}"
+        output_path = self.output_dir / f"{symbol.lower()}_{interval}_{profile}{mode_suffix}.csv"
 
-        rows = self._build_rows(candles=candles, profile=profile)
+        rows = self._build_rows(candles=candles, profile=profile, dataset_mode=dataset_mode)
         with output_path.open("w", newline="", encoding="utf-8") as file:
             writer = csv.DictWriter(file, fieldnames=self._fieldnames())
             writer.writeheader()
@@ -52,7 +57,7 @@ class MLDatasetExporter:
             candidate_rows=candidate_rows,
         )
 
-    def _build_rows(self, *, candles: list[HistoricalCandle], profile: str) -> list[dict]:
+    def _build_rows(self, *, candles: list[HistoricalCandle], profile: str, dataset_mode: str) -> list[dict]:
         if len(candles) < 31:
             return []
 
@@ -66,8 +71,14 @@ class MLDatasetExporter:
             window = closes[max(0, index - 30):index]
             state = state_builder._build_state(current_price=candle.close, prices=window)
             decision = decision_engine.make_decision(state)
-            candidate_direction = decision.action if decision.action in {"BUY_USDC", "SELL_USDC"} else "WAIT"
-            target_price = self._target_price(candle.close, candidate_direction, decision.target_profit)
+            candidate_direction = self._candidate_direction(
+                state=state,
+                profile=profile,
+                dataset_mode=dataset_mode,
+                profile_action=decision.action,
+            )
+            target_profit = decision.target_profit if dataset_mode == "profile" else self._target_profit(profile)
+            target_price = self._target_price(candle.close, candidate_direction, target_profit)
             future = candles[index + 1:]
             horizon_hits = {
                 horizon: self._target_hit_within(
@@ -85,6 +96,7 @@ class MLDatasetExporter:
 
             rows.append({
                 "timestamp": self._timestamp(candle.open_time),
+                "dataset_mode": dataset_mode,
                 "open": self._format_float(candle.open),
                 "high": self._format_float(candle.high),
                 "low": self._format_float(candle.low),
@@ -108,6 +120,49 @@ class MLDatasetExporter:
             })
 
         return rows
+
+    def _candidate_direction(
+        self,
+        *,
+        state: MarketState,
+        profile: str,
+        dataset_mode: str,
+        profile_action: str,
+    ) -> str:
+        if dataset_mode == "profile":
+            return profile_action if profile_action in {"BUY_USDC", "SELL_USDC"} else "WAIT"
+
+        if not self._safety_filters_pass(state):
+            return "WAIT"
+        if state.work_position <= self._buy_zone_max(profile):
+            return "BUY_USDC"
+        if state.work_position >= self._sell_zone_min(profile):
+            return "SELL_USDC"
+        return "WAIT"
+
+    def _buy_zone_max(self, profile: str) -> float:
+        if profile in {"mean_reversion_v2", "mean_reversion_v2_small_target"}:
+            return 25.0
+        return self.config.buy_zone_max
+
+    def _sell_zone_min(self, profile: str) -> float:
+        if profile in {"mean_reversion_v2", "mean_reversion_v2_small_target"}:
+            return 75.0
+        return self.config.sell_zone_min
+
+    def _target_profit(self, profile: str) -> float:
+        if profile == "mean_reversion_v2_small_target":
+            return self.config.target_profit * SMALL_TARGET_MULTIPLIER
+        return self.config.target_profit
+
+    def _safety_filters_pass(self, state: MarketState) -> bool:
+        return (
+            0.0 < state.spread <= self.config.max_allowed_spread
+            and state.market_health_score >= self.config.min_market_health_score
+            and state.market_health_status != "UNHEALTHY"
+            and state.market_regime != "ABNORMAL"
+            and state.volatility_regime != "EXTREME"
+        )
 
     @staticmethod
     def _target_price(entry_price: float, direction: str, target_profit: float) -> float | None:
@@ -161,6 +216,7 @@ class MLDatasetExporter:
     def _fieldnames() -> list[str]:
         return [
             "timestamp",
+            "dataset_mode",
             "open",
             "high",
             "low",
@@ -182,3 +238,9 @@ class MLDatasetExporter:
             "max_adverse_move",
             "label_target_hit",
         ]
+
+    @staticmethod
+    def _validate_dataset_mode(dataset_mode: str) -> None:
+        if dataset_mode not in SUPPORTED_DATASET_MODES:
+            supported = ", ".join(SUPPORTED_DATASET_MODES)
+            raise ValueError(f"Unsupported dataset mode: {dataset_mode}. Supported: {supported}")

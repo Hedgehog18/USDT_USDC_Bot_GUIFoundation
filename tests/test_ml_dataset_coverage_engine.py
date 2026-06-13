@@ -34,3 +34,17 @@ def test_ml_dataset_coverage_explains_zero_candidates(test_config):
     assert report.micro_trend_distribution
     assert report.all_filters_pass_count == 0
     assert report.recommendation
+
+
+def test_ml_dataset_coverage_no_micro_trend_mode_counts_entry_candidates(test_config):
+    report = MLDatasetCoverageEngine(test_config).build_report(
+        candles=_candles(40),
+        profile="mean_reversion_v2_small_target",
+        dataset_mode="no_micro_trend",
+    )
+
+    assert report.dataset_mode == "no_micro_trend"
+    assert report.entry_zone_pass_count > 0
+    assert report.micro_trend_pass_count == 0
+    assert report.candidate_rows > 0
+    assert report.all_filters_pass_count == report.candidate_rows

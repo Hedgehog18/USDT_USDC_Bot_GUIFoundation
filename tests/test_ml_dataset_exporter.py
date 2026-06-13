@@ -40,6 +40,7 @@ def test_ml_dataset_exporter_writes_expected_columns(test_config, tmp_path):
     assert len(rows) == 10
     first = rows[0]
     assert first["timestamp"]
+    assert first["dataset_mode"] == "profile"
     assert first["open"]
     assert first["high"]
     assert first["low"]
@@ -57,3 +58,23 @@ def test_ml_dataset_exporter_writes_expected_columns(test_config, tmp_path):
     assert first["target_hit_20"] in {"0", "1"}
     assert first["target_hit_30"] in {"0", "1"}
     assert first["label_target_hit"] in {"0", "1"}
+
+
+def test_ml_dataset_exporter_no_micro_trend_mode_creates_candidates(test_config, tmp_path):
+    result = MLDatasetExporter(test_config, output_dir=tmp_path).export(
+        candles=_candles(40),
+        symbol="USDCUSDT",
+        interval="1m",
+        profile="mean_reversion_v2_small_target",
+        dataset_mode="no_micro_trend",
+    )
+
+    assert result.path.name == "usdcusdt_1m_mean_reversion_v2_small_target_no_micro_trend.csv"
+    assert result.rows_written == 10
+    assert result.candidate_rows > 0
+
+    with result.path.open(encoding="utf-8", newline="") as file:
+        rows = list(csv.DictReader(file))
+
+    assert any(row["candidate_direction"] in {"BUY_USDC", "SELL_USDC"} for row in rows)
+    assert {row["dataset_mode"] for row in rows} == {"no_micro_trend"}
