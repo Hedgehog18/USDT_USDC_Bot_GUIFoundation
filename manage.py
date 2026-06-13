@@ -59,6 +59,7 @@ from analytics.fee_model_report_engine import FeeModelReportEngine
 from analytics.filter_pass_diagnostics_engine import FilterPassDiagnosticsEngine
 from analytics.holding_horizon_diagnostics_engine import HoldingHorizonDiagnosticsEngine
 from analytics.max_holding_sensitivity_engine import MaxHoldingSensitivityEngine
+from analytics.ml_dataset_coverage_engine import MLDatasetCoverageEngine
 from analytics.ml_dataset_exporter import MLDatasetExporter
 from analytics.micro_trend_sensitivity_engine import MicroTrendSensitivityEngine
 from analytics.order_book_diagnostics_engine import OrderBookDiagnosticsEngine
@@ -1635,6 +1636,44 @@ def command_build_ml_dataset(args) -> None:
     print(f"Output: {result.path}")
 
 
+def command_ml_dataset_coverage(args) -> None:
+    config, _logger, _database = build_context()
+    provider = BinanceMarketDataProvider(base_url=config.binance_base_url)
+    historical = HistoricalDataProvider(provider)
+    candles = historical.get_candles(
+        symbol=args.symbol,
+        interval=args.interval,
+        limit=args.limit,
+    )
+    report = MLDatasetCoverageEngine(config).build_report(candles=candles, profile=args.profile)
+
+    print("=== ML Dataset Coverage ===")
+    print(f"Symbol: {args.symbol}")
+    print(f"Interval: {args.interval}")
+    print(f"Limit requested: {args.limit}")
+    print(f"Candles loaded: {len(candles)}")
+    print(f"Profile: {report.profile}")
+    print(f"Total rows: {report.total_rows}")
+    print(f"Candidate rows: {report.candidate_rows}")
+    print(f"BUY zone count: {report.buy_zone_count}")
+    print(f"SELL zone count: {report.sell_zone_count}")
+    print(f"Work position min: {_format_optional_float(report.work_position_min)}")
+    print(f"Work position max: {_format_optional_float(report.work_position_max)}")
+    print(f"Work position avg: {_format_optional_float(report.work_position_avg)}")
+    print("Micro trend distribution:")
+    if report.micro_trend_distribution:
+        for name, count in report.micro_trend_distribution.items():
+            print(f"- {name}: {count}")
+    else:
+        print("- No micro trend data")
+    print("Filter pass counts:")
+    print(f"- entry zone: {report.entry_zone_pass_count}")
+    print(f"- micro_trend: {report.micro_trend_pass_count}")
+    print(f"- safety filters: {report.safety_filters_pass_count}")
+    print(f"- all filters: {report.all_filters_pass_count}")
+    print(f"Recommendation: {report.recommendation}")
+
+
 def _format_duration(seconds: float | int) -> str:
     seconds = int(seconds)
     hours, remainder = divmod(seconds, 3600)
@@ -2917,6 +2956,20 @@ def build_parser() -> argparse.ArgumentParser:
         default="mean_reversion_v2_small_target",
     )
     build_ml_dataset_parser.set_defaults(func=command_build_ml_dataset)
+
+    ml_dataset_coverage_parser = subparsers.add_parser(
+        "ml-dataset-coverage",
+        help="Diagnose why a historical ML dataset has few or no candidate rows",
+    )
+    ml_dataset_coverage_parser.add_argument("--symbol", default="USDCUSDT")
+    ml_dataset_coverage_parser.add_argument("--interval", default="1m")
+    ml_dataset_coverage_parser.add_argument("--limit", type=int, default=1000)
+    ml_dataset_coverage_parser.add_argument(
+        "--profile",
+        choices=SUPPORTED_RUNTIME_STRATEGY_PROFILES,
+        default="mean_reversion_v2_small_target",
+    )
+    ml_dataset_coverage_parser.set_defaults(func=command_ml_dataset_coverage)
 
     paper_stats_parser = subparsers.add_parser("paper-stats", help="РџРѕРєР°Р·Р°С‚Рё paper trading СЃС‚Р°С‚РёСЃС‚РёРєСѓ")
     paper_stats_parser.add_argument("--limit", type=int, default=100)
