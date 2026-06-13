@@ -80,6 +80,7 @@ from analytics.strategy_profile_sim_engine import (
 from analytics.strategy_tuning_report_engine import StrategyTuningReportEngine
 from analytics.strategy_validation_engine import StrategyValidationEngine
 from analytics.target_profit_sensitivity_engine import TargetProfitSensitivityEngine
+from analytics.trend_alignment_diagnostics_engine import TrendAlignmentDiagnosticsEngine
 from analytics.validation_summary_engine import ValidationSummaryEngine
 from app.text_encoding import clean_display_text
 
@@ -1191,6 +1192,78 @@ def command_direction_outcome_diagnostics(args) -> None:
         print(f"  SELL signals: {item.sell_signals_count}")
         print(f"  Moved toward target count: {item.moved_expected_direction_count}")
         print(f"  Moved toward target rate: {item.moved_expected_direction_rate * 100:.2f}%")
+
+
+def command_trend_alignment_diagnostics(args) -> None:
+    config, _logger, database = build_context()
+    current_price, source, timestamp = _load_current_paper_price(config, database)
+    report = TrendAlignmentDiagnosticsEngine(database, config).build_alignment_report(
+        profile=args.profile,
+        current_price=current_price,
+    )
+
+    print("=== 1h Trend Alignment Diagnostics ===")
+    print("Diagnostics only. Runtime strategy, open cycles, and trading logic are unchanged.")
+    print(f"Profile: {report.profile}")
+    print(f"Current price: {report.current_price:.8f}")
+    print(f"Current price source: {source}")
+    print(f"Current price timestamp: {timestamp}")
+    print("")
+
+    print("--- Open Cycles ---")
+    if not report.open_cycles:
+        print("No open cycles for this profile.")
+    for item in report.open_cycles:
+        print(
+            f"db_id={item.db_id} direction={item.direction} opened_at={item.opened_at} "
+            f"open_price={item.open_price:.8f} current_price={item.current_price:.8f} "
+            f"target_price={item.target_price:.8f}"
+        )
+        print(
+            f"  unrealized_pnl={item.unrealized_pnl:.8f} "
+            f"entry_1h_trend={item.entry_1h_trend} current_1h_trend={item.current_1h_trend}"
+        )
+        print(
+            f"  entry aligned with 1h trend: {'yes' if item.entry_aligned_with_1h else 'no'} | "
+            f"entry against 1h trend: {'yes' if item.entry_against_1h else 'no'}"
+        )
+
+    stats = report.cycle_stats
+    print("--- Historical/Paper Cycle Trend Stats ---")
+    print(f"Total cycles: {stats.total_cycles}")
+    print(f"Aligned cycles: {stats.aligned_cycles}")
+    print(f"Against-trend cycles: {stats.against_trend_cycles}")
+    print(f"Win rate aligned: {stats.win_rate_aligned * 100:.2f}%")
+    print(f"Win rate against-trend: {stats.win_rate_against_trend * 100:.2f}%")
+    print(f"Net profit aligned: {stats.net_profit_aligned:.8f}")
+    print(f"Net profit against-trend: {stats.net_profit_against_trend:.8f}")
+
+
+def command_trend_filter_sim(args) -> None:
+    config, _logger, database = build_context()
+    report = TrendAlignmentDiagnosticsEngine(database, config).build_filter_simulation(profile=args.profile)
+
+    print("=== 1h Trend Filter Simulation ===")
+    print("Dry-run only. Runtime profile, strategy config, and open cycles are unchanged.")
+    print(f"Profile: {report.profile}")
+    if report.current_bad_buy_cycle_db_id is None:
+        print("Current adverse BUY cycle: N/A")
+    else:
+        print(f"Current adverse BUY cycle db_id: {report.current_bad_buy_cycle_db_id}")
+    print("")
+
+    for item in report.results:
+        print(f"--- {item.name} ---")
+        print(f"Candidates total: {item.candidates_total}")
+        print(f"Candidates kept: {item.candidates_kept}")
+        print(f"Candidates blocked: {item.candidates_blocked}")
+        print(
+            "Would block current bad BUY cycle: "
+            f"{'yes' if item.would_block_current_bad_buy_cycle else 'no'}"
+        )
+        print(f"Estimated PnL impact: {item.estimated_pnl_impact:.8f}")
+        print(f"Recommendation: {item.recommendation}")
+        print("")
 
 
 def command_holding_horizon_diagnostics(args) -> None:
@@ -3145,6 +3218,28 @@ def build_parser() -> argparse.ArgumentParser:
         default="mean_reversion_v2",
     )
     direction_outcome_parser.set_defaults(func=command_direction_outcome_diagnostics)
+
+    trend_alignment_parser = subparsers.add_parser(
+        "trend-alignment-diagnostics",
+        help="Show 1h trend alignment diagnostics for paper cycles",
+    )
+    trend_alignment_parser.add_argument(
+        "--profile",
+        choices=SUPPORTED_RUNTIME_STRATEGY_PROFILES,
+        default="mean_reversion_v2_small_target",
+    )
+    trend_alignment_parser.set_defaults(func=command_trend_alignment_diagnostics)
+
+    trend_filter_sim_parser = subparsers.add_parser(
+        "trend-filter-sim",
+        help="Dry-run 1h trend filter variants for mean-reversion candidates",
+    )
+    trend_filter_sim_parser.add_argument(
+        "--profile",
+        choices=SUPPORTED_RUNTIME_STRATEGY_PROFILES,
+        default="mean_reversion_v2_small_target",
+    )
+    trend_filter_sim_parser.set_defaults(func=command_trend_filter_sim)
 
     holding_horizon_parser = subparsers.add_parser(
         "holding-horizon-diagnostics",

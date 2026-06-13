@@ -498,6 +498,25 @@ def test_manage_cli_has_direction_outcome_diagnostics_command():
     assert args.profile == "mean_reversion_v2"
 
 
+def test_manage_cli_has_trend_alignment_commands():
+    parser = build_parser()
+    alignment_args = parser.parse_args([
+        "trend-alignment-diagnostics",
+        "--profile",
+        "mean_reversion_v2_small_target",
+    ])
+    sim_args = parser.parse_args([
+        "trend-filter-sim",
+        "--profile",
+        "mean_reversion_v2_small_target",
+    ])
+
+    assert alignment_args.command == "trend-alignment-diagnostics"
+    assert alignment_args.profile == "mean_reversion_v2_small_target"
+    assert sim_args.command == "trend-filter-sim"
+    assert sim_args.profile == "mean_reversion_v2_small_target"
+
+
 def test_manage_cli_has_holding_horizon_diagnostics_command():
     parser = build_parser()
     args = parser.parse_args([
