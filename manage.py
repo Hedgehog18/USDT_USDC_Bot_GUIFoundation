@@ -2256,6 +2256,100 @@ def command_paper_cycle_sim(args) -> None:
         print("[close-debug] No open paper cycles were evaluated.")
 
 
+def command_collect_closed_cycles(args) -> None:
+    config, logger, database = build_context()
+    profile = args.profile
+    _ensure_profile_allowed_for_paper(config, profile)
+
+    if args.target <= 0:
+        raise ValueError("--target must be greater than 0.")
+    if args.interval < 0:
+        raise ValueError("--interval must be 0 or greater.")
+    if args.max_iterations is not None and args.max_iterations <= 0:
+        raise ValueError("--max-iterations must be greater than 0 when provided.")
+
+    logger.info(
+        "Closed cycle collection watcher started: profile=%s target=%s interval=%s max_iterations=%s",
+        profile,
+        args.target,
+        args.interval,
+        args.max_iterations,
+    )
+
+    print("=== Closed Cycles Collection Watch ===")
+    print(f"Profile: {profile}")
+    print(f"Target closed cycles: {args.target}")
+    print("Mode: DEMO/PAPER only. Real trading disabled.")
+
+    stats = database.load_paper_cycle_collection_stats(profile)
+    _print_closed_cycle_collection_progress(stats, args.target, data_source="N/A", iteration=0)
+    if int(stats["closed_cycles"]) >= args.target:
+        print("SUCCESS: target closed cycles already reached.")
+        if args.beep:
+            _beep_success()
+        return
+
+    iteration = 0
+    while int(stats["closed_cycles"]) < args.target:
+        if args.max_iterations is not None and iteration >= args.max_iterations:
+            print("STOPPED: max iterations reached before target closed cycles.")
+            break
+
+        iteration += 1
+        bot = _apply_profile_to_bot(BotEngine(), profile)
+        result = PaperTradingEngine(
+            config,
+            database,
+            bot=bot,
+            strategy_profile=profile,
+        ).run(1)
+        stats = database.load_paper_cycle_collection_stats(profile)
+        _print_closed_cycle_collection_progress(
+            stats,
+            args.target,
+            data_source=result.data_source,
+            iteration=iteration,
+        )
+
+        if int(stats["closed_cycles"]) >= args.target:
+            print("SUCCESS: target closed cycles reached.")
+            if args.beep:
+                _beep_success()
+            return
+
+        if args.interval:
+            time.sleep(args.interval)
+
+
+def _print_closed_cycle_collection_progress(
+    stats: dict[str, float | int],
+    target: int,
+    *,
+    data_source: str,
+    iteration: int,
+) -> None:
+    print(
+        f"[collection {iteration}] "
+        f"CLOSED {int(stats['closed_cycles'])} / {target} | "
+        f"open cycles: {int(stats['open_cycles'])} | "
+        f"net profit: {float(stats['net_profit']):.8f} | "
+        f"win rate: {float(stats['win_rate']) * 100:.2f}% | "
+        f"current price source: {data_source}"
+    )
+
+
+def _beep_success() -> None:
+    try:
+        import winsound
+
+        for _ in range(3):
+            winsound.Beep(1200, 250)
+    except Exception:
+        for _ in range(3):
+            print("\a", end="", flush=True)
+        print()
+
+
 def command_long_paper_run(args) -> None:
     config, logger, database = build_context()
     profile = args.profile
@@ -2880,6 +2974,21 @@ def build_parser() -> argparse.ArgumentParser:
     paper_cycle_sim_parser.add_argument("--debug-close", action="store_true")
     paper_cycle_sim_parser.add_argument("--force-refresh-market-data", action="store_true")
     paper_cycle_sim_parser.set_defaults(func=command_paper_cycle_sim)
+
+    collect_closed_cycles_parser = subparsers.add_parser(
+        "collect-closed-cycles",
+        help="Run paper processing until the selected profile accumulates target CLOSED cycles",
+    )
+    collect_closed_cycles_parser.add_argument(
+        "--profile",
+        choices=SUPPORTED_RUNTIME_STRATEGY_PROFILES,
+        default="mean_reversion_v2_small_target",
+    )
+    collect_closed_cycles_parser.add_argument("--target", type=int, default=100)
+    collect_closed_cycles_parser.add_argument("--interval", type=int, default=1)
+    collect_closed_cycles_parser.add_argument("--max-iterations", type=int, default=None)
+    collect_closed_cycles_parser.add_argument("--beep", action=argparse.BooleanOptionalAction, default=True)
+    collect_closed_cycles_parser.set_defaults(func=command_collect_closed_cycles)
 
     long_paper_run_parser = subparsers.add_parser("long-paper-run", help="Run long paper validation workflow")
     long_paper_run_parser.add_argument("--iterations", type=int, default=500)

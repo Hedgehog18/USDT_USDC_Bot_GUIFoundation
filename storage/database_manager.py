@@ -1376,6 +1376,31 @@ class DatabaseManager:
                 (limit,),
             ).fetchall()
 
+    def load_paper_cycle_collection_stats(self, strategy_profile: str) -> dict[str, float | int]:
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT
+                    COALESCE(SUM(CASE WHEN status = 'CLOSED' THEN 1 ELSE 0 END), 0) AS closed_cycles,
+                    COALESCE(SUM(CASE WHEN status = 'OPEN' THEN 1 ELSE 0 END), 0) AS open_cycles,
+                    COALESCE(SUM(CASE WHEN status = 'CLOSED' THEN net_profit ELSE 0 END), 0) AS net_profit,
+                    COALESCE(SUM(CASE WHEN status = 'CLOSED' AND net_profit > 0 THEN 1 ELSE 0 END), 0) AS winning_cycles
+                FROM paper_cycles
+                WHERE strategy_profile = ?
+                """,
+                (strategy_profile,),
+            ).fetchone()
+
+        closed_cycles = int(row[0])
+        winning_cycles = int(row[3])
+        return {
+            "closed_cycles": closed_cycles,
+            "open_cycles": int(row[1]),
+            "net_profit": float(row[2]),
+            "winning_cycles": winning_cycles,
+            "win_rate": (winning_cycles / closed_cycles) if closed_cycles else 0.0,
+        }
+
     def save_long_paper_run(
         self,
         *,

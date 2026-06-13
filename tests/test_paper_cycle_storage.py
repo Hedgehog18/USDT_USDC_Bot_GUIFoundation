@@ -1,4 +1,7 @@
 from pathlib import Path
+from datetime import datetime
+
+import pytest
 
 from paper.models import PaperCycle, PaperCycleStatus, PaperOrderSide
 from paper.paper_cycle_manager import PaperCycleManager
@@ -81,3 +84,63 @@ def test_database_updates_only_matching_open_paper_cycle(test_config, tmp_path: 
         (first_db_id, first_db_id, "CLOSED", 0.1),
         (second_db_id, second_db_id, "OPEN", 0.0),
     ]
+
+
+def test_database_loads_paper_cycle_collection_stats_by_profile(tmp_path: Path):
+    database = DatabaseManager(str(tmp_path / "bot.sqlite"))
+    opened_at = datetime.utcnow()
+
+    cycles = [
+        PaperCycle(
+            id=0,
+            direction=PaperOrderSide.BUY_USDC,
+            status=PaperCycleStatus.CLOSED,
+            open_price=1.0,
+            close_price=1.0001,
+            quantity=10.0,
+            open_fee=0.0,
+            close_fee=0.0,
+            gross_profit=0.01,
+            net_profit=0.01,
+            opened_at=opened_at,
+            closed_at=opened_at,
+        ),
+        PaperCycle(
+            id=0,
+            direction=PaperOrderSide.SELL_USDC,
+            status=PaperCycleStatus.CLOSED,
+            open_price=1.0,
+            close_price=0.9999,
+            quantity=10.0,
+            open_fee=0.0,
+            close_fee=0.0,
+            gross_profit=-0.02,
+            net_profit=-0.02,
+            opened_at=opened_at,
+            closed_at=opened_at,
+        ),
+        PaperCycle(
+            id=0,
+            direction=PaperOrderSide.BUY_USDC,
+            status=PaperCycleStatus.OPEN,
+            open_price=1.0,
+            close_price=1.0001,
+            quantity=10.0,
+            open_fee=0.0,
+            close_fee=0.0,
+            gross_profit=0.0,
+            net_profit=0.0,
+            opened_at=opened_at,
+        ),
+    ]
+    for cycle in cycles:
+        database.save_paper_cycle(cycle, strategy_profile="mean_reversion_v2_small_target")
+    database.save_paper_cycle(cycles[0], strategy_profile="other_profile")
+
+    stats = database.load_paper_cycle_collection_stats("mean_reversion_v2_small_target")
+
+    assert stats["closed_cycles"] == 2
+    assert stats["open_cycles"] == 1
+    assert stats["net_profit"] == pytest.approx(-0.01)
+    assert stats["winning_cycles"] == 1
+    assert stats["win_rate"] == 0.5

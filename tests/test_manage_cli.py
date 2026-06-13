@@ -245,6 +245,29 @@ def test_manage_cli_paper_cycle_accepts_small_target_profile():
     assert args.profile == "mean_reversion_v2_small_target"
 
 
+def test_manage_cli_has_collect_closed_cycles_command():
+    parser = build_parser()
+    args = parser.parse_args([
+        "collect-closed-cycles",
+        "--profile",
+        "mean_reversion_v2_small_target",
+        "--target",
+        "5",
+        "--interval",
+        "1",
+        "--max-iterations",
+        "20",
+        "--no-beep",
+    ])
+
+    assert args.command == "collect-closed-cycles"
+    assert args.profile == "mean_reversion_v2_small_target"
+    assert args.target == 5
+    assert args.interval == 1
+    assert args.max_iterations == 20
+    assert args.beep is False
+
+
 def test_manage_cli_has_long_paper_run_command():
     parser = build_parser()
     args = parser.parse_args(["long-paper-run", "--iterations", "500", "--interval", "5"])
