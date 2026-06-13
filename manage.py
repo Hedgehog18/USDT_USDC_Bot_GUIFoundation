@@ -44,6 +44,7 @@ from strategy.profile_decision_engine import (
 )
 from analytics.center_confidence_diagnostics_engine import CenterConfidenceDiagnosticsEngine
 from analytics.center_confidence_rule_sim_engine import CenterConfidenceRuleSimulationEngine
+from analytics.break_even_rebase_sim_engine import BreakEvenRebaseSimulationEngine
 from analytics.combined_entry_rule_sim_engine import CombinedEntryRuleSimulationEngine
 from analytics.confidence_diagnostics_engine import ConfidenceDiagnosticsEngine
 from analytics.data_source_check_engine import DataSourceCheckEngine
@@ -1444,6 +1445,34 @@ def command_target_rebase_diagnostics(args) -> None:
         print(f"Would close now: {item.would_close_now}")
         print(f"Estimated PnL: {item.estimated_pnl:.8f}")
         print(f"Remaining open exposure: {item.remaining_open_exposure}")
+        print(f"Recommendation score: {item.recommendation_score:.2f}")
+        print("")
+
+
+def command_break_even_rebase_sim(args) -> None:
+    config, _logger, database = build_context()
+    report = BreakEvenRebaseSimulationEngine(database, config).build_report(profile=args.profile)
+
+    print("=== Break-even Rebase Simulation ===")
+    print("Dry-run only. Runtime targets, strategy config, and paper cycles are unchanged.")
+    print(f"Profile: {report.profile}")
+    print(f"Open cycles count: {report.open_cycles_count}")
+    print(f"Current price: {_format_optional_float(report.current_price)}")
+    print(
+        "Observed 1h range: "
+        f"[{_format_optional_float(report.observed_1h_low)}, "
+        f"{_format_optional_float(report.observed_1h_high)}]"
+    )
+    print("")
+
+    for item in report.scenarios:
+        print(f"--- {item.name} ---")
+        print(f"Affected open cycles: {item.affected_open_cycles}")
+        print(f"Would close now: {item.would_close_now}")
+        print(f"Estimated realized PnL: {item.estimated_realized_pnl:.8f}")
+        print(f"Remaining open exposure: {item.remaining_open_exposure}")
+        print(f"Average distance to rebased target: {_format_optional_float(item.average_distance_to_rebased_target)}")
+        print(f"Avoided loss vs nearest range edge: {item.avoided_loss_vs_nearest_range_edge:.8f}")
         print(f"Recommendation score: {item.recommendation_score:.2f}")
         print("")
 
@@ -3461,6 +3490,17 @@ def build_parser() -> argparse.ArgumentParser:
         default="mean_reversion_v2_small_target",
     )
     target_rebase_parser.set_defaults(func=command_target_rebase_diagnostics)
+
+    break_even_rebase_parser = subparsers.add_parser(
+        "break-even-rebase-sim",
+        help="Dry-run break-even target rebase variants for stalled paper cycles",
+    )
+    break_even_rebase_parser.add_argument(
+        "--profile",
+        choices=SUPPORTED_RUNTIME_STRATEGY_PROFILES,
+        default="mean_reversion_v2_small_target",
+    )
+    break_even_rebase_parser.set_defaults(func=command_break_even_rebase_sim)
 
     holding_horizon_parser = subparsers.add_parser(
         "holding-horizon-diagnostics",

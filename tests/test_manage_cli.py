@@ -553,6 +553,18 @@ def test_manage_cli_has_target_rebase_diagnostics_command():
     assert args.profile == "mean_reversion_v2_small_target"
 
 
+def test_manage_cli_has_break_even_rebase_sim_command():
+    parser = build_parser()
+    args = parser.parse_args([
+        "break-even-rebase-sim",
+        "--profile",
+        "mean_reversion_v2_small_target",
+    ])
+
+    assert args.command == "break-even-rebase-sim"
+    assert args.profile == "mean_reversion_v2_small_target"
+
+
 def test_manage_cli_has_holding_horizon_diagnostics_command():
     parser = build_parser()
     args = parser.parse_args([
