@@ -114,3 +114,33 @@ def test_profile_decision_engine_mean_reversion_v2_small_target_uses_v2_entry_ru
     assert decision.action == "BUY_USDC"
     assert "mean_reversion_v2_small_target" in decision.reason
     assert decision.target_profit == test_config.target_profit * 0.25
+
+
+def test_profile_decision_engine_new_york_profile_blocks_entries_outside_ny(test_config):
+    decision = StrategyProfileDecisionEngine(test_config, "mean_reversion_v2_small_target_ny").make_decision(
+        _state(
+            work_position=25.0,
+            micro_trend="BUY_DOMINANT",
+            center_confidence="LOW",
+            created_at=datetime(2026, 6, 14, 9, 0, 0),
+        )
+    )
+
+    assert decision.action == "WAIT"
+    assert "outside NEW_YORK session" in decision.reason
+    assert decision.target_profit == test_config.target_profit * 0.25
+
+
+def test_profile_decision_engine_new_york_profile_allows_entries_in_ny(test_config):
+    decision = StrategyProfileDecisionEngine(test_config, "mean_reversion_v2_small_target_ny").make_decision(
+        _state(
+            work_position=75.0,
+            micro_trend="SELL_DOMINANT",
+            center_confidence="LOW",
+            created_at=datetime(2026, 6, 14, 18, 0, 0),
+        )
+    )
+
+    assert decision.action == "SELL_USDC"
+    assert "mean_reversion_v2_small_target_ny" in decision.reason
+    assert decision.target_profit == test_config.target_profit * 0.25

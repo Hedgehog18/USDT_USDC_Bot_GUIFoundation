@@ -12,10 +12,11 @@ class DummyConfig:
 
 
 class FakePaperTradingEngine:
-    def __init__(self, config, database, strategy_profile="strict_current"):
+    def __init__(self, config, database, strategy_profile="strict_current", **kwargs):
         self.config = config
         self.database = database
         self.strategy_profile = strategy_profile
+        self.kwargs = kwargs
 
     def run(self, iterations: int) -> PaperTradingRunResult:
         return PaperTradingRunResult(
@@ -46,3 +47,34 @@ def test_long_paper_run_workflow_saves_history(monkeypatch, tmp_path):
     assert rows[0][8] == result.validation_summary.overall_status
     assert rows[0][9] == result.insights.rating
     assert result.strategy_profile == "strict_current"
+
+
+def test_long_paper_run_workflow_uses_profile_aware_summary(monkeypatch, tmp_path):
+    import paper.long_paper_run_workflow as workflow_module
+
+    class FakeBotEngine:
+        def __init__(self):
+            self.config = DummyConfig()
+            self.decision_engine = None
+
+    class FakeProfileDecisionEngine:
+        def __init__(self, config, strategy_profile):
+            self.config = config
+            self.strategy_profile = strategy_profile
+
+    monkeypatch.setattr(workflow_module, "PaperTradingEngine", FakePaperTradingEngine)
+    monkeypatch.setattr(workflow_module, "BotEngine", FakeBotEngine)
+    monkeypatch.setattr(workflow_module, "StrategyProfileDecisionEngine", FakeProfileDecisionEngine)
+    monkeypatch.chdir(tmp_path)
+    database = DatabaseManager(str(tmp_path / "bot.sqlite"))
+
+    result = LongPaperRunWorkflow(DummyConfig(), database).run(
+        iterations=2,
+        interval_seconds=0,
+        strategy_profile="mean_reversion_v2_small_target_ny",
+    )
+
+    rows = database.load_recent_long_paper_runs(limit=10)
+    assert result.strategy_profile == "mean_reversion_v2_small_target_ny"
+    assert result.validation_summary.profile == "mean_reversion_v2_small_target_ny"
+    assert rows[0][8] == result.validation_summary.overall_status

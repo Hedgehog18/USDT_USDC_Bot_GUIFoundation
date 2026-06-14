@@ -358,6 +358,49 @@ def test_manage_cli_strategy_profile_sim_accepts_small_target_profile():
     assert args.profile == "mean_reversion_v2_small_target"
 
 
+def test_manage_cli_accepts_new_york_small_target_profile():
+    parser = build_parser()
+    strategy_args = parser.parse_args([
+        "strategy-profile-sim",
+        "--profile",
+        "mean_reversion_v2_small_target_ny",
+    ])
+    paper_args = parser.parse_args([
+        "paper-cycle-sim",
+        "--iterations",
+        "3",
+        "--profile",
+        "mean_reversion_v2_small_target_ny",
+    ])
+    long_args = parser.parse_args([
+        "long-paper-run",
+        "--iterations",
+        "5",
+        "--interval",
+        "1",
+        "--profile",
+        "mean_reversion_v2_small_target_ny",
+    ])
+    collect_args = parser.parse_args([
+        "collect-closed-cycles",
+        "--profile",
+        "mean_reversion_v2_small_target_ny",
+        "--target",
+        "5",
+    ])
+    validation_args = parser.parse_args([
+        "validation-summary",
+        "--profile",
+        "mean_reversion_v2_small_target_ny",
+    ])
+
+    assert strategy_args.profile == "mean_reversion_v2_small_target_ny"
+    assert paper_args.profile == "mean_reversion_v2_small_target_ny"
+    assert long_args.profile == "mean_reversion_v2_small_target_ny"
+    assert collect_args.profile == "mean_reversion_v2_small_target_ny"
+    assert validation_args.profile == "mean_reversion_v2_small_target_ny"
+
+
 def test_manage_cli_has_micro_trend_sensitivity_command():
     parser = build_parser()
     args = parser.parse_args([

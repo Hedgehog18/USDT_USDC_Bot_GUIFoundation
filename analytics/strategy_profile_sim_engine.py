@@ -13,6 +13,7 @@ SUPPORTED_STRATEGY_PROFILES = (
     "mean_reversion_v1",
     "mean_reversion_v2",
     "mean_reversion_v2_small_target",
+    "mean_reversion_v2_small_target_ny",
 )
 
 
@@ -104,14 +105,17 @@ class StrategyProfileSimulationEngine:
         )
 
     def _profile_filters(self, profile: str, row: dict) -> dict[str, bool | None]:
-        if profile in {"mean_reversion_v1", "mean_reversion_v2", "mean_reversion_v2_small_target"}:
-            return {
+        if profile in {"mean_reversion_v1", "mean_reversion_v2", "mean_reversion_v2_small_target", "mean_reversion_v2_small_target_ny"}:
+            filters = {
                 "spread_stability": row["filters"]["spread_stability"],
                 "market_health": row["filters"]["market_health"],
                 "market_regime": row["filters"]["market_regime"],
                 "volatility_regime": row["filters"]["volatility_regime"],
                 "micro_trend": row["filters"]["micro_trend"],
             }
+            if profile == "mean_reversion_v2_small_target_ny":
+                filters["new_york_session"] = row["filters"]["new_york_session"]
+            return filters
         return dict(row["filters"])
 
     def _load_snapshot_rows(self) -> list[dict]:
@@ -185,13 +189,14 @@ class StrategyProfileSimulationEngine:
                 "volatility_regime": row["volatility_regime"] != "EXTREME",
                 "order_book_pressure": self._order_book_pressure_pass(zone, row["order_book_pressure"]),
                 "micro_trend": self._micro_trend_pass(zone, row["micro_trend"]),
+                "new_york_session": self._is_new_york_session(row["timestamp"]),
                 "corridor_quality": row["corridor_quality_score"] > 0.0,
                 "mean_reversion_score": row["mean_reversion_score"] > 0.0,
             },
         }
 
     def _zone(self, work_position: float, profile: str) -> str:
-        uses_v2_zones = profile in {"mean_reversion_v2", "mean_reversion_v2_small_target"}
+        uses_v2_zones = profile in {"mean_reversion_v2", "mean_reversion_v2_small_target", "mean_reversion_v2_small_target_ny"}
         buy_zone_max = 25.0 if uses_v2_zones else self.config.buy_zone_max
         sell_zone_min = 75.0 if uses_v2_zones else self.config.sell_zone_min
         if work_position <= buy_zone_max:
@@ -227,3 +232,13 @@ class StrategyProfileSimulationEngine:
     @staticmethod
     def _float(value) -> float:
         return float(value or 0.0)
+
+    @staticmethod
+    def _is_new_york_session(timestamp: str) -> bool:
+        from datetime import datetime
+
+        try:
+            parsed = datetime.fromisoformat(timestamp)
+        except ValueError:
+            return False
+        return 17 <= parsed.hour <= 23

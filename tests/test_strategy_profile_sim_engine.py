@@ -16,6 +16,7 @@ def _insert_snapshot(
     market_health_status: str = "HEALTHY",
     market_regime: str = "NORMAL",
     volatility_regime: str = "LOW",
+    timestamp: str | None = None,
 ) -> None:
     conn.execute(
         """
@@ -35,7 +36,7 @@ def _insert_snapshot(
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
-            f"2026-01-01T00:0{index}:00",
+            timestamp or f"2026-01-01T00:0{index}:00",
             "USDCUSDT",
             1.0,
             0.9999,
@@ -130,6 +131,39 @@ def test_strategy_profile_sim_mean_reversion_v2_uses_calibrated_zones(test_confi
     assert small_target.pass_count == v2.pass_count
     assert small_target.buy_candidates == v2.buy_candidates
     assert small_target.sell_candidates == v2.sell_candidates
+
+
+def test_strategy_profile_sim_new_york_profile_filters_by_session(test_config, tmp_path):
+    database = DatabaseManager(str(tmp_path / "bot.sqlite"))
+    with database.connect() as conn:
+        _insert_snapshot(
+            conn,
+            0,
+            25.0,
+            "LOW",
+            "ASK_PRESSURE",
+            "BUY_DOMINANT",
+            timestamp="2026-01-01T09:00:00",
+        )
+        _insert_snapshot(
+            conn,
+            1,
+            75.0,
+            "LOW",
+            "BID_PRESSURE",
+            "SELL_DOMINANT",
+            timestamp="2026-01-01T18:00:00",
+        )
+        conn.commit()
+
+    report = StrategyProfileSimulationEngine(database, test_config).build_report(
+        "mean_reversion_v2_small_target_ny"
+    )
+
+    assert report.total_entry_zone_samples == 2
+    assert report.pass_count == 1
+    assert report.sell_candidates == 1
+    assert ("new_york_session", 1) in report.remaining_blocking_filters
 
 
 def test_strategy_profile_sim_rejects_unknown_profile(test_config, tmp_path):

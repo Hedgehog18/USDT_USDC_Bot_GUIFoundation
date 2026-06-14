@@ -86,7 +86,13 @@ class LongPaperRunWorkflow:
         else:
             run_result = self._run_with_interval(engine, iterations, interval_seconds)
 
-        cycle_rows = self.database.load_recent_paper_cycles(limit=500)
+        if strategy_profile == "strict_current":
+            cycle_rows = self.database.load_recent_paper_cycles(limit=500)
+        else:
+            cycle_rows = self.database.load_recent_paper_cycles_by_profile(
+                strategy_profile,
+                limit=500,
+            )
         safety_rows = self.database.load_recent_paper_safety_events(limit=500)
         stats = PaperAnalyticsEngine().build_from_rows(cycle_rows)
         insights = PaperInsightsEngine().build(stats, safety_rows)
@@ -100,7 +106,9 @@ class LongPaperRunWorkflow:
             summary_csv=exporter.export_summary_csv(stats, strategy_profile=strategy_profile),
             insights_txt=insights_path,
         )
-        validation_summary = ValidationSummaryEngine(self.database, self.config).build_summary()
+        validation_summary = ValidationSummaryEngine(self.database, self.config).build_summary(
+            profile=strategy_profile,
+        )
         long_run_id = self.database.save_long_paper_run(
             iterations=iterations,
             interval_seconds=interval_seconds,
