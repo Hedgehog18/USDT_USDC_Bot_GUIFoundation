@@ -62,6 +62,7 @@ from analytics.fee_model_report_engine import FeeModelReportEngine
 from analytics.filter_pass_diagnostics_engine import FilterPassDiagnosticsEngine
 from analytics.holding_horizon_diagnostics_engine import HoldingHorizonDiagnosticsEngine
 from analytics.max_holding_sensitivity_engine import MaxHoldingSensitivityEngine
+from analytics.market_session_diagnostics_engine import MarketSessionDiagnosticsEngine
 from analytics.ml_baseline_trainer import MLBaselineTrainer
 from analytics.ml_dataset_coverage_engine import MLDatasetCoverageEngine
 from analytics.ml_dataset_exporter import MLDatasetExporter, SUPPORTED_DATASET_MODES
@@ -1953,6 +1954,58 @@ def command_exit_tolerance_sim(args) -> None:
     print(f"Best tested tolerance: {report.recommended_tolerance or 'N/A'}")
 
 
+def command_market_session_diagnostics(args) -> None:
+    config, _logger, database = build_context()
+    current_price, source, timestamp = _load_current_paper_price(config, database)
+    report = MarketSessionDiagnosticsEngine(database, config).build_report(
+        profile=args.profile,
+        current_price=current_price,
+        current_price_source=source,
+        current_price_timestamp=timestamp,
+    )
+
+    print("=== Market Session Diagnostics ===")
+    print("Diagnostics only. Trading logic and paper cycles are unchanged.")
+    print("Session hours use the timestamp hour stored in SQLite.")
+    print("ASIA=00-07, LONDON=08-12, LONDON_NEW_YORK_OVERLAP=13-16, NEW_YORK=17-23.")
+    print(f"Profile: {report.profile}")
+    print(f"Current price: {report.current_price:.8f}")
+    print(f"Current price source: {report.current_price_source}")
+    print(f"Current price timestamp: {report.current_price_timestamp}")
+    print("")
+
+    print("--- Session Summary ---")
+    for item in report.session_stats:
+        print(f"Session: {item.session}")
+        print(f"  Total entries: {item.total_entries}")
+        print(f"  Closed cycles: {item.closed_cycles}")
+        print(f"  Open cycles: {item.open_cycles}")
+        print(f"  Win rate: {item.win_rate * 100:.2f}%")
+        print(f"  Net profit: {item.net_profit:.8f}")
+        print(f"  Average holding time: {_format_optional_duration(item.average_holding_time_seconds)}")
+        print(f"  Average unrealized PnL: {_format_optional_float(item.average_unrealized_pnl)}")
+        print(f"  Target hit rate: {item.target_hit_rate * 100:.2f}%")
+        print("")
+
+    print("--- Entry Hour Distribution ---")
+    _print_hour_distribution(report.entry_hour_distribution)
+    print("")
+    print("--- Close Hour Distribution ---")
+    _print_hour_distribution(report.close_hour_distribution)
+
+
+def _print_hour_distribution(distribution: dict[int, int]) -> None:
+    shown = False
+    for hour in range(24):
+        count = distribution.get(hour, 0)
+        if count <= 0:
+            continue
+        shown = True
+        print(f"{hour:02d}:00 | {count}")
+    if not shown:
+        print("No data.")
+
+
 def command_build_ml_dataset(args) -> None:
     config, _logger, _database = build_context()
     provider = BinanceMarketDataProvider(base_url=config.binance_base_url)
@@ -3728,6 +3781,17 @@ def build_parser() -> argparse.ArgumentParser:
         default="mean_reversion_v2_small_target",
     )
     exit_tolerance_sim_parser.set_defaults(func=command_exit_tolerance_sim)
+
+    market_session_parser = subparsers.add_parser(
+        "market-session-diagnostics",
+        help="Diagnose paper cycle performance by market session",
+    )
+    market_session_parser.add_argument(
+        "--profile",
+        choices=SUPPORTED_RUNTIME_STRATEGY_PROFILES,
+        default="mean_reversion_v2_small_target",
+    )
+    market_session_parser.set_defaults(func=command_market_session_diagnostics)
 
     build_ml_dataset_parser = subparsers.add_parser(
         "build-ml-dataset",

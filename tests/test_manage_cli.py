@@ -430,6 +430,18 @@ def test_manage_cli_has_exit_tolerance_sim_command():
     assert args.profile == "mean_reversion_v2_small_target"
 
 
+def test_manage_cli_has_market_session_diagnostics_command():
+    parser = build_parser()
+    args = parser.parse_args([
+        "market-session-diagnostics",
+        "--profile",
+        "mean_reversion_v2_small_target",
+    ])
+
+    assert args.command == "market-session-diagnostics"
+    assert args.profile == "mean_reversion_v2_small_target"
+
+
 def test_manage_cli_has_build_ml_dataset_command():
     parser = build_parser()
     args = parser.parse_args([
