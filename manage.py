@@ -57,6 +57,7 @@ from analytics.entry_zone_debug_report import EntryZoneDebugReportBuilder
 from analytics.entry_threshold_sensitivity_engine import EntryThresholdSensitivityEngine
 from analytics.exit_risk_diagnostics_engine import ExitRiskDiagnosticsEngine
 from analytics.exit_rule_sim_engine import ExitRuleSimulationEngine
+from analytics.exit_tolerance_sim_engine import ExitToleranceSimulationEngine
 from analytics.fee_model_report_engine import FeeModelReportEngine
 from analytics.filter_pass_diagnostics_engine import FilterPassDiagnosticsEngine
 from analytics.holding_horizon_diagnostics_engine import HoldingHorizonDiagnosticsEngine
@@ -1896,6 +1897,62 @@ def command_exit_rule_sim(args) -> None:
     print(f"Best tested exit rule: {report.recommended_rule or 'N/A'}")
 
 
+def command_exit_tolerance_sim(args) -> None:
+    config, _logger, database = build_context()
+    current_price, source, timestamp = _load_current_paper_price(config, database)
+    report = ExitToleranceSimulationEngine(database, config).build_report(
+        profile=args.profile,
+        current_price=current_price,
+        current_price_source=source,
+        current_price_timestamp=timestamp,
+    )
+
+    print("=== Exit Tolerance Simulation ===")
+    print("Dry-run only. Runtime close rules and paper cycles are unchanged.")
+    print(f"Profile: {report.profile}")
+    print(f"Current price: {report.current_price:.8f}")
+    print(f"Current price source: {report.current_price_source}")
+    print(f"Current price timestamp: {report.current_price_timestamp}")
+    print(f"Open cycles count: {report.open_cycles_count}")
+    print(f"Existing closed cycles count: {report.existing_closed_cycles_count}")
+    print("")
+
+    if not report.results:
+        print("No exit tolerance simulation data available.")
+        return
+
+    print("--- Tolerance Results ---")
+    for item in report.results:
+        print(f"Tolerance: {item.tolerance_name}")
+        print(f"  Tolerance value: {item.tolerance_value:.8f}")
+        print(f"  Affected cycles: {item.affected_cycles}")
+        print(f"  Would close now: {item.would_close_now}")
+        print(f"  Estimated PnL: {item.estimated_pnl:.8f}")
+        print(f"  Difference vs strict target: {item.difference_vs_strict_target:.8f}")
+        print(f"  Closed cycles count: {item.closed_cycles_count}")
+        print(f"  Open cycles remaining: {item.open_cycles_remaining}")
+        print(f"  Recommendation score: {item.recommendation_score:.8f}")
+        print("")
+
+    print("--- Open Cycles ---")
+    if not report.open_cycle_details:
+        print("No open cycles for profile.")
+    for item in report.open_cycle_details:
+        matching = ", ".join(item.matching_tolerances) if item.matching_tolerances else "none"
+        print(
+            f"db_id={item.db_id} | direction={item.direction} | "
+            f"current_price={item.current_price:.8f} | target_price={item.target_price:.8f}"
+        )
+        print(
+            f"  distance_to_target={item.distance_to_target:.8f} | "
+            f"would_close_under={matching}"
+        )
+
+    print("")
+    print("--- Recommendation ---")
+    print(f"Best tested tolerance: {report.recommended_tolerance or 'N/A'}")
+
+
 def command_build_ml_dataset(args) -> None:
     config, _logger, _database = build_context()
     provider = BinanceMarketDataProvider(base_url=config.binance_base_url)
@@ -3660,6 +3717,17 @@ def build_parser() -> argparse.ArgumentParser:
         default="mean_reversion_v2_small_target",
     )
     exit_rule_sim_parser.set_defaults(func=command_exit_rule_sim)
+
+    exit_tolerance_sim_parser = subparsers.add_parser(
+        "exit-tolerance-sim",
+        help="Dry-run close tolerance simulation for open paper cycles",
+    )
+    exit_tolerance_sim_parser.add_argument(
+        "--profile",
+        choices=SUPPORTED_RUNTIME_STRATEGY_PROFILES,
+        default="mean_reversion_v2_small_target",
+    )
+    exit_tolerance_sim_parser.set_defaults(func=command_exit_tolerance_sim)
 
     build_ml_dataset_parser = subparsers.add_parser(
         "build-ml-dataset",
