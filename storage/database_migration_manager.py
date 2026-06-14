@@ -43,6 +43,7 @@ class DatabaseMigrationManager:
         ],
         "paper_cycles": [
             ColumnDefinition("strategy_profile", "TEXT DEFAULT 'UNKNOWN'"),
+            ColumnDefinition("close_reason", "TEXT"),
         ],
     }
 

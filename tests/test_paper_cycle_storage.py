@@ -86,6 +86,50 @@ def test_database_updates_only_matching_open_paper_cycle(test_config, tmp_path: 
     ]
 
 
+def test_database_manually_closes_open_paper_cycle(test_config, tmp_path: Path):
+    database = DatabaseManager(str(tmp_path / "bot.sqlite"))
+    portfolio = PaperPortfolioManager(initial_usdt=100.0, initial_usdc=100.0)
+    exchange = PaperExchange(test_config, portfolio)
+    first_manager = PaperCycleManager(test_config, exchange)
+    second_manager = PaperCycleManager(test_config, exchange)
+
+    first = first_manager.open_cycle("BUY_USDC", 1.0)
+    second = second_manager.open_cycle("SELL_USDC", 1.0005)
+    first_db_id = database.save_paper_cycle(first, strategy_profile="mean_reversion_v2_small_target")
+    second_db_id = database.save_paper_cycle(second, strategy_profile="mean_reversion_v2_small_target")
+
+    updated = database.close_paper_cycle_manually(
+        db_id=first_db_id,
+        close_price=1.0001,
+        close_fee=0.0,
+        gross_profit=0.001,
+        net_profit=0.001,
+        close_reason="stale",
+        closed_at="2026-06-14T12:00:00",
+    )
+
+    assert updated is True
+    with database.connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, status, close_price, net_profit, close_reason, closed_at
+            FROM paper_cycles
+            ORDER BY id ASC
+            """
+        ).fetchall()
+
+    assert rows[0] == (
+        first_db_id,
+        "CLOSED_MANUAL",
+        pytest.approx(1.0001),
+        pytest.approx(0.001),
+        "stale",
+        "2026-06-14T12:00:00",
+    )
+    assert rows[1][0] == second_db_id
+    assert rows[1][1] == "OPEN"
+
+
 def test_database_loads_paper_cycle_collection_stats_by_profile(tmp_path: Path):
     database = DatabaseManager(str(tmp_path / "bot.sqlite"))
     opened_at = datetime.utcnow()

@@ -42,6 +42,7 @@ from strategy.profile_decision_engine import (
     SUPPORTED_RUNTIME_STRATEGY_PROFILES,
     StrategyProfileDecisionEngine,
 )
+from trading.fee_engine import FeeEngine
 from analytics.center_confidence_diagnostics_engine import CenterConfidenceDiagnosticsEngine
 from analytics.center_confidence_rule_sim_engine import CenterConfidenceRuleSimulationEngine
 from analytics.break_even_rebase_sim_engine import BreakEvenRebaseSimulationEngine
@@ -2924,6 +2925,69 @@ def command_paper_open_cycles(args) -> None:
         print(f"  reason_not_closed: {item.reason_not_closed}")
 
 
+def command_paper_close_cycle(args) -> None:
+    config, _logger, database = build_context()
+    row = database.load_open_paper_cycle_by_id(args.db_id)
+    if row is None:
+        raise ValueError(f"OPEN paper cycle not found for db_id={args.db_id}.")
+
+    (
+        db_id,
+        _timestamp,
+        cycle_id,
+        strategy_profile,
+        direction,
+        status,
+        open_price,
+        _target_price,
+        quantity,
+        _open_fee,
+        _close_fee,
+        _gross_profit,
+        _net_profit,
+        opened_at,
+        _closed_at,
+    ) = row
+
+    close_price, source, closed_at = _load_binance_paper_price(config)
+    profit = FeeEngine(config).calculate_profit(
+        direction=str(direction),
+        open_price=float(open_price),
+        close_price=float(close_price),
+        quantity=float(quantity),
+        use_taker_fee=True,
+    )
+    updated = database.close_paper_cycle_manually(
+        db_id=int(db_id),
+        close_price=float(close_price),
+        close_fee=float(profit.fees.close_fee),
+        gross_profit=float(profit.gross_profit),
+        net_profit=float(profit.net_profit),
+        close_reason=str(args.reason),
+        closed_at=closed_at,
+    )
+    if not updated:
+        raise ValueError(f"OPEN paper cycle not found for db_id={args.db_id}.")
+
+    print("=== Paper Close Cycle ===")
+    print(f"db_id: {db_id}")
+    print(f"cycle_id: {cycle_id}")
+    print(f"profile: {strategy_profile}")
+    print(f"direction: {direction}")
+    print(f"previous_status: {status}")
+    print("status: CLOSED_MANUAL")
+    print(f"reason: {args.reason}")
+    print(f"opened_at: {opened_at}")
+    print(f"closed_at: {closed_at}")
+    print(f"price_source: {source}")
+    print(f"open_price: {float(open_price):.8f}")
+    print(f"close_price: {float(close_price):.8f}")
+    print(f"quantity: {float(quantity):.8f}")
+    print(f"gross_profit: {profit.gross_profit:.8f}")
+    print(f"close_fee: {profit.fees.close_fee:.8f}")
+    print(f"net_profit: {profit.net_profit:.8f}")
+
+
 def command_paper_close_watch(args) -> None:
     config, _logger, database = build_context()
     interval = int(args.interval)
@@ -3398,6 +3462,18 @@ def build_parser() -> argparse.ArgumentParser:
     paper_open_cycles_parser = subparsers.add_parser("paper-open-cycles", help="Show diagnostics for open paper cycles")
     paper_open_cycles_parser.add_argument("--limit", type=int, default=100)
     paper_open_cycles_parser.set_defaults(func=command_paper_open_cycles)
+
+    paper_close_cycle_parser = subparsers.add_parser(
+        "paper-close-cycle",
+        help="Manually close an OPEN paper cycle at current Binance price",
+    )
+    paper_close_cycle_parser.add_argument("--db-id", type=int, required=True)
+    paper_close_cycle_parser.add_argument(
+        "--reason",
+        choices=("manual", "timeout", "stale", "test_cleanup"),
+        default="manual",
+    )
+    paper_close_cycle_parser.set_defaults(func=command_paper_close_cycle)
 
     paper_close_watch_parser = subparsers.add_parser(
         "paper-close-watch",

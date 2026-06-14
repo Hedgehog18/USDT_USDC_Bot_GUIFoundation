@@ -147,11 +147,14 @@ def test_migration_backfills_legacy_paper_cycle_ids(tmp_path: Path):
     second = manager.run()
 
     assert "paper_cycles.strategy_profile" in first
+    assert "paper_cycles.close_reason" in first
     assert "paper_cycles.cycle_id_backfill" in first
     assert second == []
     with sqlite3.connect(db_path) as conn:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(paper_cycles)").fetchall()}
         rows = conn.execute(
             "SELECT id, cycle_id FROM paper_cycles ORDER BY id ASC"
         ).fetchall()
 
+    assert "close_reason" in columns
     assert rows == [(1, 1), (2, 2), (3, 3)]

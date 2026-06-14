@@ -285,7 +285,8 @@ class DatabaseManager:
                     gross_profit REAL NOT NULL,
                     net_profit REAL NOT NULL,
                     opened_at TEXT NOT NULL,
-                    closed_at TEXT
+                    closed_at TEXT,
+                    close_reason TEXT
                 )
             """)
             conn.execute("""
@@ -1375,6 +1376,58 @@ class DatabaseManager:
                 """,
                 (limit,),
             ).fetchall()
+
+    def load_open_paper_cycle_by_id(self, db_id: int) -> tuple | None:
+        with self.connect() as conn:
+            return conn.execute(
+                """
+                SELECT id, timestamp, cycle_id, strategy_profile, direction, status,
+                       open_price, close_price, quantity, open_fee, close_fee,
+                       gross_profit, net_profit, opened_at, closed_at
+                FROM paper_cycles
+                WHERE id = ? AND status = 'OPEN'
+                """,
+                (db_id,),
+            ).fetchone()
+
+    def close_paper_cycle_manually(
+        self,
+        *,
+        db_id: int,
+        close_price: float,
+        close_fee: float,
+        gross_profit: float,
+        net_profit: float,
+        close_reason: str,
+        closed_at: str,
+    ) -> bool:
+        with self.connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE paper_cycles
+                SET timestamp = ?,
+                    status = 'CLOSED_MANUAL',
+                    close_price = ?,
+                    close_fee = ?,
+                    gross_profit = ?,
+                    net_profit = ?,
+                    close_reason = ?,
+                    closed_at = ?
+                WHERE id = ? AND status = 'OPEN'
+                """,
+                (
+                    closed_at,
+                    close_price,
+                    close_fee,
+                    gross_profit,
+                    net_profit,
+                    close_reason,
+                    closed_at,
+                    db_id,
+                ),
+            )
+            conn.commit()
+            return bool(cursor.rowcount)
 
     def load_paper_cycle_collection_stats(self, strategy_profile: str) -> dict[str, float | int]:
         with self.connect() as conn:
