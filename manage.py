@@ -77,6 +77,7 @@ from analytics.profile_comparison_diagnostics_engine import ProfileComparisonDia
 from analytics.range_shift_diagnostics_engine import RangeShiftDiagnosticsEngine
 from analytics.risk_diagnostics_engine import RiskDiagnosticsEngine
 from analytics.risk_profitability_diagnostics_engine import RiskProfitabilityDiagnosticsEngine
+from analytics.session_filter_sim_engine import SessionFilterSimulationEngine
 from analytics.statistics_engine import StatisticsEngine
 from analytics.strategy_profile_sim_engine import (
     SUPPORTED_STRATEGY_PROFILES,
@@ -1994,6 +1995,48 @@ def command_market_session_diagnostics(args) -> None:
     _print_hour_distribution(report.close_hour_distribution)
 
 
+def command_session_filter_sim(args) -> None:
+    config, _logger, database = build_context()
+    current_price, source, timestamp = _load_current_paper_price(config, database)
+    report = SessionFilterSimulationEngine(database, config).build_report(
+        profile=args.profile,
+        current_price=current_price,
+        current_price_source=source,
+        current_price_timestamp=timestamp,
+    )
+
+    print("=== Session Filter Simulation ===")
+    print("Dry-run only. Runtime filters, strategy config, and paper cycles are unchanged.")
+    print("ASIA=00-07, LONDON=08-12, LONDON_NEW_YORK_OVERLAP=13-16, NEW_YORK=17-23.")
+    print(f"Profile: {report.profile}")
+    print(f"Current price: {report.current_price:.8f}")
+    print(f"Current price source: {report.current_price_source}")
+    print(f"Current price timestamp: {report.current_price_timestamp}")
+    print(f"Total cycles: {report.total_cycles}")
+    print("")
+
+    if not report.results:
+        print("No session filter simulation data available.")
+        return
+
+    for item in report.results:
+        print(f"--- {item.scenario} ---")
+        print(f"Entries: {item.entries}")
+        print(f"Closed cycles: {item.closed_cycles}")
+        print(f"Win rate: {item.win_rate * 100:.2f}%")
+        print(f"Net profit: {item.net_profit:.8f}")
+        print(f"Avg holding time: {_format_optional_duration(item.average_holding_time_seconds)}")
+        print(f"Avg unrealized PnL: {_format_optional_float(item.average_unrealized_pnl)}")
+        print(f"Target hit rate: {item.target_hit_rate * 100:.2f}%")
+        print(f"Current open cycle blocked: {'yes' if item.current_open_cycle_blocked else 'no'}")
+        print(f"Historical bad cycles blocked: {'yes' if item.historical_bad_cycles_blocked else 'no'}")
+        print(f"Recommendation score: {item.recommendation_score:.8f}")
+        print("")
+
+    print("--- Recommendation ---")
+    print(f"Best tested session filter: {report.recommended_scenario or 'N/A'}")
+
+
 def _print_hour_distribution(distribution: dict[int, int]) -> None:
     shown = False
     for hour in range(24):
@@ -3792,6 +3835,17 @@ def build_parser() -> argparse.ArgumentParser:
         default="mean_reversion_v2_small_target",
     )
     market_session_parser.set_defaults(func=command_market_session_diagnostics)
+
+    session_filter_parser = subparsers.add_parser(
+        "session-filter-sim",
+        help="Dry-run session filter variants for paper cycles",
+    )
+    session_filter_parser.add_argument(
+        "--profile",
+        choices=SUPPORTED_RUNTIME_STRATEGY_PROFILES,
+        default="mean_reversion_v2_small_target",
+    )
+    session_filter_parser.set_defaults(func=command_session_filter_sim)
 
     build_ml_dataset_parser = subparsers.add_parser(
         "build-ml-dataset",

@@ -442,6 +442,18 @@ def test_manage_cli_has_market_session_diagnostics_command():
     assert args.profile == "mean_reversion_v2_small_target"
 
 
+def test_manage_cli_has_session_filter_sim_command():
+    parser = build_parser()
+    args = parser.parse_args([
+        "session-filter-sim",
+        "--profile",
+        "mean_reversion_v2_small_target",
+    ])
+
+    assert args.command == "session-filter-sim"
+    assert args.profile == "mean_reversion_v2_small_target"
+
+
 def test_manage_cli_has_build_ml_dataset_command():
     parser = build_parser()
     args = parser.parse_args([
