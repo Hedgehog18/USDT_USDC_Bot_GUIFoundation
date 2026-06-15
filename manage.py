@@ -2735,6 +2735,7 @@ def command_collect_closed_cycles(args) -> None:
         price_info=None,
         nearest_open_cycle=None,
         action_taken="waiting",
+        entry_diagnostics=_collection_entry_diagnostics([]),
     )
     if int(stats["closed_cycles"]) >= args.target:
         print("SUCCESS: target closed cycles already reached.")
@@ -2758,7 +2759,10 @@ def command_collect_closed_cycles(args) -> None:
                     "iteration skipped because --require-binance is enabled. "
                     f"CLOSED {int(stats['closed_cycles'])} / {args.target} | "
                     f"open cycles: {int(stats['open_cycles'])} | "
-                    "action_taken: skipped_no_live_price"
+                    "action_taken: skipped_no_live_price | "
+                    "entry_attempt: no | "
+                    "candidate_detected: no | "
+                    "entry_block_reason: no_signal"
                 )
             if args.interval:
                 time.sleep(args.interval)
@@ -2766,14 +2770,17 @@ def command_collect_closed_cycles(args) -> None:
 
         before_stats = database.load_paper_cycle_collection_stats(profile)
         bot = _apply_profile_to_bot(BotEngine(), profile)
+        entry_debug_items: list[dict] = []
         result = PaperTradingEngine(
             config,
             database,
             bot=bot,
+            entry_zone_debug_callback=entry_debug_items.append,
             strategy_profile=profile,
         ).run(1)
         stats = database.load_paper_cycle_collection_stats(profile)
         action_taken = _collection_action_taken(before_stats, stats, result)
+        entry_diagnostics = _collection_entry_diagnostics(entry_debug_items)
         nearest_open_cycle = _nearest_collection_open_cycle(config, database, profile, price_info[0], price_info[1], price_info[2])
         if _should_print_collection_iteration(iteration, args.print_every) or int(stats["closed_cycles"]) >= args.target:
             _print_closed_cycle_collection_progress(
@@ -2783,6 +2790,7 @@ def command_collect_closed_cycles(args) -> None:
                 price_info=price_info,
                 nearest_open_cycle=nearest_open_cycle,
                 action_taken=action_taken,
+                entry_diagnostics=entry_diagnostics,
             )
 
         if int(stats["closed_cycles"]) >= args.target:
@@ -2803,6 +2811,7 @@ def _print_closed_cycle_collection_progress(
     price_info: tuple[float, str, str] | None,
     nearest_open_cycle,
     action_taken: str,
+    entry_diagnostics: dict[str, str],
 ) -> None:
     current_price, data_source, price_timestamp = price_info if price_info else (None, "N/A", "N/A")
     parts = [
@@ -2834,6 +2843,9 @@ def _print_closed_cycle_collection_progress(
             f"close_condition_met: {'yes' if nearest_open_cycle.close_condition_met else 'no'}",
         ])
     parts.append(f"action_taken: {action_taken}")
+    parts.append(f"entry_attempt: {entry_diagnostics['entry_attempt']}")
+    parts.append(f"candidate_detected: {entry_diagnostics['candidate_detected']}")
+    parts.append(f"entry_block_reason: {entry_diagnostics['entry_block_reason']}")
     print(" | ".join(parts))
 
 
@@ -2866,6 +2878,58 @@ def _collection_action_taken(before_stats: dict[str, float | int], after_stats: 
     if result.opened_cycles > 0:
         return "opened"
     return "waiting"
+
+
+def _collection_entry_diagnostics(entry_debug_items: list[dict]) -> dict[str, str]:
+    diagnostics = {
+        "entry_attempt": "no",
+        "candidate_detected": "no",
+        "entry_block_reason": "no_signal",
+    }
+    if not entry_debug_items:
+        return diagnostics
+
+    item = entry_debug_items[-1]
+    action = item.get("action", "WAIT")
+    candidate_detected = action in {"BUY_USDC", "SELL_USDC"}
+    order_attempted = bool(item.get("order_attempted", False))
+
+    diagnostics["entry_attempt"] = "yes" if order_attempted else "no"
+    diagnostics["candidate_detected"] = "yes" if candidate_detected else "no"
+    diagnostics["entry_block_reason"] = _collection_entry_block_reason(item)
+    return diagnostics
+
+
+def _collection_entry_block_reason(item: dict) -> str:
+    action = item.get("action", "WAIT")
+    reason = str(item.get("reason", "")).lower()
+    risk_reason = str(item.get("risk_reason", "")).lower()
+
+    if "already open" in reason:
+        return "existing_cycle"
+    if "outside new_york session" in reason:
+        return "outside_session"
+    if "price outside entry zones" in reason or "working corridor center" in reason:
+        return "no_entry_zone"
+    if "micro trend not confirmed" in reason:
+        return "micro_trend_not_confirmed"
+    if (
+        "spread invalid" in reason
+        or "market health invalid" in reason
+        or "abnormal market regime" in reason
+        or "extreme volatility" in reason
+        or "market health unhealthy" in reason
+    ):
+        return "safety_filter"
+    if action in {"BUY_USDC", "SELL_USDC"} and not bool(item.get("risk_allowed", False)):
+        return "safety_filter"
+    if risk_reason and risk_reason not in {"risk check skipped while database cycle is open", "risk check skipped while active cycle is open"}:
+        return "safety_filter"
+    if "low center confidence" in reason or "low market activity" in reason or "insufficient cycle prediction score" in reason:
+        return "profile_filter"
+    if action in {"WAIT", "SAFE_WAIT"} and reason:
+        return "profile_filter"
+    return "no_signal"
 
 
 def _should_print_collection_iteration(iteration: int, print_every: int) -> bool:
