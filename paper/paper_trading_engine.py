@@ -131,6 +131,7 @@ class PaperTradingEngine:
                 closed_cycle = self.cycle_manager.try_close_cycle(
                     market_state.price,
                     tolerance=self._close_tolerance_for_profile(self.strategy_profile),
+                    rounding_digits=self._close_rounding_digits_for_profile(self.strategy_profile),
                 )
                 if closed_cycle:
                     self.database.save_paper_cycle(closed_cycle, strategy_profile=self.strategy_profile)
@@ -217,10 +218,12 @@ class PaperTradingEngine:
         for row in rows:
             cycle, strategy_profile, cycle_id = self._paper_cycle_from_open_row(row)
             close_tolerance = self._close_tolerance_for_profile(strategy_profile)
+            close_rounding_digits = self._close_rounding_digits_for_profile(strategy_profile)
             close_condition_met = self.cycle_manager.can_close_cycle(
                 cycle,
                 current_price,
                 tolerance=close_tolerance,
+                rounding_digits=close_rounding_digits,
             )
 
             if not close_condition_met:
@@ -234,6 +237,7 @@ class PaperTradingEngine:
                     "current_price": current_price,
                     "target_price": cycle.close_price,
                     "close_tolerance": close_tolerance,
+                    "close_rounding_digits": close_rounding_digits,
                     "close_condition_met": False,
                     "close_attempted": False,
                     "close_result": "SKIPPED",
@@ -260,6 +264,7 @@ class PaperTradingEngine:
                 "current_price": current_price,
                 "target_price": cycle.close_price,
                 "close_tolerance": close_tolerance,
+                "close_rounding_digits": close_rounding_digits,
                 "close_condition_met": True,
                 "close_attempted": True,
                 "close_result": result,
@@ -307,6 +312,11 @@ class PaperTradingEngine:
         if strategy_profile == "mean_reversion_v2_small_target_tol1":
             return max(0.0, float(getattr(self.config, "price_tick_size", 0.0)))
         return 0.0
+
+    def _close_rounding_digits_for_profile(self, strategy_profile: str) -> int | None:
+        if strategy_profile == "mean_reversion_v2_small_target_r7":
+            return 7
+        return None
 
     def _emit_close_debug(self, payload: dict) -> None:
         if self.close_debug_callback:

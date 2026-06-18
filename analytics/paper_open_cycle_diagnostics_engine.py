@@ -84,13 +84,19 @@ class PaperOpenCycleDiagnosticsEngine:
             opened_at,
             _closed_at,
         ) = row
+        profile = clean_display_text(strategy_profile or "UNKNOWN")
         direction = clean_display_text(direction)
         target_price = float(close_price)
         opened_at_text = clean_display_text(opened_at)
         opened_at_dt = datetime.fromisoformat(opened_at_text)
         now = datetime.now(tz=opened_at_dt.tzinfo) if opened_at_dt.tzinfo else datetime.now()
         age_seconds = max(0.0, (now - opened_at_dt).total_seconds())
-        close_condition_met = self._close_condition_met(direction, current_price, target_price)
+        close_condition_met = self._close_condition_met(
+            direction,
+            current_price,
+            target_price,
+            profile,
+        )
         distance = self._distance_to_target(direction, current_price, target_price)
         distance_percent = distance / target_price * 100.0 if target_price else 0.0
         profit = self.fee_engine.calculate_profit(
@@ -105,7 +111,7 @@ class PaperOpenCycleDiagnosticsEngine:
         return PaperOpenCycleDiagnostic(
             db_id=int(db_id),
             cycle_id=int(cycle_id),
-            profile=clean_display_text(strategy_profile or "UNKNOWN"),
+            profile=profile,
             direction=direction,
             opened_at=opened_at_text,
             age_seconds=age_seconds,
@@ -120,7 +126,15 @@ class PaperOpenCycleDiagnosticsEngine:
         )
 
     @staticmethod
-    def _close_condition_met(direction: str, current_price: float, target_price: float) -> bool:
+    def _close_condition_met(
+        direction: str,
+        current_price: float,
+        target_price: float,
+        profile: str = "strict_current",
+    ) -> bool:
+        if profile == "mean_reversion_v2_small_target_r7":
+            current_price = round(current_price, 7)
+            target_price = round(target_price, 7)
         if direction == "BUY_USDC":
             return current_price >= target_price
         if direction == "SELL_USDC":

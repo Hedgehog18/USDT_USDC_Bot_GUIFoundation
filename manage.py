@@ -77,6 +77,7 @@ from analytics.profile_comparison_diagnostics_engine import ProfileComparisonDia
 from analytics.range_shift_diagnostics_engine import RangeShiftDiagnosticsEngine
 from analytics.risk_diagnostics_engine import RiskDiagnosticsEngine
 from analytics.risk_profitability_diagnostics_engine import RiskProfitabilityDiagnosticsEngine
+from analytics.rounding_exit_diagnostics_engine import RoundingExitDiagnosticsEngine
 from analytics.session_filter_sim_engine import SessionFilterSimulationEngine
 from analytics.statistics_engine import StatisticsEngine
 from analytics.strategy_profile_sim_engine import (
@@ -257,6 +258,7 @@ def _build_close_debug_callback():
             f"current_price={item['current_price']:.8f} | "
             f"target_price={item['target_price']:.8f} | "
             f"close_tolerance={item.get('close_tolerance', 0.0):.8f} | "
+            f"close_rounding_digits={item.get('close_rounding_digits', 'N/A')} | "
             f"close_condition_met={item['close_condition_met']} | "
             f"close_attempted={item['close_attempted']} | "
             f"close_result={item['close_result']} | "
@@ -1954,6 +1956,50 @@ def command_exit_tolerance_sim(args) -> None:
     print("")
     print("--- Recommendation ---")
     print(f"Best tested tolerance: {report.recommended_tolerance or 'N/A'}")
+
+
+def command_rounding_exit_diagnostics(args) -> None:
+    config, _logger, database = build_context()
+    current_price, source, timestamp = _load_current_paper_price(config, database)
+    report = RoundingExitDiagnosticsEngine(database, config).build_report(
+        profile=args.profile,
+        current_price=current_price,
+        current_price_source=source,
+        current_price_timestamp=timestamp,
+    )
+
+    print("=== Rounding Exit Diagnostics ===")
+    print("Diagnostics only. Runtime close rules and paper cycles are unchanged.")
+    print(f"Profile: {report.profile}")
+    print(f"Current price: {report.current_price:.8f}")
+    print(f"Current price source: {report.current_price_source}")
+    print(f"Current price timestamp: {report.current_price_timestamp}")
+    print(f"Open cycles count: {report.open_cycles_count}")
+    print(f"Cycles that would close earlier due to rounding: {report.would_close_earlier_count}")
+    print(f"Average saved holding time: {report.average_saved_holding_time_seconds:.2f} sec")
+    print(f"Profit difference vs strict comparison: {report.profit_difference_vs_strict_comparison:.8f}")
+    print(f"Recommendation score: {report.recommendation_score:.4f}")
+    print("")
+
+    print("--- Open Cycles ---")
+    if not report.cycles:
+        print("No open cycles for profile.")
+    for item in report.cycles:
+        print(
+            f"db_id={item.db_id} | direction={item.direction} | "
+            f"strict_close={'yes' if item.strict_close else 'no'} | "
+            f"rounded_close={'yes' if item.rounded_close else 'no'} | "
+            f"would_close_earlier={'yes' if item.would_close_earlier else 'no'}"
+        )
+        print(
+            f"  current_price={item.current_price:.8f} rounded_current={item.rounded_current_price:.7f} | "
+            f"target_price={item.target_price:.8f} rounded_target={item.rounded_target_price:.7f}"
+        )
+        print(
+            f"  age_seconds={item.age_seconds:.0f} | "
+            f"estimated_pnl={item.estimated_pnl:.8f} | "
+            f"profit_difference_vs_target={item.profit_difference_vs_target:.8f}"
+        )
 
 
 def command_market_session_diagnostics(args) -> None:
@@ -3889,6 +3935,17 @@ def build_parser() -> argparse.ArgumentParser:
         default="mean_reversion_v2_small_target",
     )
     exit_tolerance_sim_parser.set_defaults(func=command_exit_tolerance_sim)
+
+    rounding_exit_diagnostics_parser = subparsers.add_parser(
+        "rounding-exit-diagnostics",
+        help="Diagnose rounded target close comparison for open paper cycles",
+    )
+    rounding_exit_diagnostics_parser.add_argument(
+        "--profile",
+        choices=SUPPORTED_RUNTIME_STRATEGY_PROFILES,
+        default="mean_reversion_v2_small_target_r7",
+    )
+    rounding_exit_diagnostics_parser.set_defaults(func=command_rounding_exit_diagnostics)
 
     market_session_parser = subparsers.add_parser(
         "market-session-diagnostics",

@@ -63,24 +63,46 @@ class PaperCycleManager:
         self.active_cycles.append(cycle)
         return cycle
 
-    def try_close_cycle(self, price: float, tolerance: float = 0.0) -> PaperCycle | None:
+    def try_close_cycle(
+        self,
+        price: float,
+        tolerance: float = 0.0,
+        rounding_digits: int | None = None,
+    ) -> PaperCycle | None:
         if not self.active_cycles:
             return None
 
         cycle = self.active_cycles[0]
 
-        if not self.can_close_cycle(cycle, price, tolerance=tolerance):
+        if not self.can_close_cycle(
+            cycle,
+            price,
+            tolerance=tolerance,
+            rounding_digits=rounding_digits,
+        ):
             return None
 
         return self.close_cycle(cycle, price)
 
-    def can_close_cycle(self, cycle: PaperCycle, price: float, tolerance: float = 0.0) -> bool:
+    def can_close_cycle(
+        self,
+        cycle: PaperCycle,
+        price: float,
+        tolerance: float = 0.0,
+        rounding_digits: int | None = None,
+    ) -> bool:
         tolerance = max(0.0, tolerance)
+        comparison_price = price
+        comparison_target = cycle.close_price
+        if rounding_digits is not None:
+            comparison_price = round(comparison_price, rounding_digits)
+            comparison_target = round(comparison_target, rounding_digits)
+
         if cycle.direction == PaperOrderSide.BUY_USDC:
-            return price + tolerance >= cycle.close_price
+            return comparison_price + tolerance >= comparison_target
 
         if cycle.direction == PaperOrderSide.SELL_USDC:
-            return price - tolerance <= cycle.close_price
+            return comparison_price - tolerance <= comparison_target
 
         return False
 

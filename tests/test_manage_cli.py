@@ -450,6 +450,61 @@ def test_manage_cli_accepts_one_tick_tolerance_profile():
     assert exit_tolerance_args.profile == "mean_reversion_v2_small_target_tol1"
 
 
+def test_manage_cli_accepts_rounded_target_profile():
+    parser = build_parser()
+    strategy_args = parser.parse_args([
+        "strategy-profile-sim",
+        "--profile",
+        "mean_reversion_v2_small_target_r7",
+    ])
+    paper_args = parser.parse_args([
+        "paper-cycle-sim",
+        "--iterations",
+        "3",
+        "--profile",
+        "mean_reversion_v2_small_target_r7",
+    ])
+    long_args = parser.parse_args([
+        "long-paper-run",
+        "--iterations",
+        "5",
+        "--interval",
+        "1",
+        "--profile",
+        "mean_reversion_v2_small_target_r7",
+    ])
+    collect_args = parser.parse_args([
+        "collect-closed-cycles",
+        "--profile",
+        "mean_reversion_v2_small_target_r7",
+        "--target",
+        "5",
+    ])
+    validation_args = parser.parse_args([
+        "validation-summary",
+        "--profile",
+        "mean_reversion_v2_small_target_r7",
+    ])
+    open_cycles_args = parser.parse_args([
+        "paper-open-cycles",
+        "--limit",
+        "10",
+    ])
+    rounding_args = parser.parse_args([
+        "rounding-exit-diagnostics",
+        "--profile",
+        "mean_reversion_v2_small_target_r7",
+    ])
+
+    assert strategy_args.profile == "mean_reversion_v2_small_target_r7"
+    assert paper_args.profile == "mean_reversion_v2_small_target_r7"
+    assert long_args.profile == "mean_reversion_v2_small_target_r7"
+    assert collect_args.profile == "mean_reversion_v2_small_target_r7"
+    assert validation_args.profile == "mean_reversion_v2_small_target_r7"
+    assert open_cycles_args.command == "paper-open-cycles"
+    assert rounding_args.profile == "mean_reversion_v2_small_target_r7"
+
+
 def test_manage_cli_has_micro_trend_sensitivity_command():
     parser = build_parser()
     args = parser.parse_args([

@@ -158,3 +158,17 @@ def test_profile_decision_engine_tolerance_profile_uses_small_target_rules(test_
     assert decision.action == "BUY_USDC"
     assert "mean_reversion_v2_small_target_tol1" in decision.reason
     assert decision.target_profit == test_config.target_profit * 0.25
+
+
+def test_profile_decision_engine_rounded_profile_uses_small_target_rules(test_config):
+    decision = StrategyProfileDecisionEngine(test_config, "mean_reversion_v2_small_target_r7").make_decision(
+        _state(
+            work_position=75.0,
+            micro_trend="SELL_DOMINANT",
+            center_confidence="LOW",
+        )
+    )
+
+    assert decision.action == "SELL_USDC"
+    assert "mean_reversion_v2_small_target_r7" in decision.reason
+    assert decision.target_profit == test_config.target_profit * 0.25

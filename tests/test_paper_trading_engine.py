@@ -227,3 +227,63 @@ def test_paper_trading_engine_applies_tolerance_only_to_tol1_profile(test_config
     assert by_id[strict_id]["close_tolerance"] == 0.0
     assert by_id[tol_id]["close_condition_met"] is True
     assert by_id[tol_id]["close_tolerance"] == test_config.price_tick_size
+
+
+def test_paper_trading_engine_applies_rounding_only_to_r7_profile(test_config, tmp_path: Path):
+    from datetime import datetime
+    from paper.models import PaperCycle, PaperCycleStatus, PaperOrderSide
+
+    database = DatabaseManager(str(tmp_path / "bot.sqlite"))
+    target_price = 1.00059503
+    current_price = 1.00059500
+
+    strict_cycle = PaperCycle(
+        id=1,
+        direction=PaperOrderSide.BUY_USDC,
+        status=PaperCycleStatus.OPEN,
+        open_price=1.0000,
+        close_price=target_price,
+        quantity=10.0,
+        open_fee=0.0,
+        close_fee=0.0,
+        gross_profit=0.0,
+        net_profit=0.0,
+        opened_at=datetime.utcnow(),
+    )
+    rounded_cycle = PaperCycle(
+        id=2,
+        direction=PaperOrderSide.BUY_USDC,
+        status=PaperCycleStatus.OPEN,
+        open_price=1.0000,
+        close_price=target_price,
+        quantity=10.0,
+        open_fee=0.0,
+        close_fee=0.0,
+        gross_profit=0.0,
+        net_profit=0.0,
+        opened_at=datetime.utcnow(),
+    )
+    strict_id = database.save_paper_cycle(strict_cycle, strategy_profile="mean_reversion_v2_small_target")
+    rounded_id = database.save_paper_cycle(rounded_cycle, strategy_profile="mean_reversion_v2_small_target_r7")
+    close_debug_items = []
+
+    result = PaperTradingEngine(
+        test_config,
+        database,
+        bot=FakeBot(price=current_price),
+        close_debug_callback=close_debug_items.append,
+        strategy_profile="mean_reversion_v2_small_target_r7",
+    ).run(1)
+
+    with database.connect() as conn:
+        strict_status = conn.execute("SELECT status FROM paper_cycles WHERE id = ?", (strict_id,)).fetchone()[0]
+        rounded_status = conn.execute("SELECT status FROM paper_cycles WHERE id = ?", (rounded_id,)).fetchone()[0]
+
+    assert result.closed_cycles == 1
+    assert strict_status == "OPEN"
+    assert rounded_status == "CLOSED"
+    by_id = {item["db_id"]: item for item in close_debug_items}
+    assert by_id[strict_id]["close_condition_met"] is False
+    assert by_id[strict_id]["close_rounding_digits"] is None
+    assert by_id[rounded_id]["close_condition_met"] is True
+    assert by_id[rounded_id]["close_rounding_digits"] == 7

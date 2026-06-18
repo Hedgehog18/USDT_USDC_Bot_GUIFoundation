@@ -81,3 +81,49 @@ def test_paper_open_cycle_diagnostics_detects_met_sell_close_condition(test_conf
     assert item.close_condition_met is True
     assert item.distance_to_target < 0
     assert "Close condition is met" in item.reason_not_closed
+
+
+def test_paper_open_cycle_diagnostics_uses_r7_profile_rounding(test_config, tmp_path: Path):
+    database = DatabaseManager(str(tmp_path / "bot.sqlite"))
+    opened_at = datetime.now().isoformat()
+    with database.connect() as conn:
+        for cycle_id, profile in [
+            (1, "mean_reversion_v2_small_target"),
+            (2, "mean_reversion_v2_small_target_r7"),
+        ]:
+            conn.execute(
+                """
+                INSERT INTO paper_cycles (
+                    timestamp, cycle_id, strategy_profile, direction, status,
+                    open_price, close_price, quantity, open_fee, close_fee,
+                    gross_profit, net_profit, opened_at, closed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    opened_at,
+                    cycle_id,
+                    profile,
+                    "BUY_USDC",
+                    "OPEN",
+                    1.0,
+                    1.00059503,
+                    10.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    opened_at,
+                    None,
+                ),
+            )
+        conn.commit()
+
+    report = PaperOpenCycleDiagnosticsEngine(database, test_config).build_report(
+        current_price=1.00059500,
+        current_price_source="TEST",
+        current_price_timestamp="2026-06-11T00:00:00",
+    )
+
+    by_profile = {item.profile: item for item in report.open_cycles}
+    assert by_profile["mean_reversion_v2_small_target"].close_condition_met is False
+    assert by_profile["mean_reversion_v2_small_target_r7"].close_condition_met is True

@@ -61,3 +61,19 @@ def test_paper_cycle_close_tolerance_allows_one_tick_short_buy_close(test_config
         near_target,
         tolerance=test_config.price_tick_size,
     ) is True
+
+
+def test_paper_cycle_close_rounding_allows_market_noise_buy_close(test_config):
+    portfolio = PaperPortfolioManager(initial_usdt=100.0, initial_usdc=100.0)
+    exchange = PaperExchange(test_config, portfolio)
+    manager = PaperCycleManager(test_config, exchange)
+
+    cycle = manager.open_cycle("BUY_USDC", 1.0, target_profit=0.00059503)
+    current_price = cycle.close_price - 0.00000003
+
+    assert manager.can_close_cycle(cycle, current_price) is False
+    assert manager.can_close_cycle(
+        cycle,
+        current_price,
+        rounding_digits=7,
+    ) is True
