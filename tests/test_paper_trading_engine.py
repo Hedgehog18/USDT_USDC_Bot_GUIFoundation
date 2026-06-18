@@ -167,3 +167,63 @@ def test_paper_trading_engine_closes_database_open_cycle(test_config, tmp_path: 
     assert close_debug_items[0]["close_condition_met"] is True
     assert close_debug_items[0]["close_attempted"] is True
     assert close_debug_items[0]["close_result"] == "CLOSED"
+
+
+def test_paper_trading_engine_applies_tolerance_only_to_tol1_profile(test_config, tmp_path: Path):
+    from datetime import datetime
+    from paper.models import PaperCycle, PaperCycleStatus, PaperOrderSide
+
+    database = DatabaseManager(str(tmp_path / "bot.sqlite"))
+    target_price = 1.0006
+    near_target = target_price - test_config.price_tick_size
+
+    strict_cycle = PaperCycle(
+        id=1,
+        direction=PaperOrderSide.BUY_USDC,
+        status=PaperCycleStatus.OPEN,
+        open_price=1.0000,
+        close_price=target_price,
+        quantity=10.0,
+        open_fee=0.0,
+        close_fee=0.0,
+        gross_profit=0.0,
+        net_profit=0.0,
+        opened_at=datetime.utcnow(),
+    )
+    tol_cycle = PaperCycle(
+        id=2,
+        direction=PaperOrderSide.BUY_USDC,
+        status=PaperCycleStatus.OPEN,
+        open_price=1.0000,
+        close_price=target_price,
+        quantity=10.0,
+        open_fee=0.0,
+        close_fee=0.0,
+        gross_profit=0.0,
+        net_profit=0.0,
+        opened_at=datetime.utcnow(),
+    )
+    strict_id = database.save_paper_cycle(strict_cycle, strategy_profile="mean_reversion_v2_small_target")
+    tol_id = database.save_paper_cycle(tol_cycle, strategy_profile="mean_reversion_v2_small_target_tol1")
+    close_debug_items = []
+
+    result = PaperTradingEngine(
+        test_config,
+        database,
+        bot=FakeBot(price=near_target),
+        close_debug_callback=close_debug_items.append,
+        strategy_profile="mean_reversion_v2_small_target_tol1",
+    ).run(1)
+
+    with database.connect() as conn:
+        strict_status = conn.execute("SELECT status FROM paper_cycles WHERE id = ?", (strict_id,)).fetchone()[0]
+        tol_status = conn.execute("SELECT status FROM paper_cycles WHERE id = ?", (tol_id,)).fetchone()[0]
+
+    assert result.closed_cycles == 1
+    assert strict_status == "OPEN"
+    assert tol_status == "CLOSED"
+    by_id = {item["db_id"]: item for item in close_debug_items}
+    assert by_id[strict_id]["close_condition_met"] is False
+    assert by_id[strict_id]["close_tolerance"] == 0.0
+    assert by_id[tol_id]["close_condition_met"] is True
+    assert by_id[tol_id]["close_tolerance"] == test_config.price_tick_size

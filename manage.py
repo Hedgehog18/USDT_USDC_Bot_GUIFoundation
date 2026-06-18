@@ -256,6 +256,7 @@ def _build_close_debug_callback():
             f"direction={item['direction']} | "
             f"current_price={item['current_price']:.8f} | "
             f"target_price={item['target_price']:.8f} | "
+            f"close_tolerance={item.get('close_tolerance', 0.0):.8f} | "
             f"close_condition_met={item['close_condition_met']} | "
             f"close_attempted={item['close_attempted']} | "
             f"close_result={item['close_result']} | "

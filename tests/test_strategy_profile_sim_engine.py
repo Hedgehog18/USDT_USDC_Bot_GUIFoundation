@@ -131,6 +131,11 @@ def test_strategy_profile_sim_mean_reversion_v2_uses_calibrated_zones(test_confi
     assert small_target.pass_count == v2.pass_count
     assert small_target.buy_candidates == v2.buy_candidates
     assert small_target.sell_candidates == v2.sell_candidates
+    tol1 = engine.build_report("mean_reversion_v2_small_target_tol1")
+    assert tol1.total_entry_zone_samples == small_target.total_entry_zone_samples
+    assert tol1.pass_count == small_target.pass_count
+    assert tol1.buy_candidates == small_target.buy_candidates
+    assert tol1.sell_candidates == small_target.sell_candidates
 
 
 def test_strategy_profile_sim_new_york_profile_filters_by_session(test_config, tmp_path):

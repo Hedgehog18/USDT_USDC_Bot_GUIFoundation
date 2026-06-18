@@ -128,7 +128,10 @@ class PaperTradingEngine:
                         "order_attempted": False,
                         "data_source": getattr(self.bot.market_analyzer, "last_data_source", "UNKNOWN"),
                     })
-                closed_cycle = self.cycle_manager.try_close_cycle(market_state.price)
+                closed_cycle = self.cycle_manager.try_close_cycle(
+                    market_state.price,
+                    tolerance=self._close_tolerance_for_profile(self.strategy_profile),
+                )
                 if closed_cycle:
                     self.database.save_paper_cycle(closed_cycle, strategy_profile=self.strategy_profile)
                     closed += 1
@@ -213,7 +216,12 @@ class PaperTradingEngine:
         open_cycles_remaining = False
         for row in rows:
             cycle, strategy_profile, cycle_id = self._paper_cycle_from_open_row(row)
-            close_condition_met = self.cycle_manager.can_close_cycle(cycle, current_price)
+            close_tolerance = self._close_tolerance_for_profile(strategy_profile)
+            close_condition_met = self.cycle_manager.can_close_cycle(
+                cycle,
+                current_price,
+                tolerance=close_tolerance,
+            )
 
             if not close_condition_met:
                 open_cycles_remaining = True
@@ -225,6 +233,7 @@ class PaperTradingEngine:
                     "direction": cycle.direction.value,
                     "current_price": current_price,
                     "target_price": cycle.close_price,
+                    "close_tolerance": close_tolerance,
                     "close_condition_met": False,
                     "close_attempted": False,
                     "close_result": "SKIPPED",
@@ -250,6 +259,7 @@ class PaperTradingEngine:
                 "direction": closed_cycle.direction.value,
                 "current_price": current_price,
                 "target_price": cycle.close_price,
+                "close_tolerance": close_tolerance,
                 "close_condition_met": True,
                 "close_attempted": True,
                 "close_result": result,
@@ -292,6 +302,11 @@ class PaperTradingEngine:
             closed_at=datetime.fromisoformat(closed_at) if closed_at else None,
         )
         return cycle, str(strategy_profile), int(cycle_id)
+
+    def _close_tolerance_for_profile(self, strategy_profile: str) -> float:
+        if strategy_profile == "mean_reversion_v2_small_target_tol1":
+            return max(0.0, float(getattr(self.config, "price_tick_size", 0.0)))
+        return 0.0
 
     def _emit_close_debug(self, payload: dict) -> None:
         if self.close_debug_callback:

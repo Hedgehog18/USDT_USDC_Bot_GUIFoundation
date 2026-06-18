@@ -13,6 +13,7 @@ SUPPORTED_RUNTIME_STRATEGY_PROFILES = (
     "mean_reversion_v2",
     "mean_reversion_v2_small_target",
     "mean_reversion_v2_small_target_ny",
+    "mean_reversion_v2_small_target_tol1",
 )
 
 
@@ -29,7 +30,12 @@ class StrategyProfileDecisionEngine:
     def make_decision(self, market_state: MarketState) -> TradeDecision:
         if self.profile == "strict_current":
             return self.strict_engine.make_decision(market_state)
-        if self.profile in {"mean_reversion_v2", "mean_reversion_v2_small_target", "mean_reversion_v2_small_target_ny"}:
+        if self.profile in {
+            "mean_reversion_v2",
+            "mean_reversion_v2_small_target",
+            "mean_reversion_v2_small_target_ny",
+            "mean_reversion_v2_small_target_tol1",
+        }:
             return self._mean_reversion_decision(
                 market_state,
                 profile_name=self.profile,
@@ -102,7 +108,11 @@ class StrategyProfileDecisionEngine:
 
     def _decision(self, action: str, reason: str, confidence: str, score: float) -> TradeDecision:
         target_profit = self.config.target_profit
-        if self.profile in {"mean_reversion_v2_small_target", "mean_reversion_v2_small_target_ny"}:
+        if self.profile in {
+            "mean_reversion_v2_small_target",
+            "mean_reversion_v2_small_target_ny",
+            "mean_reversion_v2_small_target_tol1",
+        }:
             target_profit *= SMALL_TARGET_MULTIPLIER
 
         return TradeDecision(

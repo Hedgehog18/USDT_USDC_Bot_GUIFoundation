@@ -144,3 +144,17 @@ def test_profile_decision_engine_new_york_profile_allows_entries_in_ny(test_conf
     assert decision.action == "SELL_USDC"
     assert "mean_reversion_v2_small_target_ny" in decision.reason
     assert decision.target_profit == test_config.target_profit * 0.25
+
+
+def test_profile_decision_engine_tolerance_profile_uses_small_target_rules(test_config):
+    decision = StrategyProfileDecisionEngine(test_config, "mean_reversion_v2_small_target_tol1").make_decision(
+        _state(
+            work_position=25.0,
+            micro_trend="BUY_DOMINANT",
+            center_confidence="LOW",
+        )
+    )
+
+    assert decision.action == "BUY_USDC"
+    assert "mean_reversion_v2_small_target_tol1" in decision.reason
+    assert decision.target_profit == test_config.target_profit * 0.25

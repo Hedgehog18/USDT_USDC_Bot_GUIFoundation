@@ -14,6 +14,7 @@ SUPPORTED_STRATEGY_PROFILES = (
     "mean_reversion_v2",
     "mean_reversion_v2_small_target",
     "mean_reversion_v2_small_target_ny",
+    "mean_reversion_v2_small_target_tol1",
 )
 
 
@@ -105,7 +106,13 @@ class StrategyProfileSimulationEngine:
         )
 
     def _profile_filters(self, profile: str, row: dict) -> dict[str, bool | None]:
-        if profile in {"mean_reversion_v1", "mean_reversion_v2", "mean_reversion_v2_small_target", "mean_reversion_v2_small_target_ny"}:
+        if profile in {
+            "mean_reversion_v1",
+            "mean_reversion_v2",
+            "mean_reversion_v2_small_target",
+            "mean_reversion_v2_small_target_ny",
+            "mean_reversion_v2_small_target_tol1",
+        }:
             filters = {
                 "spread_stability": row["filters"]["spread_stability"],
                 "market_health": row["filters"]["market_health"],
@@ -196,7 +203,12 @@ class StrategyProfileSimulationEngine:
         }
 
     def _zone(self, work_position: float, profile: str) -> str:
-        uses_v2_zones = profile in {"mean_reversion_v2", "mean_reversion_v2_small_target", "mean_reversion_v2_small_target_ny"}
+        uses_v2_zones = profile in {
+            "mean_reversion_v2",
+            "mean_reversion_v2_small_target",
+            "mean_reversion_v2_small_target_ny",
+            "mean_reversion_v2_small_target_tol1",
+        }
         buy_zone_max = 25.0 if uses_v2_zones else self.config.buy_zone_max
         sell_zone_min = 75.0 if uses_v2_zones else self.config.sell_zone_min
         if work_position <= buy_zone_max:

@@ -44,3 +44,20 @@ def test_paper_cycle_can_use_decision_target_profit(test_config):
 
     assert cycle is not None
     assert cycle.close_price == 1.0 * (1 + target_profit)
+
+
+def test_paper_cycle_close_tolerance_allows_one_tick_short_buy_close(test_config):
+    portfolio = PaperPortfolioManager(initial_usdt=100.0, initial_usdc=100.0)
+    exchange = PaperExchange(test_config, portfolio)
+    manager = PaperCycleManager(test_config, exchange)
+
+    target_profit = test_config.target_profit * 0.25
+    cycle = manager.open_cycle("BUY_USDC", 1.0, target_profit=target_profit)
+    near_target = cycle.close_price - test_config.price_tick_size
+
+    assert manager.can_close_cycle(cycle, near_target) is False
+    assert manager.can_close_cycle(
+        cycle,
+        near_target,
+        tolerance=test_config.price_tick_size,
+    ) is True
