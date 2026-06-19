@@ -125,5 +125,5 @@ def test_paper_open_cycle_diagnostics_uses_r7_profile_rounding(test_config, tmp_
     )
 
     by_profile = {item.profile: item for item in report.open_cycles}
-    assert by_profile["mean_reversion_v2_small_target"].close_condition_met is False
+    assert by_profile["mean_reversion_v2_small_target"].close_condition_met is True
     assert by_profile["mean_reversion_v2_small_target_r7"].close_condition_met is True

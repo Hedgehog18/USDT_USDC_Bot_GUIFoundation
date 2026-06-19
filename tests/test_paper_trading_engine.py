@@ -229,7 +229,7 @@ def test_paper_trading_engine_applies_tolerance_only_to_tol1_profile(test_config
     assert by_id[tol_id]["close_tolerance"] == test_config.price_tick_size
 
 
-def test_paper_trading_engine_applies_rounding_only_to_r7_profile(test_config, tmp_path: Path):
+def test_paper_trading_engine_applies_rounding_to_small_target_profiles_only(test_config, tmp_path: Path):
     from datetime import datetime
     from paper.models import PaperCycle, PaperCycleStatus, PaperOrderSide
 
@@ -237,34 +237,25 @@ def test_paper_trading_engine_applies_rounding_only_to_r7_profile(test_config, t
     target_price = 1.00059503
     current_price = 1.00059500
 
-    strict_cycle = PaperCycle(
-        id=1,
-        direction=PaperOrderSide.BUY_USDC,
-        status=PaperCycleStatus.OPEN,
-        open_price=1.0000,
-        close_price=target_price,
-        quantity=10.0,
-        open_fee=0.0,
-        close_fee=0.0,
-        gross_profit=0.0,
-        net_profit=0.0,
-        opened_at=datetime.utcnow(),
-    )
-    rounded_cycle = PaperCycle(
-        id=2,
-        direction=PaperOrderSide.BUY_USDC,
-        status=PaperCycleStatus.OPEN,
-        open_price=1.0000,
-        close_price=target_price,
-        quantity=10.0,
-        open_fee=0.0,
-        close_fee=0.0,
-        gross_profit=0.0,
-        net_profit=0.0,
-        opened_at=datetime.utcnow(),
-    )
-    strict_id = database.save_paper_cycle(strict_cycle, strategy_profile="mean_reversion_v2_small_target")
-    rounded_id = database.save_paper_cycle(rounded_cycle, strategy_profile="mean_reversion_v2_small_target_r7")
+    def open_cycle(identifier: int) -> PaperCycle:
+        return PaperCycle(
+            id=identifier,
+            direction=PaperOrderSide.BUY_USDC,
+            status=PaperCycleStatus.OPEN,
+            open_price=1.0000,
+            close_price=target_price,
+            quantity=10.0,
+            open_fee=0.0,
+            close_fee=0.0,
+            gross_profit=0.0,
+            net_profit=0.0,
+            opened_at=datetime.utcnow(),
+        )
+
+    strict_id = database.save_paper_cycle(open_cycle(1), strategy_profile="strict_current")
+    v2_id = database.save_paper_cycle(open_cycle(2), strategy_profile="mean_reversion_v2")
+    small_id = database.save_paper_cycle(open_cycle(3), strategy_profile="mean_reversion_v2_small_target")
+    r7_id = database.save_paper_cycle(open_cycle(4), strategy_profile="mean_reversion_v2_small_target_r7")
     close_debug_items = []
 
     result = PaperTradingEngine(
@@ -277,13 +268,26 @@ def test_paper_trading_engine_applies_rounding_only_to_r7_profile(test_config, t
 
     with database.connect() as conn:
         strict_status = conn.execute("SELECT status FROM paper_cycles WHERE id = ?", (strict_id,)).fetchone()[0]
-        rounded_status = conn.execute("SELECT status FROM paper_cycles WHERE id = ?", (rounded_id,)).fetchone()[0]
+        v2_status = conn.execute("SELECT status FROM paper_cycles WHERE id = ?", (v2_id,)).fetchone()[0]
+        small_status = conn.execute("SELECT status FROM paper_cycles WHERE id = ?", (small_id,)).fetchone()[0]
+        r7_status = conn.execute("SELECT status FROM paper_cycles WHERE id = ?", (r7_id,)).fetchone()[0]
 
-    assert result.closed_cycles == 1
+    assert result.closed_cycles == 2
     assert strict_status == "OPEN"
-    assert rounded_status == "CLOSED"
+    assert v2_status == "OPEN"
+    assert small_status == "CLOSED"
+    assert r7_status == "CLOSED"
     by_id = {item["db_id"]: item for item in close_debug_items}
     assert by_id[strict_id]["close_condition_met"] is False
     assert by_id[strict_id]["close_rounding_digits"] is None
-    assert by_id[rounded_id]["close_condition_met"] is True
-    assert by_id[rounded_id]["close_rounding_digits"] == 7
+    assert by_id[v2_id]["close_condition_met"] is False
+    assert by_id[v2_id]["close_rounding_digits"] is None
+    assert by_id[small_id]["close_condition_met"] is True
+    assert by_id[small_id]["close_rounding_digits"] == 7
+    assert by_id[small_id]["current_price_raw"] == current_price
+    assert by_id[small_id]["target_price_raw"] == target_price
+    assert by_id[small_id]["current_price_rounded"] == round(current_price, 7)
+    assert by_id[small_id]["target_price_rounded"] == round(target_price, 7)
+    assert by_id[small_id]["close_rounding_decimals"] == 7
+    assert by_id[r7_id]["close_condition_met"] is True
+    assert by_id[r7_id]["close_rounding_digits"] == 7

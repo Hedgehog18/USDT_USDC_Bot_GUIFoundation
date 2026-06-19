@@ -77,3 +77,20 @@ def test_paper_cycle_close_rounding_allows_market_noise_buy_close(test_config):
         current_price,
         rounding_digits=7,
     ) is True
+
+
+def test_paper_cycle_close_rounding_allows_market_noise_sell_close(test_config):
+    portfolio = PaperPortfolioManager(initial_usdt=100.0, initial_usdc=100.0)
+    exchange = PaperExchange(test_config, portfolio)
+    manager = PaperCycleManager(test_config, exchange)
+
+    cycle = manager.open_cycle("SELL_USDC", 1.0008, target_profit=0.0001)
+    cycle.close_price = 1.00068496
+    current_price = cycle.close_price + 0.00000004
+
+    assert manager.can_close_cycle(cycle, current_price) is False
+    assert manager.can_close_cycle(
+        cycle,
+        current_price,
+        rounding_digits=7,
+    ) is True

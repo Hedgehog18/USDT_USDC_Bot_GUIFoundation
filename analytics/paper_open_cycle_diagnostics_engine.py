@@ -132,7 +132,10 @@ class PaperOpenCycleDiagnosticsEngine:
         target_price: float,
         profile: str = "strict_current",
     ) -> bool:
-        if profile == "mean_reversion_v2_small_target_r7":
+        if profile in {
+            "mean_reversion_v2_small_target",
+            "mean_reversion_v2_small_target_r7",
+        }:
             current_price = round(current_price, 7)
             target_price = round(target_price, 7)
         if direction == "BUY_USDC":

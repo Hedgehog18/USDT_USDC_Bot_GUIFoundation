@@ -217,6 +217,7 @@ class PaperTradingEngine:
         open_cycles_remaining = False
         for row in rows:
             cycle, strategy_profile, cycle_id = self._paper_cycle_from_open_row(row)
+            target_price = cycle.close_price
             close_tolerance = self._close_tolerance_for_profile(strategy_profile)
             close_rounding_digits = self._close_rounding_digits_for_profile(strategy_profile)
             close_condition_met = self.cycle_manager.can_close_cycle(
@@ -235,7 +236,12 @@ class PaperTradingEngine:
                     "strategy_profile": strategy_profile,
                     "direction": cycle.direction.value,
                     "current_price": current_price,
-                    "target_price": cycle.close_price,
+                    "target_price": target_price,
+                    **self._close_debug_price_fields(
+                        current_price,
+                        target_price,
+                        close_rounding_digits,
+                    ),
                     "close_tolerance": close_tolerance,
                     "close_rounding_digits": close_rounding_digits,
                     "close_condition_met": False,
@@ -262,7 +268,12 @@ class PaperTradingEngine:
                 "strategy_profile": strategy_profile,
                 "direction": closed_cycle.direction.value,
                 "current_price": current_price,
-                "target_price": cycle.close_price,
+                "target_price": target_price,
+                **self._close_debug_price_fields(
+                    current_price,
+                    target_price,
+                    close_rounding_digits,
+                ),
                 "close_tolerance": close_tolerance,
                 "close_rounding_digits": close_rounding_digits,
                 "close_condition_met": True,
@@ -314,9 +325,34 @@ class PaperTradingEngine:
         return 0.0
 
     def _close_rounding_digits_for_profile(self, strategy_profile: str) -> int | None:
-        if strategy_profile == "mean_reversion_v2_small_target_r7":
+        if strategy_profile in {
+            "mean_reversion_v2_small_target",
+            "mean_reversion_v2_small_target_r7",
+        }:
             return 7
         return None
+
+    @staticmethod
+    def _close_debug_price_fields(
+        current_price: float,
+        target_price: float,
+        rounding_digits: int | None,
+    ) -> dict:
+        return {
+            "current_price_raw": current_price,
+            "target_price_raw": target_price,
+            "current_price_rounded": (
+                round(current_price, rounding_digits)
+                if rounding_digits is not None
+                else current_price
+            ),
+            "target_price_rounded": (
+                round(target_price, rounding_digits)
+                if rounding_digits is not None
+                else target_price
+            ),
+            "close_rounding_decimals": rounding_digits,
+        }
 
     def _emit_close_debug(self, payload: dict) -> None:
         if self.close_debug_callback:
