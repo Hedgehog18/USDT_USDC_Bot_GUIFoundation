@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from collections.abc import Callable
 from datetime import datetime
+from decimal import Decimal
 
 from app.bot_engine import BotEngine
 from config.config_manager import BotConfig
@@ -132,6 +133,7 @@ class PaperTradingEngine:
                     market_state.price,
                     tolerance=self._close_tolerance_for_profile(self.strategy_profile),
                     rounding_digits=self._close_rounding_digits_for_profile(self.strategy_profile),
+                    close_epsilon=self._close_epsilon_for_profile(self.strategy_profile),
                 )
                 if closed_cycle:
                     self.database.save_paper_cycle(closed_cycle, strategy_profile=self.strategy_profile)
@@ -220,11 +222,13 @@ class PaperTradingEngine:
             target_price = cycle.close_price
             close_tolerance = self._close_tolerance_for_profile(strategy_profile)
             close_rounding_digits = self._close_rounding_digits_for_profile(strategy_profile)
+            close_epsilon = self._close_epsilon_for_profile(strategy_profile)
             close_condition_met = self.cycle_manager.can_close_cycle(
                 cycle,
                 current_price,
                 tolerance=close_tolerance,
                 rounding_digits=close_rounding_digits,
+                close_epsilon=close_epsilon,
             )
 
             if not close_condition_met:
@@ -241,6 +245,7 @@ class PaperTradingEngine:
                         current_price,
                         target_price,
                         close_rounding_digits,
+                        close_epsilon,
                     ),
                     "close_tolerance": close_tolerance,
                     "close_rounding_digits": close_rounding_digits,
@@ -273,6 +278,7 @@ class PaperTradingEngine:
                     current_price,
                     target_price,
                     close_rounding_digits,
+                    close_epsilon,
                 ),
                 "close_tolerance": close_tolerance,
                 "close_rounding_digits": close_rounding_digits,
@@ -325,19 +331,23 @@ class PaperTradingEngine:
         return 0.0
 
     def _close_rounding_digits_for_profile(self, strategy_profile: str) -> int | None:
-        if strategy_profile in {
-            "mean_reversion_v2_small_target",
-            "mean_reversion_v2_small_target_r7",
-        }:
+        if strategy_profile == "mean_reversion_v2_small_target_r7":
             return 7
         return None
+
+    def _close_epsilon_for_profile(self, strategy_profile: str) -> Decimal:
+        if strategy_profile == "mean_reversion_v2_small_target":
+            return Decimal("0.00000010")
+        return Decimal("0")
 
     @staticmethod
     def _close_debug_price_fields(
         current_price: float,
         target_price: float,
         rounding_digits: int | None,
+        close_epsilon: Decimal | float,
     ) -> dict:
+        epsilon = Decimal(str(close_epsilon))
         return {
             "current_price_raw": current_price,
             "target_price_raw": target_price,
@@ -352,6 +362,9 @@ class PaperTradingEngine:
                 else target_price
             ),
             "close_rounding_decimals": rounding_digits,
+            "close_epsilon": float(epsilon),
+            "effective_buy_close_price": float(Decimal(str(current_price)) + epsilon),
+            "effective_sell_close_price": float(Decimal(str(current_price)) - epsilon),
         }
 
     def _emit_close_debug(self, payload: dict) -> None:

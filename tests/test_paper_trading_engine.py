@@ -229,13 +229,13 @@ def test_paper_trading_engine_applies_tolerance_only_to_tol1_profile(test_config
     assert by_id[tol_id]["close_tolerance"] == test_config.price_tick_size
 
 
-def test_paper_trading_engine_applies_rounding_to_small_target_profiles_only(test_config, tmp_path: Path):
+def test_paper_trading_engine_applies_epsilon_to_small_target_profile_only(test_config, tmp_path: Path):
     from datetime import datetime
     from paper.models import PaperCycle, PaperCycleStatus, PaperOrderSide
 
     database = DatabaseManager(str(tmp_path / "bot.sqlite"))
-    target_price = 1.00059503
-    current_price = 1.00059500
+    target_price = 1.00122506
+    current_price = 1.00122500
 
     def open_cycle(identifier: int) -> PaperCycle:
         return PaperCycle(
@@ -272,22 +272,25 @@ def test_paper_trading_engine_applies_rounding_to_small_target_profiles_only(tes
         small_status = conn.execute("SELECT status FROM paper_cycles WHERE id = ?", (small_id,)).fetchone()[0]
         r7_status = conn.execute("SELECT status FROM paper_cycles WHERE id = ?", (r7_id,)).fetchone()[0]
 
-    assert result.closed_cycles == 2
+    assert result.closed_cycles == 1
     assert strict_status == "OPEN"
     assert v2_status == "OPEN"
     assert small_status == "CLOSED"
-    assert r7_status == "CLOSED"
+    assert r7_status == "OPEN"
     by_id = {item["db_id"]: item for item in close_debug_items}
     assert by_id[strict_id]["close_condition_met"] is False
     assert by_id[strict_id]["close_rounding_digits"] is None
+    assert by_id[strict_id]["close_epsilon"] == 0.0
     assert by_id[v2_id]["close_condition_met"] is False
     assert by_id[v2_id]["close_rounding_digits"] is None
+    assert by_id[v2_id]["close_epsilon"] == 0.0
     assert by_id[small_id]["close_condition_met"] is True
-    assert by_id[small_id]["close_rounding_digits"] == 7
+    assert by_id[small_id]["close_rounding_digits"] is None
+    assert by_id[small_id]["close_epsilon"] == 0.00000010
     assert by_id[small_id]["current_price_raw"] == current_price
     assert by_id[small_id]["target_price_raw"] == target_price
-    assert by_id[small_id]["current_price_rounded"] == round(current_price, 7)
-    assert by_id[small_id]["target_price_rounded"] == round(target_price, 7)
-    assert by_id[small_id]["close_rounding_decimals"] == 7
-    assert by_id[r7_id]["close_condition_met"] is True
+    assert by_id[small_id]["effective_buy_close_price"] == current_price + 0.00000010
+    assert by_id[small_id]["effective_sell_close_price"] == current_price - 0.00000010
+    assert by_id[small_id]["close_rounding_decimals"] is None
+    assert by_id[r7_id]["close_condition_met"] is False
     assert by_id[r7_id]["close_rounding_digits"] == 7

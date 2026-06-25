@@ -262,6 +262,9 @@ def _build_close_debug_callback():
             f"current_price_rounded={item.get('current_price_rounded', item['current_price']):.8f} | "
             f"target_price_rounded={item.get('target_price_rounded', item['target_price']):.8f} | "
             f"close_rounding_decimals={item.get('close_rounding_decimals', 'N/A')} | "
+            f"close_epsilon={item.get('close_epsilon', 0.0):.8f} | "
+            f"effective_buy_close_price={item.get('effective_buy_close_price', item['current_price']):.8f} | "
+            f"effective_sell_close_price={item.get('effective_sell_close_price', item['current_price']):.8f} | "
             f"close_tolerance={item.get('close_tolerance', 0.0):.8f} | "
             f"close_rounding_digits={item.get('close_rounding_digits', 'N/A')} | "
             f"close_condition_met={item['close_condition_met']} | "
@@ -2883,6 +2886,7 @@ def _print_closed_cycle_collection_progress(
             "target_price: N/A",
             "distance_to_target: N/A",
             "unrealized_pnl: N/A",
+            "close_epsilon: N/A",
             "close_condition_met: N/A",
         ])
     else:
@@ -2892,6 +2896,7 @@ def _print_closed_cycle_collection_progress(
             f"target_price: {nearest_open_cycle.target_price:.8f}",
             f"distance_to_target: {nearest_open_cycle.distance_to_target:.8f}",
             f"unrealized_pnl: {nearest_open_cycle.unrealized_pnl:.8f}",
+            f"close_epsilon: {nearest_open_cycle.close_epsilon:.8f}",
             f"close_condition_met: {'yes' if nearest_open_cycle.close_condition_met else 'no'}",
         ])
     parts.append(f"action_taken: {action_taken}")
@@ -3189,6 +3194,11 @@ def command_paper_open_cycles(args) -> None:
             f"  distance_to_target={item.distance_to_target:.8f} | "
             f"distance_to_target_percent={item.distance_to_target_percent:.5f}% | "
             f"unrealized_pnl={item.unrealized_pnl:.8f}"
+        )
+        print(
+            f"  close_epsilon={item.close_epsilon:.8f} | "
+            f"effective_buy_close_price={item.effective_buy_close_price:.8f} | "
+            f"effective_sell_close_price={item.effective_sell_close_price:.8f}"
         )
         print(f"  close_condition_met: {close_status}")
         print(f"  reason_not_closed: {item.reason_not_closed}")

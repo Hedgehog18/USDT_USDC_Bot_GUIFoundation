@@ -83,7 +83,7 @@ def test_paper_open_cycle_diagnostics_detects_met_sell_close_condition(test_conf
     assert "Close condition is met" in item.reason_not_closed
 
 
-def test_paper_open_cycle_diagnostics_uses_r7_profile_rounding(test_config, tmp_path: Path):
+def test_paper_open_cycle_diagnostics_uses_small_target_epsilon(test_config, tmp_path: Path):
     database = DatabaseManager(str(tmp_path / "bot.sqlite"))
     opened_at = datetime.now().isoformat()
     with database.connect() as conn:
@@ -106,7 +106,7 @@ def test_paper_open_cycle_diagnostics_uses_r7_profile_rounding(test_config, tmp_
                     "BUY_USDC",
                     "OPEN",
                     1.0,
-                    1.00059503,
+                    1.00122506,
                     10.0,
                     0.0,
                     0.0,
@@ -119,11 +119,13 @@ def test_paper_open_cycle_diagnostics_uses_r7_profile_rounding(test_config, tmp_
         conn.commit()
 
     report = PaperOpenCycleDiagnosticsEngine(database, test_config).build_report(
-        current_price=1.00059500,
+        current_price=1.00122500,
         current_price_source="TEST",
         current_price_timestamp="2026-06-11T00:00:00",
     )
 
     by_profile = {item.profile: item for item in report.open_cycles}
     assert by_profile["mean_reversion_v2_small_target"].close_condition_met is True
-    assert by_profile["mean_reversion_v2_small_target_r7"].close_condition_met is True
+    assert by_profile["mean_reversion_v2_small_target"].close_epsilon == 0.00000010
+    assert by_profile["mean_reversion_v2_small_target_r7"].close_condition_met is False
+    assert by_profile["mean_reversion_v2_small_target_r7"].close_epsilon == 0.0

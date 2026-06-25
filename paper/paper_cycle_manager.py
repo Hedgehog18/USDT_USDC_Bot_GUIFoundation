@@ -1,4 +1,5 @@
 from datetime import datetime
+from decimal import Decimal
 from itertools import count
 
 from config.config_manager import BotConfig
@@ -68,6 +69,7 @@ class PaperCycleManager:
         price: float,
         tolerance: float = 0.0,
         rounding_digits: int | None = None,
+        close_epsilon: Decimal | float = Decimal("0"),
     ) -> PaperCycle | None:
         if not self.active_cycles:
             return None
@@ -79,6 +81,7 @@ class PaperCycleManager:
             price,
             tolerance=tolerance,
             rounding_digits=rounding_digits,
+            close_epsilon=close_epsilon,
         ):
             return None
 
@@ -90,21 +93,33 @@ class PaperCycleManager:
         price: float,
         tolerance: float = 0.0,
         rounding_digits: int | None = None,
+        close_epsilon: Decimal | float = Decimal("0"),
     ) -> bool:
-        tolerance = max(0.0, tolerance)
+        tolerance_decimal = max(Decimal("0"), Decimal(str(tolerance)))
+        epsilon_decimal = max(Decimal("0"), Decimal(str(close_epsilon)))
         comparison_price = price
         comparison_target = cycle.close_price
         if rounding_digits is not None:
             comparison_price = round(comparison_price, rounding_digits)
             comparison_target = round(comparison_target, rounding_digits)
 
+        price_decimal = self._decimal_price(comparison_price)
+        target_decimal = self._decimal_price(comparison_target)
+        close_margin = tolerance_decimal + epsilon_decimal
+
         if cycle.direction == PaperOrderSide.BUY_USDC:
-            return comparison_price + tolerance >= comparison_target
+            return price_decimal + close_margin >= target_decimal
 
         if cycle.direction == PaperOrderSide.SELL_USDC:
-            return comparison_price - tolerance <= comparison_target
+            return price_decimal - close_margin <= target_decimal
 
         return False
+
+    @staticmethod
+    def _decimal_price(value: float | Decimal) -> Decimal:
+        if isinstance(value, Decimal):
+            return value
+        return Decimal(str(round(float(value), 12)))
 
     def close_cycle(self, cycle: PaperCycle, price: float) -> PaperCycle:
         close_side = (

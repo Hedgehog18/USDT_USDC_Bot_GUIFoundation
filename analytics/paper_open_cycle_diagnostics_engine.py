@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal
 
 from app.text_encoding import clean_display_text
 from config.config_manager import BotConfig
@@ -23,6 +24,9 @@ class PaperOpenCycleDiagnostic:
     distance_to_target: float
     distance_to_target_percent: float
     unrealized_pnl: float
+    close_epsilon: float
+    effective_buy_close_price: float
+    effective_sell_close_price: float
     close_condition_met: bool
     reason_not_closed: str
 
@@ -97,6 +101,7 @@ class PaperOpenCycleDiagnosticsEngine:
             target_price,
             profile,
         )
+        close_epsilon = self._close_epsilon_for_profile(profile)
         distance = self._distance_to_target(direction, current_price, target_price)
         distance_percent = distance / target_price * 100.0 if target_price else 0.0
         profit = self.fee_engine.calculate_profit(
@@ -121,28 +126,38 @@ class PaperOpenCycleDiagnosticsEngine:
             distance_to_target=distance,
             distance_to_target_percent=distance_percent,
             unrealized_pnl=unrealized_pnl,
+            close_epsilon=float(close_epsilon),
+            effective_buy_close_price=float(Decimal(str(current_price)) + close_epsilon),
+            effective_sell_close_price=float(Decimal(str(current_price)) - close_epsilon),
             close_condition_met=close_condition_met,
             reason_not_closed=self._reason_not_closed(direction, close_condition_met, distance),
         )
 
-    @staticmethod
+    @classmethod
     def _close_condition_met(
+        cls,
         direction: str,
         current_price: float,
         target_price: float,
         profile: str = "strict_current",
     ) -> bool:
-        if profile in {
-            "mean_reversion_v2_small_target",
-            "mean_reversion_v2_small_target_r7",
-        }:
+        close_epsilon = cls._close_epsilon_for_profile(profile)
+        if profile == "mean_reversion_v2_small_target_r7":
             current_price = round(current_price, 7)
             target_price = round(target_price, 7)
+        current_decimal = Decimal(str(current_price))
+        target_decimal = Decimal(str(target_price))
         if direction == "BUY_USDC":
-            return current_price >= target_price
+            return current_decimal + close_epsilon >= target_decimal
         if direction == "SELL_USDC":
-            return current_price <= target_price
+            return current_decimal - close_epsilon <= target_decimal
         return False
+
+    @staticmethod
+    def _close_epsilon_for_profile(profile: str) -> Decimal:
+        if profile == "mean_reversion_v2_small_target":
+            return Decimal("0.00000010")
+        return Decimal("0")
 
     @staticmethod
     def _distance_to_target(direction: str, current_price: float, target_price: float) -> float:
