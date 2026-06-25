@@ -15,6 +15,7 @@ SUPPORTED_RUNTIME_STRATEGY_PROFILES = (
     "mean_reversion_v2_small_target_ny",
     "mean_reversion_v2_small_target_tol1",
     "mean_reversion_v2_small_target_r7",
+    "mean_reversion_v2_small_target_max12h",
 )
 
 
@@ -37,6 +38,7 @@ class StrategyProfileDecisionEngine:
             "mean_reversion_v2_small_target_ny",
             "mean_reversion_v2_small_target_tol1",
             "mean_reversion_v2_small_target_r7",
+            "mean_reversion_v2_small_target_max12h",
         }:
             return self._mean_reversion_decision(
                 market_state,
@@ -115,6 +117,7 @@ class StrategyProfileDecisionEngine:
             "mean_reversion_v2_small_target_ny",
             "mean_reversion_v2_small_target_tol1",
             "mean_reversion_v2_small_target_r7",
+            "mean_reversion_v2_small_target_max12h",
         }:
             target_profit *= SMALL_TARGET_MULTIPLIER
 

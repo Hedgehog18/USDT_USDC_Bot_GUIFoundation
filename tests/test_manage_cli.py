@@ -1033,6 +1033,18 @@ def test_manage_cli_exit_rule_optimizer_accepts_profile():
     assert args.profile == "mean_reversion_v2_small_target"
 
 
+def test_manage_cli_accepts_max12h_runtime_profile():
+    parser = build_parser()
+    args = parser.parse_args([
+        "paper-cycle-sim",
+        "--profile",
+        "mean_reversion_v2_small_target_max12h",
+    ])
+
+    assert args.command == "paper-cycle-sim"
+    assert args.profile == "mean_reversion_v2_small_target_max12h"
+
+
 def test_manage_cli_has_gui_command():
     parser = build_parser()
     args = parser.parse_args(["gui"])

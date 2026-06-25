@@ -16,6 +16,7 @@ SUPPORTED_STRATEGY_PROFILES = (
     "mean_reversion_v2_small_target_ny",
     "mean_reversion_v2_small_target_tol1",
     "mean_reversion_v2_small_target_r7",
+    "mean_reversion_v2_small_target_max12h",
 )
 
 
@@ -114,6 +115,7 @@ class StrategyProfileSimulationEngine:
             "mean_reversion_v2_small_target_ny",
             "mean_reversion_v2_small_target_tol1",
             "mean_reversion_v2_small_target_r7",
+            "mean_reversion_v2_small_target_max12h",
         }:
             filters = {
                 "spread_stability": row["filters"]["spread_stability"],
@@ -211,6 +213,7 @@ class StrategyProfileSimulationEngine:
             "mean_reversion_v2_small_target_ny",
             "mean_reversion_v2_small_target_tol1",
             "mean_reversion_v2_small_target_r7",
+            "mean_reversion_v2_small_target_max12h",
         }
         buy_zone_max = 25.0 if uses_v2_zones else self.config.buy_zone_max
         sell_zone_min = 75.0 if uses_v2_zones else self.config.sell_zone_min

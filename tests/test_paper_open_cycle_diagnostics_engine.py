@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from analytics.paper_open_cycle_diagnostics_engine import PaperOpenCycleDiagnosticsEngine
@@ -129,3 +129,47 @@ def test_paper_open_cycle_diagnostics_uses_small_target_epsilon(test_config, tmp
     assert by_profile["mean_reversion_v2_small_target"].close_epsilon == 0.00000010
     assert by_profile["mean_reversion_v2_small_target_r7"].close_condition_met is False
     assert by_profile["mean_reversion_v2_small_target_r7"].close_epsilon == 0.0
+
+
+def test_paper_open_cycle_diagnostics_detects_max12h_age(test_config, tmp_path: Path):
+    database = DatabaseManager(str(tmp_path / "bot.sqlite"))
+    opened_at = (datetime.now() - timedelta(hours=13)).isoformat()
+    with database.connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO paper_cycles (
+                timestamp, cycle_id, strategy_profile, direction, status,
+                open_price, close_price, quantity, open_fee, close_fee,
+                gross_profit, net_profit, opened_at, closed_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                opened_at,
+                1,
+                "mean_reversion_v2_small_target_max12h",
+                "BUY_USDC",
+                "OPEN",
+                1.0,
+                1.00122506,
+                10.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                opened_at,
+                None,
+            ),
+        )
+        conn.commit()
+
+    report = PaperOpenCycleDiagnosticsEngine(database, test_config).build_report(
+        current_price=1.0,
+        current_price_source="TEST",
+        current_price_timestamp="2026-06-11T00:00:00",
+    )
+
+    item = report.open_cycles[0]
+    assert item.profile == "mean_reversion_v2_small_target_max12h"
+    assert item.close_epsilon == 0.00000010
+    assert item.max_holding_limit_seconds == 12 * 60 * 60
+    assert item.max_holding_condition_met is True

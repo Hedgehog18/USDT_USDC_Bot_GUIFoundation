@@ -2889,6 +2889,7 @@ def command_collect_closed_cycles(args) -> None:
         price_info=None,
         nearest_open_cycle=None,
         action_taken="waiting",
+        close_reason="N/A",
         entry_diagnostics=_collection_entry_diagnostics([]),
     )
     if int(stats["closed_cycles"]) >= args.target:
@@ -2925,11 +2926,13 @@ def command_collect_closed_cycles(args) -> None:
         before_stats = database.load_paper_cycle_collection_stats(profile)
         bot = _apply_profile_to_bot(BotEngine(), profile)
         entry_debug_items: list[dict] = []
+        close_debug_items: list[dict] = []
         result = PaperTradingEngine(
             config,
             database,
             bot=bot,
             entry_zone_debug_callback=entry_debug_items.append,
+            close_debug_callback=close_debug_items.append,
             strategy_profile=profile,
         ).run(1)
         stats = database.load_paper_cycle_collection_stats(profile)
@@ -2944,6 +2947,7 @@ def command_collect_closed_cycles(args) -> None:
                 price_info=price_info,
                 nearest_open_cycle=nearest_open_cycle,
                 action_taken=action_taken,
+                close_reason=_collection_close_reason(close_debug_items),
                 entry_diagnostics=entry_diagnostics,
             )
 
@@ -2965,6 +2969,7 @@ def _print_closed_cycle_collection_progress(
     price_info: tuple[float, str, str] | None,
     nearest_open_cycle,
     action_taken: str,
+    close_reason: str,
     entry_diagnostics: dict[str, str],
 ) -> None:
     current_price, data_source, price_timestamp = price_info if price_info else (None, "N/A", "N/A")
@@ -2986,9 +2991,17 @@ def _print_closed_cycle_collection_progress(
             "distance_to_target: N/A",
             "unrealized_pnl: N/A",
             "close_epsilon: N/A",
+            "max_holding_limit: N/A",
+            "cycle_age: N/A",
+            "max_holding_condition_met: N/A",
             "close_condition_met: N/A",
         ])
     else:
+        max_holding_limit = (
+            f"{nearest_open_cycle.max_holding_limit_seconds / 3600:.1f}h"
+            if nearest_open_cycle.max_holding_limit_seconds
+            else "N/A"
+        )
         parts.extend([
             f"nearest_open_cycle_db_id: {nearest_open_cycle.db_id}",
             f"direction: {nearest_open_cycle.direction}",
@@ -2996,9 +3009,13 @@ def _print_closed_cycle_collection_progress(
             f"distance_to_target: {nearest_open_cycle.distance_to_target:.8f}",
             f"unrealized_pnl: {nearest_open_cycle.unrealized_pnl:.8f}",
             f"close_epsilon: {nearest_open_cycle.close_epsilon:.8f}",
+            f"max_holding_limit: {max_holding_limit}",
+            f"cycle_age: {_format_collection_duration(nearest_open_cycle.age_seconds)}",
+            f"max_holding_condition_met: {'yes' if nearest_open_cycle.max_holding_condition_met else 'no'}",
             f"close_condition_met: {'yes' if nearest_open_cycle.close_condition_met else 'no'}",
         ])
     parts.append(f"action_taken: {action_taken}")
+    parts.append(f"close_reason: {close_reason}")
     parts.append(f"entry_attempt: {entry_diagnostics['entry_attempt']}")
     parts.append(f"candidate_detected: {entry_diagnostics['candidate_detected']}")
     parts.append(f"entry_block_reason: {entry_diagnostics['entry_block_reason']}")
@@ -3034,6 +3051,27 @@ def _collection_action_taken(before_stats: dict[str, float | int], after_stats: 
     if result.opened_cycles > 0:
         return "opened"
     return "waiting"
+
+
+def _collection_close_reason(close_debug_items: list[dict]) -> str:
+    for item in reversed(close_debug_items):
+        reason = item.get("close_reason")
+        if reason:
+            return str(reason)
+    return "N/A"
+
+
+def _format_collection_duration(seconds: float | int | None) -> str:
+    if seconds is None:
+        return "N/A"
+    total = max(0, int(seconds))
+    hours, remainder = divmod(total, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours:
+        return f"{hours}h{minutes:02d}m"
+    if minutes:
+        return f"{minutes}m{secs:02d}s"
+    return f"{secs}s"
 
 
 def _collection_entry_diagnostics(entry_debug_items: list[dict]) -> dict[str, str]:
