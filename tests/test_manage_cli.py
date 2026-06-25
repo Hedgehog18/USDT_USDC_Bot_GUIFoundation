@@ -1009,6 +1009,18 @@ def test_manage_cli_validation_summary_accepts_profile():
     assert args.profile == "mean_reversion_v2_small_target"
 
 
+def test_manage_cli_profile_performance_summary_accepts_profile():
+    parser = build_parser()
+    args = parser.parse_args([
+        "profile-performance-summary",
+        "--profile",
+        "mean_reversion_v2_small_target",
+    ])
+
+    assert args.command == "profile-performance-summary"
+    assert args.profile == "mean_reversion_v2_small_target"
+
+
 def test_manage_cli_has_gui_command():
     parser = build_parser()
     args = parser.parse_args(["gui"])

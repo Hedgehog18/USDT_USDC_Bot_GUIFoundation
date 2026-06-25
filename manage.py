@@ -74,6 +74,7 @@ from analytics.paper_open_cycle_diagnostics_engine import PaperOpenCycleDiagnost
 from analytics.partial_target_diagnostics_engine import PartialTargetDiagnosticsEngine
 from analytics.post_entry_path_diagnostics_engine import PostEntryPathDiagnosticsEngine
 from analytics.profile_comparison_diagnostics_engine import ProfileComparisonDiagnosticsEngine
+from analytics.profile_performance_summary_engine import ProfilePerformanceSummaryEngine
 from analytics.range_shift_diagnostics_engine import RangeShiftDiagnosticsEngine
 from analytics.risk_diagnostics_engine import RiskDiagnosticsEngine
 from analytics.risk_profitability_diagnostics_engine import RiskProfitabilityDiagnosticsEngine
@@ -2305,6 +2306,65 @@ def command_validation_summary(args) -> None:
     print(summary.next_action)
 
 
+def command_profile_performance_summary(args) -> None:
+    _config, _logger, database = build_context()
+    summary = ProfilePerformanceSummaryEngine(database).build_summary(profile=args.profile)
+
+    print("=== Profile Performance Summary ===")
+    print(f"Profile: {summary.profile}")
+    print(f"Total profile cycles: {summary.total_profile_cycles}")
+    print(f"Automatic closed count: {summary.automatic_closed_count}")
+    print(f"Manual closed count: {summary.manual_closed_count}")
+    print(f"Open count: {summary.open_count}")
+    print(f"Total realized net profit including manual closes: {summary.total_realized_net_profit:.8f}")
+    print(f"Automatic closed net profit: {summary.automatic_closed_net_profit:.8f}")
+    print(f"Manual closed net profit: {summary.manual_closed_net_profit:.8f}")
+    print(f"Target-hit win rate only for automatic closes: {summary.target_hit_win_rate * 100:.2f}%")
+    print(f"Real outcome win rate including manual closes: {summary.real_outcome_win_rate * 100:.2f}%")
+    print(f"Average net per cycle: {summary.average_net_per_cycle:.8f}")
+    print(f"Average holding time: {_format_optional_duration(summary.average_holding_time_seconds)}")
+    print(
+        "Average holding time automatic: "
+        f"{_format_optional_duration(summary.average_holding_time_automatic_seconds)}"
+    )
+    print(
+        "Average holding time manual: "
+        f"{_format_optional_duration(summary.average_holding_time_manual_seconds)}"
+    )
+    print(f"Manual close rate: {summary.manual_close_rate * 100:.2f}%")
+    print(f"Stale close count: {summary.stale_close_count}")
+    print("Best cycle:")
+    _print_profile_cycle_summary(summary.best_cycle)
+    print("Worst cycle:")
+    _print_profile_cycle_summary(summary.worst_cycle)
+    print("Buy vs sell breakdown:")
+    _print_profile_breakdown(summary.buy_breakdown)
+    _print_profile_breakdown(summary.sell_breakdown)
+    print("Session breakdown:")
+    for item in summary.session_breakdown:
+        _print_profile_breakdown(item)
+    print(f"Recommendation: {summary.recommendation}")
+
+
+def _print_profile_cycle_summary(cycle) -> None:
+    if cycle is None:
+        print("- No realized cycles.")
+        return
+    print(
+        f"- db_id={cycle.db_id} direction={cycle.direction} status={cycle.status} "
+        f"net_profit={cycle.net_profit:.8f} opened_at={cycle.opened_at} "
+        f"closed_at={cycle.closed_at or 'N/A'} close_reason={cycle.close_reason or 'N/A'}"
+    )
+
+
+def _print_profile_breakdown(item) -> None:
+    print(
+        f"- {item.name}: total={item.total_cycles} automatic={item.automatic_closed_count} "
+        f"manual={item.manual_closed_count} open={item.open_count} "
+        f"net={item.net_profit:.8f} win_rate={item.win_rate * 100:.2f}%"
+    )
+
+
 def _print_reason_rows(rows: list[tuple[str, int]]) -> None:
     if not rows:
         print("- No data.")
@@ -3623,6 +3683,17 @@ def build_parser() -> argparse.ArgumentParser:
         default="strict_current",
     )
     validation_summary_parser.set_defaults(func=command_validation_summary)
+
+    profile_performance_summary_parser = subparsers.add_parser(
+        "profile-performance-summary",
+        help="Show profile paper-cycle performance with manual-close accounting",
+    )
+    profile_performance_summary_parser.add_argument(
+        "--profile",
+        choices=SUPPORTED_RUNTIME_STRATEGY_PROFILES,
+        default="mean_reversion_v2_small_target",
+    )
+    profile_performance_summary_parser.set_defaults(func=command_profile_performance_summary)
 
     notifications_parser = subparsers.add_parser("notifications", help="РџРѕРєР°Р·Р°С‚Рё РїРѕРІС–РґРѕРјР»РµРЅРЅСЏ")
     notifications_parser.add_argument("--limit", type=int, default=10)
