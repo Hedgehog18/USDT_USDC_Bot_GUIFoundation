@@ -223,12 +223,6 @@ class PaperTradingEngine:
             close_tolerance = self._close_tolerance_for_profile(strategy_profile)
             close_rounding_digits = self._close_rounding_digits_for_profile(strategy_profile)
             close_epsilon = self._close_epsilon_for_profile(strategy_profile)
-            max_holding_seconds = self._max_holding_seconds_for_profile(strategy_profile)
-            cycle_age_seconds = self._cycle_age_seconds(cycle.opened_at)
-            max_holding_condition_met = (
-                max_holding_seconds is not None
-                and cycle_age_seconds >= max_holding_seconds
-            )
             close_condition_met = self.cycle_manager.can_close_cycle(
                 cycle,
                 current_price,
@@ -236,60 +230,6 @@ class PaperTradingEngine:
                 rounding_digits=close_rounding_digits,
                 close_epsilon=close_epsilon,
             )
-
-            if max_holding_condition_met and not close_condition_met:
-                closed_cycle = self.cycle_manager.close_cycle(cycle, current_price)
-                if closed_cycle.status == PaperCycleStatus.CLOSED:
-                    saved = self.database.close_paper_cycle_manually(
-                        db_id=int(cycle.id),
-                        close_price=closed_cycle.close_price,
-                        close_fee=closed_cycle.close_fee,
-                        gross_profit=closed_cycle.gross_profit,
-                        net_profit=closed_cycle.net_profit,
-                        close_reason="max_holding_12h",
-                        closed_at=closed_cycle.closed_at.isoformat()
-                        if closed_cycle.closed_at
-                        else datetime.utcnow().isoformat(),
-                    )
-                    if saved:
-                        closed_count += 1
-                        result = "CLOSED_MANUAL"
-                        reason = "Cycle closed by max_holding_12h rule."
-                    else:
-                        open_cycles_remaining = True
-                        result = "SKIPPED"
-                        reason = "Database cycle was not updated."
-                else:
-                    open_cycles_remaining = True
-                    result = closed_cycle.status.value
-                    reason = "Max holding close order was not filled."
-
-                self._emit_close_debug({
-                    "index": index,
-                    "db_id": cycle.id,
-                    "cycle_id": cycle_id,
-                    "strategy_profile": strategy_profile,
-                    "direction": cycle.direction.value,
-                    "current_price": current_price,
-                    "target_price": target_price,
-                    **self._close_debug_price_fields(
-                        current_price,
-                        target_price,
-                        close_rounding_digits,
-                        close_epsilon,
-                    ),
-                    "close_tolerance": close_tolerance,
-                    "close_rounding_digits": close_rounding_digits,
-                    "max_holding_limit_seconds": max_holding_seconds,
-                    "cycle_age_seconds": cycle_age_seconds,
-                    "max_holding_condition_met": True,
-                    "close_condition_met": close_condition_met,
-                    "close_attempted": True,
-                    "close_result": result,
-                    "close_reason": "max_holding_12h",
-                    "reason": reason,
-                })
-                continue
 
             if not close_condition_met:
                 open_cycles_remaining = True
@@ -309,9 +249,6 @@ class PaperTradingEngine:
                     ),
                     "close_tolerance": close_tolerance,
                     "close_rounding_digits": close_rounding_digits,
-                    "max_holding_limit_seconds": max_holding_seconds,
-                    "cycle_age_seconds": cycle_age_seconds,
-                    "max_holding_condition_met": False,
                     "close_condition_met": False,
                     "close_attempted": False,
                     "close_result": "SKIPPED",
@@ -345,9 +282,6 @@ class PaperTradingEngine:
                 ),
                 "close_tolerance": close_tolerance,
                 "close_rounding_digits": close_rounding_digits,
-                "max_holding_limit_seconds": max_holding_seconds,
-                "cycle_age_seconds": cycle_age_seconds,
-                "max_holding_condition_met": max_holding_condition_met,
                 "close_condition_met": True,
                 "close_attempted": True,
                 "close_result": result,
@@ -392,33 +326,15 @@ class PaperTradingEngine:
         return cycle, str(strategy_profile), int(cycle_id)
 
     def _close_tolerance_for_profile(self, strategy_profile: str) -> float:
-        if strategy_profile == "mean_reversion_v2_small_target_tol1":
-            return max(0.0, float(getattr(self.config, "price_tick_size", 0.0)))
         return 0.0
 
     def _close_rounding_digits_for_profile(self, strategy_profile: str) -> int | None:
-        if strategy_profile == "mean_reversion_v2_small_target_r7":
-            return 7
         return None
 
     def _close_epsilon_for_profile(self, strategy_profile: str) -> Decimal:
-        if strategy_profile in {
-            "mean_reversion_v2_small_target",
-            "mean_reversion_v2_small_target_max12h",
-        }:
+        if strategy_profile == "mean_reversion_v2_small_target":
             return Decimal("0.00000010")
         return Decimal("0")
-
-    @staticmethod
-    def _max_holding_seconds_for_profile(strategy_profile: str) -> int | None:
-        if strategy_profile == "mean_reversion_v2_small_target_max12h":
-            return 12 * 60 * 60
-        return None
-
-    @staticmethod
-    def _cycle_age_seconds(opened_at: datetime) -> float:
-        now = datetime.now(tz=opened_at.tzinfo) if opened_at.tzinfo else datetime.now()
-        return max(0.0, (now - opened_at).total_seconds())
 
     @staticmethod
     def _close_debug_price_fields(

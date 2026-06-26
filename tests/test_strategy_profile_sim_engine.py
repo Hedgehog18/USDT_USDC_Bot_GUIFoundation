@@ -131,54 +131,6 @@ def test_strategy_profile_sim_mean_reversion_v2_uses_calibrated_zones(test_confi
     assert small_target.pass_count == v2.pass_count
     assert small_target.buy_candidates == v2.buy_candidates
     assert small_target.sell_candidates == v2.sell_candidates
-    tol1 = engine.build_report("mean_reversion_v2_small_target_tol1")
-    assert tol1.total_entry_zone_samples == small_target.total_entry_zone_samples
-    assert tol1.pass_count == small_target.pass_count
-    assert tol1.buy_candidates == small_target.buy_candidates
-    assert tol1.sell_candidates == small_target.sell_candidates
-    r7 = engine.build_report("mean_reversion_v2_small_target_r7")
-    assert r7.total_entry_zone_samples == small_target.total_entry_zone_samples
-    assert r7.pass_count == small_target.pass_count
-    assert r7.buy_candidates == small_target.buy_candidates
-    assert r7.sell_candidates == small_target.sell_candidates
-    max12h = engine.build_report("mean_reversion_v2_small_target_max12h")
-    assert max12h.total_entry_zone_samples == small_target.total_entry_zone_samples
-    assert max12h.pass_count == small_target.pass_count
-    assert max12h.buy_candidates == small_target.buy_candidates
-    assert max12h.sell_candidates == small_target.sell_candidates
-
-
-def test_strategy_profile_sim_new_york_profile_filters_by_session(test_config, tmp_path):
-    database = DatabaseManager(str(tmp_path / "bot.sqlite"))
-    with database.connect() as conn:
-        _insert_snapshot(
-            conn,
-            0,
-            25.0,
-            "LOW",
-            "ASK_PRESSURE",
-            "BUY_DOMINANT",
-            timestamp="2026-01-01T09:00:00",
-        )
-        _insert_snapshot(
-            conn,
-            1,
-            75.0,
-            "LOW",
-            "BID_PRESSURE",
-            "SELL_DOMINANT",
-            timestamp="2026-01-01T18:00:00",
-        )
-        conn.commit()
-
-    report = StrategyProfileSimulationEngine(database, test_config).build_report(
-        "mean_reversion_v2_small_target_ny"
-    )
-
-    assert report.total_entry_zone_samples == 2
-    assert report.pass_count == 1
-    assert report.sell_candidates == 1
-    assert ("new_york_session", 1) in report.remaining_blocking_filters
 
 
 def test_strategy_profile_sim_rejects_unknown_profile(test_config, tmp_path):

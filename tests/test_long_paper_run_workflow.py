@@ -71,10 +71,10 @@ def test_long_paper_run_workflow_uses_profile_aware_summary(monkeypatch, tmp_pat
     result = LongPaperRunWorkflow(DummyConfig(), database).run(
         iterations=2,
         interval_seconds=0,
-        strategy_profile="mean_reversion_v2_small_target_ny",
+        strategy_profile="mean_reversion_v2_small_target",
     )
 
     rows = database.load_recent_long_paper_runs(limit=10)
-    assert result.strategy_profile == "mean_reversion_v2_small_target_ny"
-    assert result.validation_summary.profile == "mean_reversion_v2_small_target_ny"
+    assert result.strategy_profile == "mean_reversion_v2_small_target"
+    assert result.validation_summary.profile == "mean_reversion_v2_small_target"
     assert rows[0][8] == result.validation_summary.overall_status

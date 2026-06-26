@@ -25,8 +25,6 @@ class PaperOpenCycleDiagnostic:
     distance_to_target_percent: float
     unrealized_pnl: float
     close_epsilon: float
-    max_holding_limit_seconds: int | None
-    max_holding_condition_met: bool
     effective_buy_close_price: float
     effective_sell_close_price: float
     close_condition_met: bool
@@ -104,11 +102,6 @@ class PaperOpenCycleDiagnosticsEngine:
             profile,
         )
         close_epsilon = self._close_epsilon_for_profile(profile)
-        max_holding_limit_seconds = self._max_holding_limit_seconds_for_profile(profile)
-        max_holding_condition_met = (
-            max_holding_limit_seconds is not None
-            and age_seconds >= max_holding_limit_seconds
-        )
         distance = self._distance_to_target(direction, current_price, target_price)
         distance_percent = distance / target_price * 100.0 if target_price else 0.0
         profit = self.fee_engine.calculate_profit(
@@ -134,8 +127,6 @@ class PaperOpenCycleDiagnosticsEngine:
             distance_to_target_percent=distance_percent,
             unrealized_pnl=unrealized_pnl,
             close_epsilon=float(close_epsilon),
-            max_holding_limit_seconds=max_holding_limit_seconds,
-            max_holding_condition_met=max_holding_condition_met,
             effective_buy_close_price=float(Decimal(str(current_price)) + close_epsilon),
             effective_sell_close_price=float(Decimal(str(current_price)) - close_epsilon),
             close_condition_met=close_condition_met,
@@ -151,9 +142,6 @@ class PaperOpenCycleDiagnosticsEngine:
         profile: str = "strict_current",
     ) -> bool:
         close_epsilon = cls._close_epsilon_for_profile(profile)
-        if profile == "mean_reversion_v2_small_target_r7":
-            current_price = round(current_price, 7)
-            target_price = round(target_price, 7)
         current_decimal = Decimal(str(current_price))
         target_decimal = Decimal(str(target_price))
         if direction == "BUY_USDC":
@@ -164,18 +152,9 @@ class PaperOpenCycleDiagnosticsEngine:
 
     @staticmethod
     def _close_epsilon_for_profile(profile: str) -> Decimal:
-        if profile in {
-            "mean_reversion_v2_small_target",
-            "mean_reversion_v2_small_target_max12h",
-        }:
+        if profile == "mean_reversion_v2_small_target":
             return Decimal("0.00000010")
         return Decimal("0")
-
-    @staticmethod
-    def _max_holding_limit_seconds_for_profile(profile: str) -> int | None:
-        if profile == "mean_reversion_v2_small_target_max12h":
-            return 12 * 60 * 60
-        return None
 
     @staticmethod
     def _distance_to_target(direction: str, current_price: float, target_price: float) -> float:

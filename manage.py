@@ -62,6 +62,7 @@ from analytics.exit_tolerance_sim_engine import ExitToleranceSimulationEngine
 from analytics.fee_model_report_engine import FeeModelReportEngine
 from analytics.filter_pass_diagnostics_engine import FilterPassDiagnosticsEngine
 from analytics.holding_horizon_diagnostics_engine import HoldingHorizonDiagnosticsEngine
+from analytics.high_frequency_diagnostics_engine import HighFrequencyDiagnosticsEngine
 from analytics.max_holding_sensitivity_engine import MaxHoldingSensitivityEngine
 from analytics.market_session_diagnostics_engine import MarketSessionDiagnosticsEngine
 from analytics.ml_baseline_trainer import MLBaselineTrainer
@@ -79,7 +80,6 @@ from analytics.profile_performance_summary_engine import ProfilePerformanceSumma
 from analytics.range_shift_diagnostics_engine import RangeShiftDiagnosticsEngine
 from analytics.risk_diagnostics_engine import RiskDiagnosticsEngine
 from analytics.risk_profitability_diagnostics_engine import RiskProfitabilityDiagnosticsEngine
-from analytics.rounding_exit_diagnostics_engine import RoundingExitDiagnosticsEngine
 from analytics.session_filter_sim_engine import SessionFilterSimulationEngine
 from analytics.statistics_engine import StatisticsEngine
 from analytics.strategy_profile_sim_engine import (
@@ -2006,48 +2006,66 @@ def command_exit_tolerance_sim(args) -> None:
     print(f"Best tested tolerance: {report.recommended_tolerance or 'N/A'}")
 
 
-def command_rounding_exit_diagnostics(args) -> None:
+def command_high_frequency_diagnostics(args) -> None:
     config, _logger, database = build_context()
-    current_price, source, timestamp = _load_current_paper_price(config, database)
-    report = RoundingExitDiagnosticsEngine(database, config).build_report(
-        profile=args.profile,
-        current_price=current_price,
-        current_price_source=source,
-        current_price_timestamp=timestamp,
-    )
+    report = HighFrequencyDiagnosticsEngine(database, config).build_report()
 
-    print("=== Rounding Exit Diagnostics ===")
-    print("Diagnostics only. Runtime close rules and paper cycles are unchanged.")
-    print(f"Profile: {report.profile}")
-    print(f"Current price: {report.current_price:.8f}")
-    print(f"Current price source: {report.current_price_source}")
-    print(f"Current price timestamp: {report.current_price_timestamp}")
-    print(f"Open cycles count: {report.open_cycles_count}")
-    print(f"Cycles that would close earlier due to rounding: {report.would_close_earlier_count}")
-    print(f"Average saved holding time: {report.average_saved_holding_time_seconds:.2f} sec")
-    print(f"Profit difference vs strict comparison: {report.profit_difference_vs_strict_comparison:.8f}")
-    print(f"Recommendation score: {report.recommendation_score:.4f}")
+    print("=== High Frequency Diagnostics ===")
+    print("Diagnostics only. Runtime strategy profiles and trading logic are unchanged.")
+    print(f"Total market samples: {report.total_samples}")
+    print(f"Sample span hours: {report.sample_span_hours:.4f}")
+    print(f"Estimated sample interval seconds: {report.estimated_sample_interval_seconds:.2f}")
     print("")
 
-    print("--- Open Cycles ---")
-    if not report.cycles:
-        print("No open cycles for profile.")
-    for item in report.cycles:
-        print(
-            f"db_id={item.db_id} | direction={item.direction} | "
-            f"strict_close={'yes' if item.strict_close else 'no'} | "
-            f"rounded_close={'yes' if item.rounded_close else 'no'} | "
-            f"would_close_earlier={'yes' if item.would_close_earlier else 'no'}"
+    print("--- Current Mean Reversion Frequency ---")
+    print(f"Current candidate count: {report.current_candidate_count}")
+    print(f"Current candidate rate: {report.current_candidate_rate * 100:.2f}%")
+    print(f"Paper closed cycles for mean_reversion_v2_small_target: {report.current_closed_cycles}")
+    print(f"Approx current cycles/day: {report.current_cycles_per_day:.2f}")
+    print("")
+
+    print("--- Current Entry Blockers ---")
+    if not report.current_blockers:
+        print("No blocker data available.")
+    for item in report.current_blockers:
+        print(f"- {item.name}: {item.count} ({item.rate * 100:.2f}%)")
+    print("")
+
+    print("--- Micro Entry Scenarios ---")
+    for item in report.micro_entry_scenarios:
+        print(f"{item.name}: {item.candidate_count} candidates ({item.candidate_rate * 100:.2f}%)")
+        print(f"  {item.description}")
+        print(f"  BUY: {item.buy_count} | SELL: {item.sell_count}")
+        if item.top_blockers:
+            blockers = ", ".join(f"{blocker.name}={blocker.count}" for blocker in item.top_blockers[:5])
+            print(f"  top blockers: {blockers}")
+    print("")
+
+    print("--- Target Sweep ---")
+    for item in report.target_results:
+        avg_holding = (
+            f"{item.average_holding_seconds:.2f} sec"
+            if item.average_holding_seconds is not None
+            else "N/A"
         )
         print(
-            f"  current_price={item.current_price:.8f} rounded_current={item.rounded_current_price:.7f} | "
-            f"target_price={item.target_price:.8f} rounded_target={item.rounded_target_price:.7f}"
+            f"target={item.target_percent:.4f}% | candidates={item.candidate_count} | "
+            f"hits={item.hit_count} | hit_rate={item.hit_rate * 100:.2f}% | "
+            f"avg_holding={avg_holding} | cycles/hour={item.theoretical_cycles_per_hour:.2f} | "
+            f"cycles/day={item.theoretical_cycles_per_day:.2f}"
         )
-        print(
-            f"  age_seconds={item.age_seconds:.0f} | "
-            f"estimated_pnl={item.estimated_pnl:.8f} | "
-            f"profit_difference_vs_target={item.profit_difference_vs_target:.8f}"
-        )
+    print("")
+
+    print("--- Frequency Choking Filters ---")
+    for item in report.choking_filters[:8]:
+        print(f"- {item.name}: {item.count} ({item.rate * 100:.2f}%)")
+    print("")
+
+    print("--- Fit Comparison ---")
+    print(f"Potential cycles/hour: {report.potential_cycles_per_hour:.2f}")
+    print(f"Potential cycles/day: {report.potential_cycles_per_day:.2f}")
+    print(f"Better fit for original idea: {report.better_fit}")
+    print(f"Recommendation: {report.recommendation}")
 
 
 def command_market_session_diagnostics(args) -> None:
@@ -2991,17 +3009,9 @@ def _print_closed_cycle_collection_progress(
             "distance_to_target: N/A",
             "unrealized_pnl: N/A",
             "close_epsilon: N/A",
-            "max_holding_limit: N/A",
-            "cycle_age: N/A",
-            "max_holding_condition_met: N/A",
             "close_condition_met: N/A",
         ])
     else:
-        max_holding_limit = (
-            f"{nearest_open_cycle.max_holding_limit_seconds / 3600:.1f}h"
-            if nearest_open_cycle.max_holding_limit_seconds
-            else "N/A"
-        )
         parts.extend([
             f"nearest_open_cycle_db_id: {nearest_open_cycle.db_id}",
             f"direction: {nearest_open_cycle.direction}",
@@ -3009,9 +3019,6 @@ def _print_closed_cycle_collection_progress(
             f"distance_to_target: {nearest_open_cycle.distance_to_target:.8f}",
             f"unrealized_pnl: {nearest_open_cycle.unrealized_pnl:.8f}",
             f"close_epsilon: {nearest_open_cycle.close_epsilon:.8f}",
-            f"max_holding_limit: {max_holding_limit}",
-            f"cycle_age: {_format_collection_duration(nearest_open_cycle.age_seconds)}",
-            f"max_holding_condition_met: {'yes' if nearest_open_cycle.max_holding_condition_met else 'no'}",
             f"close_condition_met: {'yes' if nearest_open_cycle.close_condition_met else 'no'}",
         ])
     parts.append(f"action_taken: {action_taken}")
@@ -3059,19 +3066,6 @@ def _collection_close_reason(close_debug_items: list[dict]) -> str:
         if reason:
             return str(reason)
     return "N/A"
-
-
-def _format_collection_duration(seconds: float | int | None) -> str:
-    if seconds is None:
-        return "N/A"
-    total = max(0, int(seconds))
-    hours, remainder = divmod(total, 3600)
-    minutes, secs = divmod(remainder, 60)
-    if hours:
-        return f"{hours}h{minutes:02d}m"
-    if minutes:
-        return f"{minutes}m{secs:02d}s"
-    return f"{secs}s"
 
 
 def _collection_entry_diagnostics(entry_debug_items: list[dict]) -> dict[str, str]:
@@ -4110,16 +4104,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     exit_tolerance_sim_parser.set_defaults(func=command_exit_tolerance_sim)
 
-    rounding_exit_diagnostics_parser = subparsers.add_parser(
-        "rounding-exit-diagnostics",
-        help="Diagnose rounded target close comparison for open paper cycles",
+    high_frequency_parser = subparsers.add_parser(
+        "high-frequency-diagnostics",
+        help="Research high-frequency micro-cycle potential without changing runtime",
     )
-    rounding_exit_diagnostics_parser.add_argument(
-        "--profile",
-        choices=SUPPORTED_RUNTIME_STRATEGY_PROFILES,
-        default="mean_reversion_v2_small_target_r7",
-    )
-    rounding_exit_diagnostics_parser.set_defaults(func=command_rounding_exit_diagnostics)
+    high_frequency_parser.set_defaults(func=command_high_frequency_diagnostics)
 
     market_session_parser = subparsers.add_parser(
         "market-session-diagnostics",

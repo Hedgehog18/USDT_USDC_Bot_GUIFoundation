@@ -12,10 +12,6 @@ SUPPORTED_RUNTIME_STRATEGY_PROFILES = (
     "mean_reversion_v1",
     "mean_reversion_v2",
     "mean_reversion_v2_small_target",
-    "mean_reversion_v2_small_target_ny",
-    "mean_reversion_v2_small_target_tol1",
-    "mean_reversion_v2_small_target_r7",
-    "mean_reversion_v2_small_target_max12h",
 )
 
 
@@ -35,10 +31,6 @@ class StrategyProfileDecisionEngine:
         if self.profile in {
             "mean_reversion_v2",
             "mean_reversion_v2_small_target",
-            "mean_reversion_v2_small_target_ny",
-            "mean_reversion_v2_small_target_tol1",
-            "mean_reversion_v2_small_target_r7",
-            "mean_reversion_v2_small_target_max12h",
         }:
             return self._mean_reversion_decision(
                 market_state,
@@ -75,9 +67,6 @@ class StrategyProfileDecisionEngine:
         if market_state.volatility_regime == "EXTREME":
             return self._decision("SAFE_WAIT", f"{profile_name}: extreme volatility", "LOW", 0.0)
 
-        if profile_name == "mean_reversion_v2_small_target_ny" and not self._is_new_york_session(market_state.created_at):
-            return self._decision("WAIT", f"{profile_name}: outside NEW_YORK session", "LOW", 0.0)
-
         if market_state.work_position <= buy_zone_max:
             if market_state.micro_trend != "BUY_DOMINANT":
                 return self._decision("WAIT", f"{profile_name}: BUY micro trend not confirmed", "LOW", 0.0)
@@ -106,18 +95,10 @@ class StrategyProfileDecisionEngine:
             zone_depth = 0.0
         return max(self.config.min_cycle_prediction_score, zone_depth)
 
-    @staticmethod
-    def _is_new_york_session(created_at: datetime) -> bool:
-        return 17 <= created_at.hour <= 23
-
     def _decision(self, action: str, reason: str, confidence: str, score: float) -> TradeDecision:
         target_profit = self.config.target_profit
         if self.profile in {
             "mean_reversion_v2_small_target",
-            "mean_reversion_v2_small_target_ny",
-            "mean_reversion_v2_small_target_tol1",
-            "mean_reversion_v2_small_target_r7",
-            "mean_reversion_v2_small_target_max12h",
         }:
             target_profit *= SMALL_TARGET_MULTIPLIER
 
