@@ -136,6 +136,43 @@ class DatabaseManager:
             """)
 
             conn.execute("""
+                CREATE TABLE IF NOT EXISTS market_snapshots_hf (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT NOT NULL,
+                    symbol TEXT NOT NULL,
+                    price REAL NOT NULL,
+                    bid REAL NOT NULL,
+                    ask REAL NOT NULL,
+                    mid_price REAL NOT NULL,
+                    spread REAL NOT NULL,
+                    work_position REAL NOT NULL,
+                    micro_trend TEXT NOT NULL,
+                    entry_zone TEXT NOT NULL,
+                    buy_zone INTEGER NOT NULL,
+                    sell_zone INTEGER NOT NULL,
+                    volatility_regime TEXT NOT NULL,
+                    market_regime TEXT NOT NULL,
+                    distance_to_long_center REAL NOT NULL,
+                    distance_to_short_center REAL NOT NULL,
+                    distance_to_work_center REAL NOT NULL,
+                    order_book_pressure TEXT NOT NULL,
+                    session TEXT NOT NULL,
+                    price_change_5_sec REAL NOT NULL,
+                    price_change_10_sec REAL NOT NULL,
+                    price_change_30_sec REAL NOT NULL,
+                    price_change_1_min REAL NOT NULL,
+                    price_change_5_min REAL NOT NULL,
+                    would_open_cycle INTEGER NOT NULL,
+                    reason_if_not TEXT NOT NULL,
+                    data_source TEXT NOT NULL
+                )
+            """)
+
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_market_snapshots_hf_timestamp ON market_snapshots_hf(timestamp)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_market_snapshots_hf_session ON market_snapshots_hf(session)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_market_snapshots_hf_reason ON market_snapshots_hf(reason_if_not)")
+
+            conn.execute("""
                 CREATE TABLE IF NOT EXISTS bot_budget_events (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     timestamp TEXT NOT NULL,
@@ -558,6 +595,66 @@ class DatabaseManager:
             conn.commit()
             return int(cursor.lastrowid)
 
+    def save_hf_market_snapshot(self, snapshot: dict) -> int:
+        with self.connect() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO market_snapshots_hf (
+                    timestamp, symbol, price, bid, ask, mid_price, spread,
+                    work_position, micro_trend, entry_zone, buy_zone, sell_zone,
+                    volatility_regime, market_regime,
+                    distance_to_long_center, distance_to_short_center, distance_to_work_center,
+                    order_book_pressure, session,
+                    price_change_5_sec, price_change_10_sec, price_change_30_sec,
+                    price_change_1_min, price_change_5_min,
+                    would_open_cycle, reason_if_not, data_source
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    snapshot["timestamp"],
+                    snapshot["symbol"],
+                    snapshot["price"],
+                    snapshot["bid"],
+                    snapshot["ask"],
+                    snapshot["mid_price"],
+                    snapshot["spread"],
+                    snapshot["work_position"],
+                    snapshot["micro_trend"],
+                    snapshot["entry_zone"],
+                    int(bool(snapshot["buy_zone"])),
+                    int(bool(snapshot["sell_zone"])),
+                    snapshot["volatility_regime"],
+                    snapshot["market_regime"],
+                    snapshot["distance_to_long_center"],
+                    snapshot["distance_to_short_center"],
+                    snapshot["distance_to_work_center"],
+                    snapshot["order_book_pressure"],
+                    snapshot["session"],
+                    snapshot["price_change_5_sec"],
+                    snapshot["price_change_10_sec"],
+                    snapshot["price_change_30_sec"],
+                    snapshot["price_change_1_min"],
+                    snapshot["price_change_5_min"],
+                    int(bool(snapshot["would_open_cycle"])),
+                    snapshot["reason_if_not"],
+                    snapshot["data_source"],
+                ),
+            )
+            conn.commit()
+            return int(cursor.lastrowid)
+
+    def load_recent_hf_market_snapshots(self, limit: int = 5000) -> list[tuple]:
+        with self.connect() as conn:
+            return conn.execute(
+                """
+                SELECT timestamp, price
+                FROM market_snapshots_hf
+                ORDER BY timestamp DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+
     def load_recent_system_events(self, limit: int = 200) -> list[tuple]:
         with self.connect() as conn:
             return conn.execute(
@@ -597,7 +694,7 @@ class DatabaseManager:
             ).fetchone()
 
     def count_rows(self, table: str) -> int:
-        allowed_tables = {"cycles", "trade_signals", "market_snapshots", "system_events", "bot_budget_events", "notifications", "decision_audit", "backtest_runs", "backtest_trades", "walk_forward_runs", "walk_forward_windows", "backtest_equity_points", "backtest_period_analytics", "paper_orders", "paper_cycles", "paper_safety_events", "paper_state_transitions", "paper_runs"}
+        allowed_tables = {"cycles", "trade_signals", "market_snapshots", "market_snapshots_hf", "system_events", "bot_budget_events", "notifications", "decision_audit", "backtest_runs", "backtest_trades", "walk_forward_runs", "walk_forward_windows", "backtest_equity_points", "backtest_period_analytics", "paper_orders", "paper_cycles", "paper_safety_events", "paper_state_transitions", "paper_runs"}
         if table not in allowed_tables:
             raise ValueError("Table is not allowed.")
         with self.connect() as conn:

@@ -62,7 +62,9 @@ from analytics.exit_tolerance_sim_engine import ExitToleranceSimulationEngine
 from analytics.fee_model_report_engine import FeeModelReportEngine
 from analytics.filter_pass_diagnostics_engine import FilterPassDiagnosticsEngine
 from analytics.holding_horizon_diagnostics_engine import HoldingHorizonDiagnosticsEngine
+from analytics.high_frequency_dataset_summary_engine import HighFrequencyDatasetSummaryEngine
 from analytics.high_frequency_diagnostics_engine import HighFrequencyDiagnosticsEngine
+from analytics.high_frequency_snapshot_collector import HighFrequencySnapshotCollector
 from analytics.max_holding_sensitivity_engine import MaxHoldingSensitivityEngine
 from analytics.market_session_diagnostics_engine import MarketSessionDiagnosticsEngine
 from analytics.ml_baseline_trainer import MLBaselineTrainer
@@ -2066,6 +2068,61 @@ def command_high_frequency_diagnostics(args) -> None:
     print(f"Potential cycles/day: {report.potential_cycles_per_day:.2f}")
     print(f"Better fit for original idea: {report.better_fit}")
     print(f"Recommendation: {report.recommendation}")
+
+
+def command_collect_market_snapshots(args) -> None:
+    config, logger, database = build_context()
+    collector = HighFrequencySnapshotCollector(database, config)
+
+    print("=== High Frequency Market Snapshot Collector ===")
+    print("Diagnostics-only collector. No paper cycles, no orders, no runtime strategy changes.")
+    print(f"Symbol: {config.symbol}")
+    print(f"Duration hours: {args.duration_hours}")
+    print(f"Interval seconds: {args.interval}")
+    if args.max_snapshots:
+        print(f"Max snapshots: {args.max_snapshots}")
+
+    logger.info(
+        "HF market snapshot collector started: duration_hours=%s interval=%s max_snapshots=%s",
+        args.duration_hours,
+        args.interval,
+        args.max_snapshots,
+    )
+    result = collector.collect(
+        duration_hours=args.duration_hours,
+        interval_seconds=args.interval,
+        max_snapshots=args.max_snapshots,
+    )
+
+    print("--- Result ---")
+    print(f"Snapshots collected: {result.snapshots_collected}")
+    print(f"Duration seconds: {result.duration_seconds:.2f}")
+    print(f"Interval seconds: {result.interval_seconds:.2f}")
+
+
+def command_high_frequency_dataset_summary(args) -> None:
+    _config, _logger, database = build_context()
+    summary = HighFrequencyDatasetSummaryEngine(database).build_summary()
+
+    print("=== High Frequency Dataset Summary ===")
+    print(f"Snapshots: {summary.total_snapshots}")
+    print(f"Potential micro-entry: {summary.potential_micro_entries}")
+    print(f"Potential micro-entry rate: {summary.potential_micro_entry_rate * 100:.2f}%")
+    _print_hf_distribution("By hour", summary.by_hour)
+    _print_hf_distribution("By session", summary.by_session)
+    _print_hf_distribution("Blockers", summary.blockers)
+    _print_hf_distribution("Spread distribution", summary.spread_distribution)
+    _print_hf_distribution("Micro trend distribution", summary.micro_trend_distribution)
+    _print_hf_distribution("Work position distribution", summary.work_position_distribution)
+
+
+def _print_hf_distribution(title: str, rows: list[tuple[str, int]]) -> None:
+    print("")
+    print(f"--- {title} ---")
+    if not rows:
+        print("No data.")
+    for name, count in rows:
+        print(f"- {name}: {count}")
 
 
 def command_market_session_diagnostics(args) -> None:
@@ -4109,6 +4166,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="Research high-frequency micro-cycle potential without changing runtime",
     )
     high_frequency_parser.set_defaults(func=command_high_frequency_diagnostics)
+
+    collect_market_snapshots_parser = subparsers.add_parser(
+        "collect-market-snapshots",
+        help="Collect live market snapshots for high-frequency research without trading",
+    )
+    collect_market_snapshots_parser.add_argument("--duration-hours", type=float, default=24.0)
+    collect_market_snapshots_parser.add_argument("--interval", type=float, default=5.0)
+    collect_market_snapshots_parser.add_argument("--max-snapshots", type=int, default=None)
+    collect_market_snapshots_parser.set_defaults(func=command_collect_market_snapshots)
+
+    hf_dataset_summary_parser = subparsers.add_parser(
+        "high-frequency-dataset-summary",
+        help="Summarize collected high-frequency market snapshots",
+    )
+    hf_dataset_summary_parser.set_defaults(func=command_high_frequency_dataset_summary)
 
     market_session_parser = subparsers.add_parser(
         "market-session-diagnostics",

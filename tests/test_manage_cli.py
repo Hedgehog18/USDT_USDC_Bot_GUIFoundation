@@ -893,6 +893,31 @@ def test_manage_cli_has_high_frequency_diagnostics_command():
     assert args.command == "high-frequency-diagnostics"
 
 
+def test_manage_cli_has_collect_market_snapshots_command():
+    parser = build_parser()
+    args = parser.parse_args([
+        "collect-market-snapshots",
+        "--duration-hours",
+        "1",
+        "--interval",
+        "5",
+        "--max-snapshots",
+        "2",
+    ])
+
+    assert args.command == "collect-market-snapshots"
+    assert args.duration_hours == 1.0
+    assert args.interval == 5.0
+    assert args.max_snapshots == 2
+
+
+def test_manage_cli_has_high_frequency_dataset_summary_command():
+    parser = build_parser()
+    args = parser.parse_args(["high-frequency-dataset-summary"])
+
+    assert args.command == "high-frequency-dataset-summary"
+
+
 def test_manage_cli_has_gui_command():
     parser = build_parser()
     args = parser.parse_args(["gui"])

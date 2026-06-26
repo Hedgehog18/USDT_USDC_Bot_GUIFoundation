@@ -313,6 +313,10 @@ class HighFrequencyDiagnosticsEngine:
         return failures
 
     def _load_snapshot_rows(self) -> list[dict]:
+        hf_rows = self._load_hf_snapshot_rows()
+        if hf_rows:
+            return hf_rows
+
         with self.database.connect() as conn:
             rows = conn.execute(
                 """
@@ -362,6 +366,56 @@ class HighFrequencyDiagnosticsEngine:
                 "volatility_regime": self._text(volatility_regime),
                 "market_health_score": self._float(market_health_score),
                 "market_health_status": self._text(market_health_status),
+            })
+            previous_price = current_price
+        return result
+
+    def _load_hf_snapshot_rows(self) -> list[dict]:
+        with self.database.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    timestamp,
+                    price,
+                    work_position,
+                    distance_to_short_center,
+                    spread,
+                    market_regime,
+                    micro_trend,
+                    volatility_regime
+                FROM market_snapshots_hf
+                ORDER BY timestamp ASC
+                """
+            ).fetchall()
+
+        result = []
+        previous_price = None
+        for index, row in enumerate(rows):
+            (
+                timestamp,
+                price,
+                work_position,
+                distance_to_short_center,
+                spread,
+                market_regime,
+                micro_trend,
+                volatility_regime,
+            ) = row
+            current_price = self._float(price)
+            result.append({
+                "index": index,
+                "timestamp": clean_display_text(timestamp),
+                "parsed_timestamp": self._parse_timestamp(timestamp),
+                "price": current_price,
+                "previous_price": previous_price,
+                "work_position": self._float(work_position),
+                "short_center": current_price - self._float(distance_to_short_center),
+                "spread": self._float(spread),
+                "market_regime": self._text(market_regime),
+                "micro_trend": self._text(micro_trend),
+                "volatility_regime": self._text(volatility_regime),
+                "market_health_score": 100.0,
+                "market_health_status": "HEALTHY",
             })
             previous_price = current_price
         return result
