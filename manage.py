@@ -101,6 +101,7 @@ from analytics.strategy_tuning_report_engine import StrategyTuningReportEngine
 from analytics.strategy_validation_engine import StrategyValidationEngine
 from analytics.target_rebase_diagnostics_engine import TargetRebaseDiagnosticsEngine
 from analytics.target_profit_sensitivity_engine import TargetProfitSensitivityEngine
+from analytics.target_resolution_diagnostics_engine import TargetResolutionDiagnosticsEngine
 from analytics.trend_alignment_diagnostics_engine import TrendAlignmentDiagnosticsEngine
 from analytics.trend_strength_diagnostics_engine import TrendStrengthDiagnosticsEngine
 from analytics.validation_summary_engine import ValidationSummaryEngine
@@ -2317,6 +2318,91 @@ def _print_micro_cycle_grid_section(title: str, rows, engine: MicroCycleGridSear
     print("")
 
 
+def command_target_resolution_diagnostics(args) -> None:
+    config, _logger, database = build_context()
+    engine = TargetResolutionDiagnosticsEngine(database, config)
+
+    print("=== Target Resolution Diagnostics ===")
+    print("Diagnostics only. Runtime, paper trading, and strategy profiles are unchanged.")
+    print(f"Symbol: {config.symbol}")
+    print(f"Price tick size: {config.price_tick_size:.8f}")
+    print("")
+
+    if args.compare:
+        report = engine.compare(args.compare[0], args.compare[1])
+        _print_target_resolution_item("First target", report.first)
+        _print_target_resolution_item("Second target", report.second)
+        print("--- Compare ---")
+        print(f"Identical after floor normalization: {report.identical_after_floor_normalization}")
+        print(f"Identical after ceil normalization: {report.identical_after_ceil_normalization}")
+        print(f"Identical after rounding: {report.identical_after_rounding}")
+        print(f"Identical after epsilon: {report.identical_after_epsilon}")
+        print(f"Identical after BUY target calculation: {report.identical_after_buy_target_calculation}")
+        print(f"Identical after SELL target calculation: {report.identical_after_sell_target_calculation}")
+        if report.warning:
+            print(f"WARNING: {report.warning}")
+        return
+
+    if args.compare_simulation:
+        report = engine.compare_simulation(
+            args.compare_simulation[0],
+            args.compare_simulation[1],
+            scenario=args.scenario,
+            max_holding_seconds=args.max_holding_seconds,
+        )
+        print("--- Simulation Compare ---")
+        print(f"Scenario: {report.scenario}")
+        print(f"Max holding seconds: {_format_optional_seconds(report.max_holding_seconds)}")
+        print(f"Total samples: {report.total_samples}")
+        print(f"First target: {report.first_target_percent:.5f}% cycles={report.first_cycles}")
+        print(f"Second target: {report.second_target_percent:.5f}% cycles={report.second_cycles}")
+        print(f"Compared cycles: {report.compared_cycles}")
+        print(f"Different outcome: {report.different_outcomes}")
+        print(f"Identical outcome: {report.identical_outcomes}")
+        print(f"Similarity: {report.similarity * 100:.2f}%")
+        print(report.message)
+        return
+
+    report = engine.build_report()
+    print(f"Reference price: {report.reference_price:.8f}")
+    print("--- Target Resolution ---")
+    for item in report.items:
+        _print_target_resolution_item("Target", item)
+    print("--- Equivalent Effective Targets ---")
+    if not report.equivalent_groups:
+        print("No equivalent effective targets detected by ceil tick normalization.")
+    else:
+        for group in report.equivalent_groups:
+            values = ", ".join(f"{target:.5f}%" for target in group)
+            print(f"WARNING: Equivalent effective target group: {values}")
+
+
+def _print_target_resolution_item(title: str, item) -> None:
+    print(f"--- {title} ---")
+    print(f"Requested target: {item.requested_target_percent:.5f}%")
+    print(f"Reference price: {item.reference_price:.8f}")
+    print(f"Raw target distance: {item.raw_target_distance:.10f}")
+    print(f"Target distance in ticks: {item.raw_ticks:.4f}")
+    print(f"Minimum possible price move: {item.minimum_price_move:.8f}")
+    print(f"Floor ticks: {item.floor_ticks}")
+    print(f"Ceil ticks: {item.ceil_ticks}")
+    print(f"Rounded ticks: {item.rounded_ticks}")
+    print(f"Effective target by floor ticks: {item.floor_effective_target_percent:.5f}%")
+    print(f"Effective target by ceil ticks: {item.ceil_effective_target_percent:.5f}%")
+    print(f"Effective target by rounded ticks: {item.rounded_effective_target_percent:.5f}%")
+    print(f"BUY target raw: {item.buy_target_raw:.8f}")
+    print(f"BUY target floor tick: {item.buy_target_floor_tick:.8f}")
+    print(f"BUY target ceil tick: {item.buy_target_ceil_tick:.8f}")
+    print(f"SELL target raw: {item.sell_target_raw:.8f}")
+    print(f"SELL target floor tick: {item.sell_target_floor_tick:.8f}")
+    print(f"SELL target ceil tick: {item.sell_target_ceil_tick:.8f}")
+    print(f"Close epsilon reference: {item.close_epsilon:.8f}")
+    print(f"Epsilon in ticks: {item.epsilon_ticks:.4f}")
+    if item.has_sub_tick_distance:
+        print("WARNING: Requested target distance is smaller than one configured price tick.")
+    print("")
+
+
 def command_market_session_diagnostics(args) -> None:
     config, _logger, database = build_context()
     current_price, source, timestamp = _load_current_paper_price(config, database)
@@ -4394,6 +4480,20 @@ def build_parser() -> argparse.ArgumentParser:
     micro_cycle_grid_search_parser.add_argument("--max-drawdown", type=float, default=0.005)
     micro_cycle_grid_search_parser.add_argument("--export-csv", default=None)
     micro_cycle_grid_search_parser.set_defaults(func=command_micro_cycle_grid_search)
+
+    target_resolution_parser = subparsers.add_parser(
+        "target-resolution-diagnostics",
+        help="Diagnose whether micro-cycle target values collapse to equivalent effective targets",
+    )
+    target_resolution_parser.add_argument("--compare", nargs=2, type=_positive_decimal_float, default=None)
+    target_resolution_parser.add_argument("--compare-simulation", nargs=2, type=_positive_decimal_float, default=None)
+    target_resolution_parser.add_argument(
+        "--scenario",
+        choices=MICRO_CYCLE_SCENARIOS,
+        default="short_term_mean_reversion",
+    )
+    target_resolution_parser.add_argument("--max-holding-seconds", type=float, default=270.0)
+    target_resolution_parser.set_defaults(func=command_target_resolution_diagnostics)
 
     market_session_parser = subparsers.add_parser(
         "market-session-diagnostics",

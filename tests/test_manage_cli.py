@@ -987,6 +987,45 @@ def test_manage_cli_has_micro_cycle_grid_search_command():
     assert args.export_csv == "reports/micro_cycle_grid_search.csv"
 
 
+def test_manage_cli_has_target_resolution_compare_command():
+    parser = build_parser()
+    args = parser.parse_args([
+        "target-resolution-diagnostics",
+        "--compare",
+        "0.0005",
+        "0.00075",
+    ])
+
+    assert args.command == "target-resolution-diagnostics"
+    assert args.compare == [0.0005, 0.00075]
+
+
+def test_manage_cli_has_target_resolution_compare_simulation_command():
+    parser = build_parser()
+    args = parser.parse_args([
+        "target-resolution-diagnostics",
+        "--compare-simulation",
+        "0.0005",
+        "0.00075",
+        "--scenario",
+        "short_term_mean_reversion",
+        "--max-holding-seconds",
+        "270",
+    ])
+
+    assert args.command == "target-resolution-diagnostics"
+    assert args.compare_simulation == [0.0005, 0.00075]
+    assert args.scenario == "short_term_mean_reversion"
+    assert args.max_holding_seconds == 270.0
+
+
+def test_manage_cli_target_resolution_rejects_non_positive_target():
+    parser = build_parser()
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["target-resolution-diagnostics", "--compare", "0", "0.00075"])
+
+
 def test_manage_cli_has_gui_command():
     parser = build_parser()
     args = parser.parse_args(["gui"])
