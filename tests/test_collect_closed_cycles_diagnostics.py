@@ -4,6 +4,8 @@ from manage import (
     _collection_action_taken,
     _collection_close_reason,
     _collection_entry_diagnostics,
+    _collection_target_settings,
+    _print_closed_cycle_collection_progress,
 )
 
 
@@ -76,3 +78,77 @@ def test_collection_close_reason_filters_by_profile():
     ]
 
     assert _collection_close_reason(close_debug_items, "mean_reversion_hf_micro_v1") == "max_holding_270s"
+
+
+def test_collection_target_settings_defaults_to_legacy_target():
+    args = SimpleNamespace(target=None, target_new=None)
+
+    assert _collection_target_settings(args) == (False, 100)
+
+
+def test_collection_target_settings_uses_target_new():
+    args = SimpleNamespace(target=None, target_new=50)
+
+    assert _collection_target_settings(args) == (True, 50)
+
+
+def test_collection_target_settings_rejects_target_and_target_new():
+    args = SimpleNamespace(target=100, target_new=50)
+
+    try:
+        _collection_target_settings(args)
+    except ValueError as exc:
+        assert "--target and --target-new cannot be used together" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError")
+
+
+def test_collection_target_settings_rejects_non_positive_target_new():
+    args = SimpleNamespace(target=None, target_new=0)
+
+    try:
+        _collection_target_settings(args)
+    except ValueError as exc:
+        assert "--target-new must be greater than 0" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError")
+
+
+def test_collection_progress_prints_empty_new_run(capsys):
+    stats = {
+        "closed_cycles": 0,
+        "automatic_closed": 0,
+        "manual_closed": 0,
+        "target_closed": 0,
+        "timeout_closed": 0,
+        "open_cycles": 0,
+        "net_profit": 0.0,
+        "win_rate": 0.0,
+    }
+    entry_diagnostics = {
+        "entry_attempt": "no",
+        "candidate_detected": "no",
+        "entry_block_reason": "no_signal",
+        "short_center": "N/A",
+        "entry_direction": "N/A",
+        "target_price": "N/A",
+        "target_distance": "N/A",
+    }
+
+    _print_closed_cycle_collection_progress(
+        stats,
+        5,
+        iteration=0,
+        price_info=None,
+        nearest_open_cycle=None,
+        action_taken="waiting",
+        close_reason="N/A",
+        entry_diagnostics=entry_diagnostics,
+        new_mode=True,
+    )
+
+    output = capsys.readouterr().out
+    assert "NEW CLOSED 0 / 5" in output
+    assert "new net profit: 0.00000000" in output
+    assert "target closed: 0" in output
+    assert "timeout closed: 0" in output

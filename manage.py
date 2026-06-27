@@ -3212,8 +3212,8 @@ def command_collect_closed_cycles(args) -> None:
     profile = args.profile
     _ensure_profile_allowed_for_paper(config, profile)
 
-    if args.target <= 0:
-        raise ValueError("--target must be greater than 0.")
+    use_new_target, collection_target = _collection_target_settings(args)
+
     if args.interval < 0:
         raise ValueError("--interval must be 0 or greater.")
     if args.max_iterations is not None and args.max_iterations <= 0:
@@ -3231,28 +3231,37 @@ def command_collect_closed_cycles(args) -> None:
 
     print("=== Closed Cycles Collection Watch ===")
     print(f"Profile: {profile}")
-    print(f"Target closed cycles: {args.target}")
+    if use_new_target:
+        baseline = database.load_paper_cycle_collection_baseline(profile)
+        baseline_max_id = int(baseline["max_cycle_id"])
+        print(f"Target new closed cycles: {collection_target}")
+        print(f"Baseline max paper cycle id: {baseline_max_id}")
+    else:
+        baseline_max_id = 0
+        print(f"Target closed cycles: {collection_target}")
     print("Mode: DEMO/PAPER only. Real trading disabled.")
 
     stats = database.load_paper_cycle_collection_stats(profile)
+    new_stats = database.load_new_paper_cycle_collection_stats(profile, baseline_max_id) if use_new_target else None
     _print_closed_cycle_collection_progress(
-        stats,
-        args.target,
+        new_stats if new_stats is not None else stats,
+        collection_target,
         iteration=0,
         price_info=None,
         nearest_open_cycle=None,
         action_taken="waiting",
         close_reason="N/A",
         entry_diagnostics=_collection_entry_diagnostics([]),
+        new_mode=use_new_target,
     )
-    if int(stats["closed_cycles"]) >= args.target:
+    if _collection_target_reached(stats, new_stats, collection_target, new_mode=use_new_target):
         print("SUCCESS: target closed cycles already reached.")
         if args.beep:
             _beep_success()
         return
 
     iteration = 0
-    while int(stats["closed_cycles"]) < args.target:
+    while not _collection_target_reached(stats, new_stats, collection_target, new_mode=use_new_target):
         if args.max_iterations is not None and iteration >= args.max_iterations:
             print("STOPPED: max iterations reached before target closed cycles.")
             break
@@ -3261,12 +3270,19 @@ def command_collect_closed_cycles(args) -> None:
         price_info = _load_collection_price_info(config, database, require_binance=args.require_binance)
         if price_info is None:
             stats = database.load_paper_cycle_collection_stats(profile)
+            new_stats = database.load_new_paper_cycle_collection_stats(profile, baseline_max_id) if use_new_target else None
             if _should_print_collection_iteration(iteration, args.print_every):
+                progress_stats = new_stats if new_stats is not None else stats
+                progress_label = (
+                    f"NEW CLOSED {int(progress_stats['closed_cycles'])} / {collection_target}"
+                    if use_new_target
+                    else f"CLOSED {int(progress_stats['closed_cycles'])} / {collection_target}"
+                )
                 print(
                     f"[collection {iteration}] WARNING: Binance price unavailable; "
                     "iteration skipped because --require-binance is enabled. "
-                    f"CLOSED {int(stats['closed_cycles'])} / {args.target} | "
-                    f"open cycles: {int(stats['open_cycles'])} | "
+                    f"{progress_label} | "
+                    f"open cycles: {int(progress_stats['open_cycles'])} | "
                     "action_taken: skipped_no_live_price | "
                     "entry_attempt: no | "
                     "candidate_detected: no | "
@@ -3289,23 +3305,30 @@ def command_collect_closed_cycles(args) -> None:
             strategy_profile=profile,
         ).run(1)
         stats = database.load_paper_cycle_collection_stats(profile)
+        new_stats = database.load_new_paper_cycle_collection_stats(profile, baseline_max_id) if use_new_target else None
         action_taken = _collection_action_taken(before_stats, stats, result)
         entry_diagnostics = _collection_entry_diagnostics(entry_debug_items)
         nearest_open_cycle = _nearest_collection_open_cycle(config, database, profile, price_info[0], price_info[1], price_info[2])
-        if _should_print_collection_iteration(iteration, args.print_every) or int(stats["closed_cycles"]) >= args.target:
+        if (
+            _should_print_collection_iteration(iteration, args.print_every)
+            or _collection_target_reached(stats, new_stats, collection_target, new_mode=use_new_target)
+        ):
             _print_closed_cycle_collection_progress(
-                stats,
-                args.target,
+                new_stats if new_stats is not None else stats,
+                collection_target,
                 iteration=iteration,
                 price_info=price_info,
                 nearest_open_cycle=nearest_open_cycle,
                 action_taken=action_taken,
                 close_reason=_collection_close_reason(close_debug_items, profile),
                 entry_diagnostics=entry_diagnostics,
+                new_mode=use_new_target,
             )
 
-        if int(stats["closed_cycles"]) >= args.target:
+        if _collection_target_reached(stats, new_stats, collection_target, new_mode=use_new_target):
             print("SUCCESS: target closed cycles reached.")
+            if use_new_target and new_stats is not None:
+                _print_closed_cycle_collection_summary(new_stats)
             if args.beep:
                 _beep_success()
             return
@@ -3324,18 +3347,29 @@ def _print_closed_cycle_collection_progress(
     action_taken: str,
     close_reason: str,
     entry_diagnostics: dict[str, str],
+    new_mode: bool = False,
 ) -> None:
     current_price, data_source, price_timestamp = price_info if price_info else (None, "N/A", "N/A")
+    closed_label = "NEW CLOSED" if new_mode else "CLOSED"
+    net_label = "new net profit" if new_mode else "net profit"
+    win_label = "new win rate" if new_mode else "win rate"
     parts = [
         f"[collection {iteration}]",
-        f"CLOSED {int(stats['closed_cycles'])} / {target}",
+        f"{closed_label} {int(stats['closed_cycles'])} / {target}",
         f"open cycles: {int(stats['open_cycles'])}",
-        f"net profit: {float(stats['net_profit']):.8f}",
-        f"win rate: {float(stats['win_rate']) * 100:.2f}%",
+        f"{net_label}: {float(stats['net_profit']):.8f}",
+        f"{win_label}: {float(stats['win_rate']) * 100:.2f}%",
         f"current_price: {_format_collection_float(current_price)}",
         f"price_timestamp: {price_timestamp}",
         f"data_source: {data_source}",
     ]
+    if new_mode:
+        parts.extend([
+            f"new automatic closed: {int(stats['automatic_closed'])}",
+            f"target closed: {int(stats['target_closed'])}",
+            f"timeout closed: {int(stats['timeout_closed'])}",
+            f"manual closed: {int(stats['manual_closed'])}",
+        ])
     if nearest_open_cycle is None:
         parts.extend([
             "nearest_open_cycle_db_id: N/A",
@@ -3372,6 +3406,43 @@ def _print_closed_cycle_collection_progress(
     parts.append(f"entry_target_price: {entry_diagnostics['target_price']}")
     parts.append(f"entry_target_distance: {entry_diagnostics['target_distance']}")
     print(" | ".join(parts))
+
+
+def _collection_target_reached(
+    stats: dict[str, float | int],
+    new_stats: dict[str, float | int] | None,
+    target: int,
+    *,
+    new_mode: bool,
+) -> bool:
+    progress_stats = new_stats if new_mode and new_stats is not None else stats
+    return int(progress_stats["closed_cycles"]) >= target
+
+
+def _print_closed_cycle_collection_summary(stats: dict[str, float | int]) -> None:
+    print("=== New Collection Summary ===")
+    print(f"New closed cycles: {int(stats['closed_cycles'])}")
+    print(f"New automatic closed: {int(stats['automatic_closed'])}")
+    print(f"New target closed: {int(stats['target_closed'])}")
+    print(f"New timeout closed: {int(stats['timeout_closed'])}")
+    print(f"New manual closed: {int(stats['manual_closed'])}")
+    print(f"New net profit: {float(stats['net_profit']):.8f}")
+    print(f"New win rate: {float(stats['win_rate']) * 100:.2f}%")
+
+
+def _collection_target_settings(args) -> tuple[bool, int]:
+    if args.target is not None and args.target_new is not None:
+        raise ValueError("--target and --target-new cannot be used together.")
+
+    if args.target_new is not None:
+        if args.target_new <= 0:
+            raise ValueError("--target-new must be greater than 0.")
+        return True, int(args.target_new)
+
+    target = 100 if args.target is None else int(args.target)
+    if target <= 0:
+        raise ValueError("--target must be greater than 0.")
+    return False, target
 
 
 def _load_collection_price_info(config, database, *, require_binance: bool) -> tuple[float, str, str] | None:
@@ -4251,7 +4322,8 @@ def build_parser() -> argparse.ArgumentParser:
         choices=SUPPORTED_RUNTIME_STRATEGY_PROFILES,
         default="mean_reversion_v2_small_target",
     )
-    collect_closed_cycles_parser.add_argument("--target", type=int, default=100)
+    collect_closed_cycles_parser.add_argument("--target", type=int, default=None)
+    collect_closed_cycles_parser.add_argument("--target-new", type=int, default=None)
     collect_closed_cycles_parser.add_argument("--interval", type=int, default=1)
     collect_closed_cycles_parser.add_argument("--max-iterations", type=int, default=None)
     collect_closed_cycles_parser.add_argument("--beep", action=argparse.BooleanOptionalAction, default=True)

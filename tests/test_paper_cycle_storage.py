@@ -188,3 +188,59 @@ def test_database_loads_paper_cycle_collection_stats_by_profile(tmp_path: Path):
     assert stats["net_profit"] == pytest.approx(-0.01)
     assert stats["winning_cycles"] == 1
     assert stats["win_rate"] == 0.5
+
+
+def test_database_loads_new_paper_cycle_collection_stats_after_baseline(tmp_path: Path):
+    database = DatabaseManager(str(tmp_path / "bot.sqlite"))
+    opened_at = datetime.utcnow()
+
+    def make_cycle(status: PaperCycleStatus, net_profit: float, close_reason: str | None = None) -> PaperCycle:
+        cycle = PaperCycle(
+            id=0,
+            direction=PaperOrderSide.BUY_USDC,
+            status=status,
+            open_price=1.0,
+            close_price=1.0001,
+            quantity=10.0,
+            open_fee=0.0,
+            close_fee=0.0,
+            gross_profit=net_profit,
+            net_profit=net_profit,
+            opened_at=opened_at,
+            closed_at=opened_at if status != PaperCycleStatus.OPEN else None,
+        )
+        setattr(cycle, "close_reason", close_reason)
+        return cycle
+
+    database.save_paper_cycle(make_cycle(PaperCycleStatus.CLOSED, 0.01, "target"), strategy_profile="mean_reversion_hf_micro_v1")
+    baseline = database.load_paper_cycle_collection_baseline("mean_reversion_hf_micro_v1")
+
+    database.save_paper_cycle(make_cycle(PaperCycleStatus.CLOSED, 0.02, "target"), strategy_profile="mean_reversion_hf_micro_v1")
+    database.save_paper_cycle(make_cycle(PaperCycleStatus.CLOSED, -0.01, "max_holding_270s"), strategy_profile="mean_reversion_hf_micro_v1")
+    database.save_paper_cycle(make_cycle(PaperCycleStatus.OPEN, 0.0), strategy_profile="mean_reversion_hf_micro_v1")
+    manual_id = database.save_paper_cycle(make_cycle(PaperCycleStatus.OPEN, 0.0), strategy_profile="mean_reversion_hf_micro_v1")
+    database.close_paper_cycle_manually(
+        db_id=manual_id,
+        close_price=0.9999,
+        close_fee=0.0,
+        gross_profit=-0.03,
+        net_profit=-0.03,
+        close_reason="stale",
+        closed_at=opened_at.isoformat(),
+    )
+    database.save_paper_cycle(make_cycle(PaperCycleStatus.CLOSED, 9.0, "target"), strategy_profile="other_profile")
+
+    stats = database.load_new_paper_cycle_collection_stats(
+        "mean_reversion_hf_micro_v1",
+        baseline_max_id=int(baseline["max_cycle_id"]),
+    )
+
+    assert stats["closed_cycles"] == 3
+    assert stats["automatic_closed"] == 2
+    assert stats["manual_closed"] == 1
+    assert stats["target_closed"] == 1
+    assert stats["timeout_closed"] == 1
+    assert stats["open_cycles"] == 1
+    assert stats["net_profit"] == pytest.approx(-0.02)
+    assert stats["winning_cycles"] == 1
+    assert stats["win_rate"] == pytest.approx(1 / 3)

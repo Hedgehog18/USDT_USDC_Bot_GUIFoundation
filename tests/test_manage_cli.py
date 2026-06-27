@@ -258,6 +258,7 @@ def test_manage_cli_accepts_hf_micro_profile_for_paper_workflow_commands():
         ["paper-cycle-sim", "--iterations", "3", "--profile", "mean_reversion_hf_micro_v1"],
         ["long-paper-run", "--iterations", "10", "--interval", "1", "--profile", "mean_reversion_hf_micro_v1"],
         ["collect-closed-cycles", "--profile", "mean_reversion_hf_micro_v1", "--target", "5"],
+        ["collect-closed-cycles", "--profile", "mean_reversion_hf_micro_v1", "--target-new", "5"],
         ["validation-summary", "--profile", "mean_reversion_hf_micro_v1"],
         ["profile-performance-summary", "--profile", "mean_reversion_hf_micro_v1"],
         ["exit-risk-diagnostics", "--profile", "mean_reversion_hf_micro_v1"],
@@ -289,11 +290,28 @@ def test_manage_cli_has_collect_closed_cycles_command():
     assert args.command == "collect-closed-cycles"
     assert args.profile == "mean_reversion_v2_small_target"
     assert args.target == 5
+    assert args.target_new is None
     assert args.interval == 1
     assert args.max_iterations == 20
     assert args.require_binance is True
     assert args.print_every == 2
     assert args.beep is False
+
+
+def test_manage_cli_has_collect_closed_cycles_target_new():
+    parser = build_parser()
+    args = parser.parse_args([
+        "collect-closed-cycles",
+        "--profile",
+        "mean_reversion_hf_micro_v1",
+        "--target-new",
+        "50",
+    ])
+
+    assert args.command == "collect-closed-cycles"
+    assert args.profile == "mean_reversion_hf_micro_v1"
+    assert args.target is None
+    assert args.target_new == 50
 
 
 def test_manage_cli_has_long_paper_run_command():

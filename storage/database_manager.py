@@ -1554,6 +1554,59 @@ class DatabaseManager:
             "win_rate": (winning_cycles / closed_cycles) if closed_cycles else 0.0,
         }
 
+    def load_paper_cycle_collection_baseline(self, strategy_profile: str) -> dict[str, float | int]:
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT
+                    COALESCE(MAX(id), 0) AS max_cycle_id,
+                    COALESCE(SUM(CASE WHEN status = 'CLOSED' THEN 1 ELSE 0 END), 0) AS closed_cycles,
+                    COALESCE(SUM(CASE WHEN status = 'CLOSED' THEN net_profit ELSE 0 END), 0) AS net_profit
+                FROM paper_cycles
+                WHERE strategy_profile = ?
+                """,
+                (strategy_profile,),
+            ).fetchone()
+
+        return {
+            "max_cycle_id": int(row[0]),
+            "closed_cycles": int(row[1]),
+            "net_profit": float(row[2]),
+        }
+
+    def load_new_paper_cycle_collection_stats(self, strategy_profile: str, baseline_max_id: int) -> dict[str, float | int]:
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT
+                    COALESCE(SUM(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') THEN 1 ELSE 0 END), 0) AS closed_cycles,
+                    COALESCE(SUM(CASE WHEN status = 'CLOSED' THEN 1 ELSE 0 END), 0) AS automatic_closed,
+                    COALESCE(SUM(CASE WHEN status = 'CLOSED_MANUAL' THEN 1 ELSE 0 END), 0) AS manual_closed,
+                    COALESCE(SUM(CASE WHEN status = 'CLOSED' AND close_reason = 'target' THEN 1 ELSE 0 END), 0) AS target_closed,
+                    COALESCE(SUM(CASE WHEN status = 'CLOSED' AND close_reason LIKE 'max_holding_%' THEN 1 ELSE 0 END), 0) AS timeout_closed,
+                    COALESCE(SUM(CASE WHEN status = 'OPEN' THEN 1 ELSE 0 END), 0) AS open_cycles,
+                    COALESCE(SUM(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') THEN net_profit ELSE 0 END), 0) AS net_profit,
+                    COALESCE(SUM(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') AND net_profit > 0 THEN 1 ELSE 0 END), 0) AS winning_cycles
+                FROM paper_cycles
+                WHERE strategy_profile = ? AND id > ?
+                """,
+                (strategy_profile, baseline_max_id),
+            ).fetchone()
+
+        closed_cycles = int(row[0])
+        winning_cycles = int(row[7])
+        return {
+            "closed_cycles": closed_cycles,
+            "automatic_closed": int(row[1]),
+            "manual_closed": int(row[2]),
+            "target_closed": int(row[3]),
+            "timeout_closed": int(row[4]),
+            "open_cycles": int(row[5]),
+            "net_profit": float(row[6]),
+            "winning_cycles": winning_cycles,
+            "win_rate": (winning_cycles / closed_cycles) if closed_cycles else 0.0,
+        }
+
     def save_long_paper_run(
         self,
         *,
