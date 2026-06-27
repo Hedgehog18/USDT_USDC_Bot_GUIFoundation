@@ -27,6 +27,7 @@ class PaperTradingRunResult:
     final_portfolio: PaperPortfolio
     data_source: str = "UNKNOWN"
     safety_stop_reason: str | None = None
+    safety_diagnostics: dict[str, str] | None = None
 
 
 class PaperTradingEngine:
@@ -47,6 +48,7 @@ class PaperTradingEngine:
         close_debug_callback: Callable[[dict], None] | None = None,
         force_refresh_market_data: bool = False,
         strategy_profile: str = "strict_current",
+        safety_baseline_max_id: int = 0,
     ) -> None:
         self.config = config
         self.database = database
@@ -67,6 +69,7 @@ class PaperTradingEngine:
         self.close_debug_callback = close_debug_callback
         self.force_refresh_market_data = force_refresh_market_data
         self.strategy_profile = strategy_profile
+        self.safety_baseline_max_id = safety_baseline_max_id
 
     def run(self, iterations: int) -> PaperTradingRunResult:
         if iterations <= 0:
@@ -82,6 +85,7 @@ class PaperTradingEngine:
         closed = 0
         safety_stops = 0
         safety_stop_reason = None
+        safety_diagnostics = None
 
         for index in range(iterations):
             if self.force_refresh_market_data:
@@ -112,8 +116,14 @@ class PaperTradingEngine:
 
             portfolio = self.portfolio_manager.get_portfolio(market_state.price)
 
-            recent_cycles = self.database.load_recent_paper_cycles(limit=20)
-            safety = self.safety_engine.check(portfolio, recent_cycles)
+            recent_cycles = self._load_safety_cycles()
+            safety = self.safety_engine.check_for_profile(
+                portfolio,
+                recent_cycles,
+                strategy_profile=self.strategy_profile,
+                baseline_max_id=self.safety_baseline_max_id,
+            )
+            safety_diagnostics = safety.diagnostics
             self.database.save_paper_safety_event(safety, portfolio.total_value)
 
             if not safety.allowed:
@@ -210,7 +220,17 @@ class PaperTradingEngine:
             final_portfolio=self.portfolio_manager.get_portfolio(),
             data_source=getattr(self.bot.market_analyzer, "last_data_source", "UNKNOWN"),
             safety_stop_reason=safety_stop_reason,
+            safety_diagnostics=safety_diagnostics,
         )
+
+    def _load_safety_cycles(self) -> list[tuple]:
+        if self.strategy_profile == "mean_reversion_hf_micro_v1":
+            return self.database.load_recent_paper_cycles_for_safety(
+                self.strategy_profile,
+                baseline_max_id=self.safety_baseline_max_id,
+                limit=500,
+            )
+        return self.database.load_recent_paper_cycles(limit=20)
 
     def _is_potential_entry_state(self, market_state) -> bool:
         return (

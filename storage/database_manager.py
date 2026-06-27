@@ -1307,6 +1307,26 @@ class DatabaseManager:
                 (strategy_profile, limit),
             ).fetchall()
 
+    def load_recent_paper_cycles_for_safety(
+        self,
+        strategy_profile: str,
+        *,
+        baseline_max_id: int = 0,
+        limit: int = 500,
+    ) -> list[tuple]:
+        with self.connect() as conn:
+            return conn.execute(
+                """
+                SELECT timestamp, cycle_id, direction, status, open_price, close_price,
+                       quantity, open_fee, close_fee, gross_profit, net_profit, close_reason
+                FROM paper_cycles
+                WHERE strategy_profile = ? AND id > ?
+                ORDER BY timestamp DESC
+                LIMIT ?
+                """,
+                (strategy_profile, baseline_max_id, limit),
+            ).fetchall()
+
 
     def save_paper_safety_event(self, result, portfolio_value: float) -> int:
         from datetime import datetime

@@ -3306,6 +3306,7 @@ def command_collect_closed_cycles(args) -> None:
             entry_zone_debug_callback=entry_debug_items.append,
             close_debug_callback=close_debug_items.append,
             strategy_profile=profile,
+            safety_baseline_max_id=baseline_max_id if use_new_target else 0,
         ).run(1)
         stats = database.load_paper_cycle_collection_stats(profile)
         new_stats = database.load_new_paper_cycle_collection_stats(profile, baseline_max_id) if use_new_target else None
@@ -3319,7 +3320,16 @@ def command_collect_closed_cycles(args) -> None:
             _apply_collection_paper_safety_block(
                 entry_diagnostics,
                 getattr(result, "safety_stop_reason", None),
+                getattr(result, "safety_diagnostics", None),
             )
+        else:
+            _apply_collection_policy_diagnostics(
+                entry_diagnostics,
+                getattr(result, "safety_diagnostics", None),
+            )
+            if getattr(result, "safety_diagnostics", None):
+                entry_diagnostics["safety_filter_passed"] = "yes"
+                entry_diagnostics["paper_safety_state"] = "passed"
         nearest_open_cycle = _nearest_collection_open_cycle(config, database, profile, price_info[0], price_info[1], price_info[2])
         if (
             _should_print_collection_iteration(iteration, args.print_every)
@@ -3417,6 +3427,13 @@ def _print_closed_cycle_collection_progress(
     parts.append(f"safety_block_reason: {entry_diagnostics['safety_block_reason']}")
     parts.append(f"safety_block_details: {entry_diagnostics['safety_block_details']}")
     parts.append(f"paper_safety_state: {entry_diagnostics['paper_safety_state']}")
+    parts.append(f"paper_safety_policy: {entry_diagnostics['paper_safety_policy']}")
+    parts.append(f"safety_window_scope: {entry_diagnostics['safety_window_scope']}")
+    parts.append(f"safety_window_cycles: {entry_diagnostics['safety_window_cycles']}")
+    parts.append(f"safety_consecutive_losses: {entry_diagnostics['safety_consecutive_losses']}")
+    parts.append(f"safety_realized_drawdown: {entry_diagnostics['safety_realized_drawdown']}")
+    parts.append(f"safety_timeout_loss_rate: {entry_diagnostics['safety_timeout_loss_rate']}")
+    parts.append(f"safety_min_cycles_met: {entry_diagnostics['safety_min_cycles_met']}")
     parts.append(f"balance_check_passed: {entry_diagnostics['balance_check_passed']}")
     parts.append(f"spread_check_passed: {entry_diagnostics['spread_check_passed']}")
     parts.append(f"cooldown_check_passed: {entry_diagnostics['cooldown_check_passed']}")
@@ -3526,6 +3543,13 @@ def _collection_entry_diagnostics(entry_debug_items: list[dict], fallback_market
         "safety_block_reason": "N/A",
         "safety_block_details": "N/A",
         "paper_safety_state": "N/A",
+        "paper_safety_policy": "N/A",
+        "safety_window_scope": "N/A",
+        "safety_window_cycles": "N/A",
+        "safety_consecutive_losses": "N/A",
+        "safety_realized_drawdown": "N/A",
+        "safety_timeout_loss_rate": "N/A",
+        "safety_min_cycles_met": "N/A",
         "balance_check_passed": "N/A",
         "spread_check_passed": "N/A",
         "cooldown_check_passed": "N/A",
@@ -3576,12 +3600,35 @@ def _apply_collection_short_center_diagnostics(diagnostics: dict[str, str], mark
         diagnostics["entry_block_reason"] = "no_short_center"
 
 
-def _apply_collection_paper_safety_block(diagnostics: dict[str, str], reason: str | None) -> None:
+def _apply_collection_paper_safety_block(
+    diagnostics: dict[str, str],
+    reason: str | None,
+    policy_diagnostics: dict[str, str] | None = None,
+) -> None:
     details = str(reason or "Paper safety stopped this iteration.")
     diagnostics["safety_filter_passed"] = "no"
     diagnostics["paper_safety_state"] = "blocked"
     diagnostics["safety_block_reason"] = _classify_paper_safety_reason(details)
     diagnostics["safety_block_details"] = details
+    _apply_collection_policy_diagnostics(diagnostics, policy_diagnostics)
+
+
+def _apply_collection_policy_diagnostics(
+    diagnostics: dict[str, str],
+    policy_diagnostics: dict[str, str] | None,
+) -> None:
+    if not policy_diagnostics:
+        return
+    for key in (
+        "paper_safety_policy",
+        "safety_window_scope",
+        "safety_window_cycles",
+        "safety_consecutive_losses",
+        "safety_realized_drawdown",
+        "safety_timeout_loss_rate",
+        "safety_min_cycles_met",
+    ):
+        diagnostics[key] = str(policy_diagnostics.get(key, "N/A"))
 
 
 def _apply_collection_safety_diagnostics(diagnostics: dict[str, str], item: dict) -> None:

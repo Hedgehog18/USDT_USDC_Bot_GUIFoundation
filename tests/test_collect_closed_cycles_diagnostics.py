@@ -102,12 +102,30 @@ def test_collection_entry_diagnostics_reports_existing_cycle_guard():
 def test_collection_paper_safety_block_sets_specific_diagnostics():
     diagnostics = _collection_entry_diagnostics([])
 
-    _apply_collection_paper_safety_block(diagnostics, "Last 3 paper cycles are losing cycles.")
+    _apply_collection_paper_safety_block(
+        diagnostics,
+        "Last 3 paper cycles are losing cycles.",
+        {
+            "paper_safety_policy": "hf_micro",
+            "safety_window_scope": "new_run",
+            "safety_window_cycles": "3",
+            "safety_consecutive_losses": "3 / 10",
+            "safety_realized_drawdown": "-0.00030000 / -0.00500000",
+            "safety_timeout_loss_rate": "66.67%",
+            "safety_min_cycles_met": "no",
+        },
+    )
 
     assert diagnostics["safety_filter_passed"] == "no"
     assert diagnostics["paper_safety_state"] == "blocked"
     assert diagnostics["safety_block_reason"] == "paper_max_losing_cycles"
     assert diagnostics["safety_block_details"] == "Last 3 paper cycles are losing cycles."
+    assert diagnostics["paper_safety_policy"] == "hf_micro"
+    assert diagnostics["safety_window_scope"] == "new_run"
+    assert diagnostics["safety_consecutive_losses"] == "3 / 10"
+    assert diagnostics["safety_realized_drawdown"] == "-0.00030000 / -0.00500000"
+    assert diagnostics["safety_timeout_loss_rate"] == "66.67%"
+    assert diagnostics["safety_min_cycles_met"] == "no"
 
 
 def test_collection_entry_diagnostics_reports_short_center_readiness():
@@ -236,6 +254,13 @@ def test_collection_progress_prints_empty_new_run(capsys):
         "safety_block_reason": "N/A",
         "safety_block_details": "N/A",
         "paper_safety_state": "N/A",
+        "paper_safety_policy": "hf_micro",
+        "safety_window_scope": "new_run",
+        "safety_window_cycles": "3",
+        "safety_consecutive_losses": "3 / 10",
+        "safety_realized_drawdown": "-0.00030000 / -0.00500000",
+        "safety_timeout_loss_rate": "66.67%",
+        "safety_min_cycles_met": "no",
         "balance_check_passed": "N/A",
         "spread_check_passed": "N/A",
         "cooldown_check_passed": "N/A",
@@ -263,5 +288,9 @@ def test_collection_progress_prints_empty_new_run(capsys):
     assert "target closed: 0" in output
     assert "timeout closed: 0" in output
     assert "safety_filter_passed: N/A" in output
+    assert "paper_safety_policy: hf_micro" in output
+    assert "safety_consecutive_losses: 3 / 10" in output
+    assert "safety_realized_drawdown: -0.00030000 / -0.00500000" in output
+    assert "safety_timeout_loss_rate: 66.67%" in output
     assert "cooldown_check_passed: N/A" in output
     assert "stale_price_check_passed: N/A" in output
