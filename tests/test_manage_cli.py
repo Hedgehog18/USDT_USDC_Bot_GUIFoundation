@@ -928,12 +928,14 @@ def test_manage_cli_has_micro_cycle_sim_command():
         "0.001",
         "--max-holding-seconds",
         "300",
+        "--show-cycles",
     ])
 
     assert args.command == "micro-cycle-sim"
     assert args.scenario == "short_term_mean_reversion"
     assert args.target == 0.001
     assert args.max_holding_seconds == 300.0
+    assert args.show_cycles is True
 
 
 def test_manage_cli_has_gui_command():

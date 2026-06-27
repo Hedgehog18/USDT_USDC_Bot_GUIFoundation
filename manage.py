@@ -2171,6 +2171,32 @@ def command_micro_cycle_sim(args) -> None:
             f"cycles/hour={result.cycles_per_hour:.2f} | cycles/day={result.estimated_cycles_per_day:.2f} | "
             f"score={result.recommendation_score:.4f}"
         )
+        print(
+            f"  target: net={result.target_net_profit:.8f} win_rate={result.target_win_rate * 100:.2f}% "
+            f"avg={result.target_avg_net:.8f} best={result.target_best_profit:.8f} "
+            f"worst={result.target_worst_loss:.8f}"
+        )
+        print(
+            f"  timeout: net={result.timeout_net_profit:.8f} win_rate={result.timeout_win_rate * 100:.2f}% "
+            f"avg={result.timeout_avg_net:.8f} best={result.timeout_best_profit:.8f} "
+            f"worst={result.timeout_worst_loss:.8f} profits={result.timeout_profit_count} "
+            f"losses={result.timeout_loss_count}"
+        )
+        print(
+            f"  risk: max_loss_streak={result.max_consecutive_losses} "
+            f"max_timeout_loss_streak={result.max_consecutive_timeout_losses} "
+            f"realized_drawdown={result.max_drawdown_by_realized_equity:.8f} "
+            f"worst_cycle={result.worst_realized_cycle:.8f} best_cycle={result.best_realized_cycle:.8f}"
+        )
+        print(
+            f"  distribution: positive={result.positive_cycles_count} negative={result.negative_cycles_count} "
+            f"breakeven={result.breakeven_cycles_count} "
+            f"top1_share={result.profit_share_from_top_1_cycle * 100:.2f}% "
+            f"top3_share={result.profit_share_from_top_3_cycles * 100:.2f}% "
+            f"top5_share={result.profit_share_from_top_5_cycles * 100:.2f}%"
+        )
+        if args.show_cycles:
+            _print_micro_cycle_details(result.cycles)
 
     print("")
     print("--- Summary Recommendation ---")
@@ -2195,6 +2221,34 @@ def _format_optional_seconds(value: float | None) -> str:
     if value is None:
         return "N/A"
     return f"{value:.2f}s"
+
+
+def _print_micro_cycle_details(cycles) -> None:
+    if not cycles:
+        print("  cycles: no closed simulated cycles.")
+        return
+
+    important = sorted(cycles, key=lambda cycle: cycle.net_profit)[:3]
+    important.extend(sorted(cycles, key=lambda cycle: cycle.net_profit, reverse=True)[:3])
+    important.extend(cycles[-5:])
+    seen = set()
+    selected = []
+    for cycle in important:
+        key = (cycle.opened_at, cycle.closed_at, cycle.direction, cycle.entry_price, cycle.exit_price)
+        if key in seen:
+            continue
+        seen.add(key)
+        selected.append(cycle)
+
+    print("  cycles:")
+    for cycle in selected:
+        print(
+            "    "
+            f"opened_at={cycle.opened_at} closed_at={cycle.closed_at} direction={cycle.direction} "
+            f"entry={cycle.entry_price:.8f} exit={cycle.exit_price:.8f} "
+            f"reason={cycle.close_reason} hold={cycle.holding_seconds:.2f}s "
+            f"net={cycle.net_profit:.8f} max_unrealized_loss={cycle.max_unrealized_loss:.8f}"
+        )
 
 
 def command_market_session_diagnostics(args) -> None:
@@ -4261,6 +4315,7 @@ def build_parser() -> argparse.ArgumentParser:
     micro_cycle_sim_parser.add_argument("--scenario", choices=MICRO_CYCLE_SCENARIOS, default=None)
     micro_cycle_sim_parser.add_argument("--target", type=float, choices=MICRO_CYCLE_TARGET_PERCENTS, default=None)
     micro_cycle_sim_parser.add_argument("--max-holding-seconds", type=float, default=None)
+    micro_cycle_sim_parser.add_argument("--show-cycles", action="store_true")
     micro_cycle_sim_parser.set_defaults(func=command_micro_cycle_sim)
 
     market_session_parser = subparsers.add_parser(

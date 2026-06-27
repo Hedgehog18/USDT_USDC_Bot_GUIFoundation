@@ -45,6 +45,30 @@ class MicroCycleSimulationResult:
     cycles_per_hour: float
     estimated_cycles_per_day: float
     recommendation_score: float
+    target_net_profit: float
+    target_win_rate: float
+    target_avg_net: float
+    target_best_profit: float
+    target_worst_loss: float
+    timeout_net_profit: float
+    timeout_win_rate: float
+    timeout_avg_net: float
+    timeout_best_profit: float
+    timeout_worst_loss: float
+    timeout_profit_count: int
+    timeout_loss_count: int
+    max_consecutive_losses: int
+    max_consecutive_timeout_losses: int
+    max_drawdown_by_realized_equity: float
+    worst_realized_cycle: float
+    best_realized_cycle: float
+    positive_cycles_count: int
+    negative_cycles_count: int
+    breakeven_cycles_count: int
+    profit_share_from_top_1_cycle: float
+    profit_share_from_top_3_cycles: float
+    profit_share_from_top_5_cycles: float
+    cycles: list["MicroCycleClosedCycle"]
 
 
 @dataclass(frozen=True)
@@ -54,6 +78,20 @@ class MicroCycleSimulationReport:
     recommendation: str
 
 
+@dataclass(frozen=True)
+class MicroCycleClosedCycle:
+    opened_at: str
+    closed_at: str
+    direction: str
+    entry_price: float
+    exit_price: float
+    close_reason: str
+    holding_seconds: float
+    gross_profit: float
+    net_profit: float
+    max_unrealized_loss: float
+
+
 @dataclass
 class _ActiveCycle:
     direction: str
@@ -61,6 +99,7 @@ class _ActiveCycle:
     target_price: float
     quantity: float
     opened_at: datetime | None
+    max_unrealized_loss: float = 0.0
 
 
 class MicroCycleSimulationEngine:
@@ -116,14 +155,9 @@ class MicroCycleSimulationEngine:
 
         active: _ActiveCycle | None = None
         cycles_opened = 0
-        closed_by_target = 0
-        closed_by_timeout = 0
         skipped_opportunities = 0
-        gross_profit = 0.0
-        net_profit = 0.0
-        wins = 0
-        holding_times: list[float] = []
         worst_unrealized_loss = 0.0
+        closed_cycles: list[MicroCycleClosedCycle] = []
 
         for index, row in enumerate(rows):
             if active is not None:
@@ -132,20 +166,13 @@ class MicroCycleSimulationEngine:
 
                 unrealized = self._profit(active, row["price"])
                 worst_unrealized_loss = min(worst_unrealized_loss, unrealized.net_profit)
+                active.max_unrealized_loss = min(active.max_unrealized_loss, unrealized.net_profit)
 
                 close_reason = self._close_reason(active, row, max_holding_seconds)
                 if close_reason is None:
                     continue
 
-                gross_profit += unrealized.gross_profit
-                net_profit += unrealized.net_profit
-                if unrealized.net_profit > 0:
-                    wins += 1
-                holding_times.append(self._holding_seconds(active.opened_at, row["parsed_timestamp"]))
-                if close_reason == "target":
-                    closed_by_target += 1
-                else:
-                    closed_by_timeout += 1
+                closed_cycles.append(self._closed_cycle(active, row, close_reason, unrealized))
                 active = None
                 continue
 
@@ -172,7 +199,13 @@ class MicroCycleSimulationEngine:
             )
             cycles_opened += 1
 
+        closed_by_target = sum(1 for cycle in closed_cycles if cycle.close_reason == "target")
+        closed_by_timeout = sum(1 for cycle in closed_cycles if cycle.close_reason == "timeout")
         closed_count = closed_by_target + closed_by_timeout
+        gross_profit = sum(cycle.gross_profit for cycle in closed_cycles)
+        net_profit = sum(cycle.net_profit for cycle in closed_cycles)
+        wins = sum(1 for cycle in closed_cycles if cycle.net_profit > 0)
+        holding_times = [cycle.holding_seconds for cycle in closed_cycles]
         opportunities = cycles_opened + skipped_opportunities
         span_hours = self._sample_span_hours(rows)
         cycles_per_hour = closed_count / span_hours if span_hours > 0 else 0.0
@@ -207,6 +240,34 @@ class MicroCycleSimulationEngine:
             cycles_per_hour=cycles_per_hour,
             estimated_cycles_per_day=cycles_per_hour * 24.0,
             recommendation_score=recommendation_score,
+            target_net_profit=self._net_profit_for(closed_cycles, "target"),
+            target_win_rate=self._win_rate_for(closed_cycles, "target"),
+            target_avg_net=self._avg_net_for(closed_cycles, "target"),
+            target_best_profit=self._best_profit_for(closed_cycles, "target"),
+            target_worst_loss=self._worst_loss_for(closed_cycles, "target"),
+            timeout_net_profit=self._net_profit_for(closed_cycles, "timeout"),
+            timeout_win_rate=self._win_rate_for(closed_cycles, "timeout"),
+            timeout_avg_net=self._avg_net_for(closed_cycles, "timeout"),
+            timeout_best_profit=self._best_profit_for(closed_cycles, "timeout"),
+            timeout_worst_loss=self._worst_loss_for(closed_cycles, "timeout"),
+            timeout_profit_count=sum(
+                1 for cycle in closed_cycles if cycle.close_reason == "timeout" and cycle.net_profit > 0
+            ),
+            timeout_loss_count=sum(
+                1 for cycle in closed_cycles if cycle.close_reason == "timeout" and cycle.net_profit < 0
+            ),
+            max_consecutive_losses=self._max_consecutive_losses(closed_cycles),
+            max_consecutive_timeout_losses=self._max_consecutive_timeout_losses(closed_cycles),
+            max_drawdown_by_realized_equity=self._max_drawdown(closed_cycles),
+            worst_realized_cycle=min((cycle.net_profit for cycle in closed_cycles), default=0.0),
+            best_realized_cycle=max((cycle.net_profit for cycle in closed_cycles), default=0.0),
+            positive_cycles_count=sum(1 for cycle in closed_cycles if cycle.net_profit > 0),
+            negative_cycles_count=sum(1 for cycle in closed_cycles if cycle.net_profit < 0),
+            breakeven_cycles_count=sum(1 for cycle in closed_cycles if cycle.net_profit == 0),
+            profit_share_from_top_1_cycle=self._profit_share(closed_cycles, 1),
+            profit_share_from_top_3_cycles=self._profit_share(closed_cycles, 3),
+            profit_share_from_top_5_cycles=self._profit_share(closed_cycles, 5),
+            cycles=closed_cycles,
         )
 
     def _direction_for_scenario(self, row: dict, index: int, scenario: str) -> str | None:
@@ -257,6 +318,20 @@ class MicroCycleSimulationEngine:
             use_taker_fee=True,
         )
 
+    def _closed_cycle(self, active: _ActiveCycle, row: dict, close_reason: str, profit) -> MicroCycleClosedCycle:
+        return MicroCycleClosedCycle(
+            opened_at=active.opened_at.isoformat() if active.opened_at else "",
+            closed_at=row["parsed_timestamp"].isoformat() if row["parsed_timestamp"] else "",
+            direction=active.direction,
+            entry_price=active.entry_price,
+            exit_price=row["price"],
+            close_reason=close_reason,
+            holding_seconds=self._holding_seconds(active.opened_at, row["parsed_timestamp"]),
+            gross_profit=profit.gross_profit,
+            net_profit=profit.net_profit,
+            max_unrealized_loss=active.max_unrealized_loss,
+        )
+
     def _basic_failures(self, row: dict) -> list[str]:
         failures = []
         if not (0.0 < row["spread"] <= self.config.max_allowed_spread):
@@ -266,6 +341,75 @@ class MicroCycleSimulationEngine:
         if row["volatility_regime"] == "EXTREME":
             failures.append("volatility_regime")
         return failures
+
+    @staticmethod
+    def _cycles_for_reason(
+        cycles: list[MicroCycleClosedCycle],
+        reason: str,
+    ) -> list[MicroCycleClosedCycle]:
+        return [cycle for cycle in cycles if cycle.close_reason == reason]
+
+    def _net_profit_for(self, cycles: list[MicroCycleClosedCycle], reason: str) -> float:
+        return sum(cycle.net_profit for cycle in self._cycles_for_reason(cycles, reason))
+
+    def _win_rate_for(self, cycles: list[MicroCycleClosedCycle], reason: str) -> float:
+        items = self._cycles_for_reason(cycles, reason)
+        return sum(1 for cycle in items if cycle.net_profit > 0) / len(items) if items else 0.0
+
+    def _avg_net_for(self, cycles: list[MicroCycleClosedCycle], reason: str) -> float:
+        items = self._cycles_for_reason(cycles, reason)
+        return sum(cycle.net_profit for cycle in items) / len(items) if items else 0.0
+
+    def _best_profit_for(self, cycles: list[MicroCycleClosedCycle], reason: str) -> float:
+        items = self._cycles_for_reason(cycles, reason)
+        return max((cycle.net_profit for cycle in items), default=0.0)
+
+    def _worst_loss_for(self, cycles: list[MicroCycleClosedCycle], reason: str) -> float:
+        items = self._cycles_for_reason(cycles, reason)
+        return min((cycle.net_profit for cycle in items), default=0.0)
+
+    @staticmethod
+    def _max_consecutive_losses(cycles: list[MicroCycleClosedCycle]) -> int:
+        max_streak = 0
+        current = 0
+        for cycle in cycles:
+            if cycle.net_profit < 0:
+                current += 1
+                max_streak = max(max_streak, current)
+            else:
+                current = 0
+        return max_streak
+
+    @staticmethod
+    def _max_consecutive_timeout_losses(cycles: list[MicroCycleClosedCycle]) -> int:
+        max_streak = 0
+        current = 0
+        for cycle in cycles:
+            if cycle.close_reason == "timeout" and cycle.net_profit < 0:
+                current += 1
+                max_streak = max(max_streak, current)
+            else:
+                current = 0
+        return max_streak
+
+    @staticmethod
+    def _max_drawdown(cycles: list[MicroCycleClosedCycle]) -> float:
+        equity = 0.0
+        peak = 0.0
+        max_drawdown = 0.0
+        for cycle in cycles:
+            equity += cycle.net_profit
+            peak = max(peak, equity)
+            max_drawdown = min(max_drawdown, equity - peak)
+        return max_drawdown
+
+    @staticmethod
+    def _profit_share(cycles: list[MicroCycleClosedCycle], top_count: int) -> float:
+        positive_profits = sorted((cycle.net_profit for cycle in cycles if cycle.net_profit > 0), reverse=True)
+        total_positive_profit = sum(positive_profits)
+        if total_positive_profit <= 0:
+            return 0.0
+        return sum(positive_profits[:top_count]) / total_positive_profit
 
     def _load_rows(self) -> list[dict]:
         with self.database.connect() as conn:
