@@ -157,6 +157,7 @@ class PaperTradingEngine:
                     "risk_reason": risk.reason,
                     "risk_check_evaluated": decision.action in {"BUY_USDC", "SELL_USDC"},
                     "order_attempted": order_attempted,
+                    "target_profit": decision.target_profit,
                     "data_source": getattr(self.bot.market_analyzer, "last_data_source", "UNKNOWN"),
                 })
             if self.decision_debug_callback and self._is_potential_entry_state(market_state):
@@ -223,13 +224,21 @@ class PaperTradingEngine:
             close_tolerance = self._close_tolerance_for_profile(strategy_profile)
             close_rounding_digits = self._close_rounding_digits_for_profile(strategy_profile)
             close_epsilon = self._close_epsilon_for_profile(strategy_profile)
-            close_condition_met = self.cycle_manager.can_close_cycle(
+            target_close_condition_met = self.cycle_manager.can_close_cycle(
                 cycle,
                 current_price,
                 tolerance=close_tolerance,
                 rounding_digits=close_rounding_digits,
                 close_epsilon=close_epsilon,
             )
+            max_holding_limit = self._max_holding_seconds_for_profile(strategy_profile)
+            cycle_age = self._cycle_age_seconds(cycle)
+            max_holding_condition_met = (
+                max_holding_limit is not None
+                and cycle_age >= max_holding_limit
+            )
+            close_condition_met = target_close_condition_met or max_holding_condition_met
+            close_reason = "target" if target_close_condition_met else self._max_holding_close_reason(strategy_profile)
 
             if not close_condition_met:
                 open_cycles_remaining = True
@@ -250,18 +259,24 @@ class PaperTradingEngine:
                     "close_tolerance": close_tolerance,
                     "close_rounding_digits": close_rounding_digits,
                     "close_condition_met": False,
+                    "target_close_condition_met": False,
+                    "max_holding_limit": max_holding_limit,
+                    "cycle_age": cycle_age,
+                    "max_holding_condition_met": False,
                     "close_attempted": False,
                     "close_result": "SKIPPED",
+                    "close_reason": None,
                     "reason": "Close condition is not met.",
                 })
                 continue
 
             closed_cycle = self.cycle_manager.close_cycle(cycle, current_price)
+            setattr(closed_cycle, "close_reason", close_reason)
             self.database.save_paper_cycle(closed_cycle, strategy_profile=strategy_profile)
             if closed_cycle.status == PaperCycleStatus.CLOSED:
                 closed_count += 1
                 result = "CLOSED"
-                reason = "Cycle closed successfully."
+                reason = f"Cycle closed successfully by {close_reason}."
             else:
                 result = closed_cycle.status.value
                 reason = "Close order was not filled."
@@ -283,8 +298,13 @@ class PaperTradingEngine:
                 "close_tolerance": close_tolerance,
                 "close_rounding_digits": close_rounding_digits,
                 "close_condition_met": True,
+                "target_close_condition_met": target_close_condition_met,
+                "max_holding_limit": max_holding_limit,
+                "cycle_age": cycle_age,
+                "max_holding_condition_met": max_holding_condition_met,
                 "close_attempted": True,
                 "close_result": result,
+                "close_reason": close_reason,
                 "reason": reason,
             })
 
@@ -335,6 +355,20 @@ class PaperTradingEngine:
         if strategy_profile == "mean_reversion_v2_small_target":
             return Decimal("0.00000010")
         return Decimal("0")
+
+    def _max_holding_seconds_for_profile(self, strategy_profile: str) -> float | None:
+        if strategy_profile == "mean_reversion_hf_micro_v1":
+            return 270.0
+        return None
+
+    def _max_holding_close_reason(self, strategy_profile: str) -> str | None:
+        if strategy_profile == "mean_reversion_hf_micro_v1":
+            return "max_holding_270s"
+        return None
+
+    @staticmethod
+    def _cycle_age_seconds(cycle: PaperCycle) -> float:
+        return max(0.0, (datetime.utcnow() - cycle.opened_at).total_seconds())
 
     @staticmethod
     def _close_debug_price_fields(

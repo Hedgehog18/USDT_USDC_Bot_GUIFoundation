@@ -2,7 +2,7 @@
 
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 
 from backtest.backtest_comparison_engine import BacktestComparisonEngine
@@ -3300,7 +3300,7 @@ def command_collect_closed_cycles(args) -> None:
                 price_info=price_info,
                 nearest_open_cycle=nearest_open_cycle,
                 action_taken=action_taken,
-                close_reason=_collection_close_reason(close_debug_items),
+                close_reason=_collection_close_reason(close_debug_items, profile),
                 entry_diagnostics=entry_diagnostics,
             )
 
@@ -3345,6 +3345,9 @@ def _print_closed_cycle_collection_progress(
             "unrealized_pnl: N/A",
             "close_epsilon: N/A",
             "close_condition_met: N/A",
+            "max_holding_limit: N/A",
+            "cycle_age: N/A",
+            "max_holding_condition_met: N/A",
         ])
     else:
         parts.extend([
@@ -3355,12 +3358,19 @@ def _print_closed_cycle_collection_progress(
             f"unrealized_pnl: {nearest_open_cycle.unrealized_pnl:.8f}",
             f"close_epsilon: {nearest_open_cycle.close_epsilon:.8f}",
             f"close_condition_met: {'yes' if nearest_open_cycle.close_condition_met else 'no'}",
+            f"max_holding_limit: {_format_optional_seconds(_collection_max_holding_limit(nearest_open_cycle.profile))}",
+            f"cycle_age: {_format_optional_seconds(_collection_cycle_age_seconds(nearest_open_cycle))}",
+            f"max_holding_condition_met: {'yes' if _collection_max_holding_condition_met(nearest_open_cycle) else 'no'}",
         ])
     parts.append(f"action_taken: {action_taken}")
     parts.append(f"close_reason: {close_reason}")
     parts.append(f"entry_attempt: {entry_diagnostics['entry_attempt']}")
     parts.append(f"candidate_detected: {entry_diagnostics['candidate_detected']}")
     parts.append(f"entry_block_reason: {entry_diagnostics['entry_block_reason']}")
+    parts.append(f"short_center: {entry_diagnostics['short_center']}")
+    parts.append(f"entry_direction: {entry_diagnostics['entry_direction']}")
+    parts.append(f"entry_target_price: {entry_diagnostics['target_price']}")
+    parts.append(f"entry_target_distance: {entry_diagnostics['target_distance']}")
     print(" | ".join(parts))
 
 
@@ -3388,15 +3398,17 @@ def _nearest_collection_open_cycle(config, database, profile: str, current_price
 
 
 def _collection_action_taken(before_stats: dict[str, float | int], after_stats: dict[str, float | int], result) -> str:
-    if int(after_stats["closed_cycles"]) > int(before_stats["closed_cycles"]) or result.closed_cycles > 0:
+    if int(after_stats["closed_cycles"]) > int(before_stats["closed_cycles"]):
         return "closed"
-    if result.opened_cycles > 0:
+    if int(after_stats["open_cycles"]) > int(before_stats["open_cycles"]) or result.opened_cycles > 0:
         return "opened"
     return "waiting"
 
 
-def _collection_close_reason(close_debug_items: list[dict]) -> str:
+def _collection_close_reason(close_debug_items: list[dict], profile: str) -> str:
     for item in reversed(close_debug_items):
+        if item.get("strategy_profile") != profile:
+            continue
         reason = item.get("close_reason")
         if reason:
             return str(reason)
@@ -3408,6 +3420,10 @@ def _collection_entry_diagnostics(entry_debug_items: list[dict]) -> dict[str, st
         "entry_attempt": "no",
         "candidate_detected": "no",
         "entry_block_reason": "no_signal",
+        "short_center": "N/A",
+        "entry_direction": "N/A",
+        "target_price": "N/A",
+        "target_distance": "N/A",
     }
     if not entry_debug_items:
         return diagnostics
@@ -3416,10 +3432,25 @@ def _collection_entry_diagnostics(entry_debug_items: list[dict]) -> dict[str, st
     action = item.get("action", "WAIT")
     candidate_detected = action in {"BUY_USDC", "SELL_USDC"}
     order_attempted = bool(item.get("order_attempted", False))
+    market_state = item.get("market_state")
 
     diagnostics["entry_attempt"] = "yes" if order_attempted else "no"
     diagnostics["candidate_detected"] = "yes" if candidate_detected else "no"
     diagnostics["entry_block_reason"] = _collection_entry_block_reason(item)
+    if market_state is not None:
+        short_center = getattr(market_state, "short_center", None)
+        price = getattr(market_state, "price", None)
+        diagnostics["short_center"] = _format_collection_float(short_center)
+        diagnostics["entry_direction"] = action if candidate_detected else "N/A"
+        if candidate_detected and price is not None:
+            target_profit = float(item.get("target_profit", 0.0) or 0.0)
+            target_price = (
+                price * (1.0 + target_profit)
+                if action == "BUY_USDC"
+                else price * (1.0 - target_profit)
+            )
+            diagnostics["target_price"] = _format_collection_float(target_price)
+            diagnostics["target_distance"] = _format_collection_float(abs(target_price - price))
     return diagnostics
 
 
@@ -3430,6 +3461,12 @@ def _collection_entry_block_reason(item: dict) -> str:
 
     if "already open" in reason:
         return "existing_cycle"
+    if "no_short_center" in reason:
+        return "no_short_center"
+    if "price_equals_short_center" in reason:
+        return "price_equals_short_center"
+    if "invalid_price" in reason:
+        return "invalid_price"
     if "outside new_york session" in reason:
         return "outside_session"
     if "price outside entry zones" in reason or "working corridor center" in reason:
@@ -3461,6 +3498,32 @@ def _should_print_collection_iteration(iteration: int, print_every: int) -> bool
 
 def _format_collection_float(value: float | None) -> str:
     return "N/A" if value is None else f"{value:.8f}"
+
+
+def _collection_max_holding_limit(profile: str) -> float | None:
+    if profile == "mean_reversion_hf_micro_v1":
+        return 270.0
+    return None
+
+
+def _collection_max_holding_condition_met(open_cycle) -> bool:
+    limit = _collection_max_holding_limit(open_cycle.profile)
+    if limit is None:
+        return False
+    return _collection_cycle_age_seconds(open_cycle) >= limit
+
+
+def _collection_cycle_age_seconds(open_cycle) -> float:
+    try:
+        opened_at = datetime.fromisoformat(open_cycle.opened_at)
+        now = (
+            datetime.now(tz=opened_at.tzinfo)
+            if opened_at.tzinfo
+            else datetime.now(timezone.utc).replace(tzinfo=None)
+        )
+        return max(0.0, (now - opened_at).total_seconds())
+    except (TypeError, ValueError):
+        return open_cycle.age_seconds
 
 
 def _beep_success() -> None:

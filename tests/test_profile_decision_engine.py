@@ -116,6 +116,43 @@ def test_profile_decision_engine_mean_reversion_v2_small_target_uses_v2_entry_ru
     assert decision.target_profit == test_config.target_profit * 0.25
 
 
+def test_profile_decision_engine_hf_micro_buy_when_price_below_short_center(test_config):
+    decision = StrategyProfileDecisionEngine(test_config, "mean_reversion_hf_micro_v1").make_decision(
+        _state(price=1.000005, short_center=1.0001, work_position=50.0, micro_trend="NEUTRAL")
+    )
+
+    assert decision.action == "BUY_USDC"
+    assert "mean_reversion_hf_micro_v1" in decision.reason
+    assert decision.target_profit == 0.000005
+
+
+def test_profile_decision_engine_hf_micro_sell_when_price_above_short_center(test_config):
+    decision = StrategyProfileDecisionEngine(test_config, "mean_reversion_hf_micro_v1").make_decision(
+        _state(price=1.000005, short_center=1.0, work_position=50.0, micro_trend="NEUTRAL")
+    )
+
+    assert decision.action == "SELL_USDC"
+    assert decision.target_profit == 0.000005
+
+
+def test_profile_decision_engine_hf_micro_waits_when_price_equals_short_center(test_config):
+    decision = StrategyProfileDecisionEngine(test_config, "mean_reversion_hf_micro_v1").make_decision(
+        _state(price=1.000005, short_center=1.000005)
+    )
+
+    assert decision.action == "WAIT"
+    assert "price_equals_short_center" in decision.reason
+
+
+def test_profile_decision_engine_hf_micro_waits_without_short_center(test_config):
+    decision = StrategyProfileDecisionEngine(test_config, "mean_reversion_hf_micro_v1").make_decision(
+        _state(price=1.000005, short_center=0.0)
+    )
+
+    assert decision.action == "WAIT"
+    assert "no_short_center" in decision.reason
+
+
 def test_profile_decision_engine_rejects_removed_experimental_profiles(test_config):
     for profile in [
         "mean_reversion_v2_small_target_ny",

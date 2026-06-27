@@ -1,4 +1,10 @@
-from manage import _collection_entry_diagnostics
+from types import SimpleNamespace
+
+from manage import (
+    _collection_action_taken,
+    _collection_close_reason,
+    _collection_entry_diagnostics,
+)
 
 
 def test_collection_entry_diagnostics_reports_outside_session():
@@ -11,11 +17,9 @@ def test_collection_entry_diagnostics_reports_outside_session():
         }
     ])
 
-    assert diagnostics == {
-        "entry_attempt": "no",
-        "candidate_detected": "no",
-        "entry_block_reason": "outside_session",
-    }
+    assert diagnostics["entry_attempt"] == "no"
+    assert diagnostics["candidate_detected"] == "no"
+    assert diagnostics["entry_block_reason"] == "outside_session"
 
 
 def test_collection_entry_diagnostics_reports_candidate_blocked_by_safety():
@@ -48,3 +52,19 @@ def test_collection_entry_diagnostics_reports_attempted_order():
     assert diagnostics["candidate_detected"] == "yes"
     assert diagnostics["entry_block_reason"] == "no_signal"
 
+
+def test_collection_action_taken_uses_profile_specific_stats():
+    before_stats = {"closed_cycles": 1, "open_cycles": 0}
+    after_stats = {"closed_cycles": 1, "open_cycles": 0}
+    result = SimpleNamespace(closed_cycles=1, opened_cycles=0)
+
+    assert _collection_action_taken(before_stats, after_stats, result) == "waiting"
+
+
+def test_collection_close_reason_filters_by_profile():
+    close_debug_items = [
+        {"strategy_profile": "other_profile", "close_reason": "target"},
+        {"strategy_profile": "mean_reversion_hf_micro_v1", "close_reason": "max_holding_270s"},
+    ]
+
+    assert _collection_close_reason(close_debug_items, "mean_reversion_hf_micro_v1") == "max_holding_270s"

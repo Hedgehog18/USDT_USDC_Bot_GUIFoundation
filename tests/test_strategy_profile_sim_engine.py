@@ -17,6 +17,8 @@ def _insert_snapshot(
     market_regime: str = "NORMAL",
     volatility_regime: str = "LOW",
     timestamp: str | None = None,
+    price: float = 1.0,
+    short_center: float = 1.0003,
 ) -> None:
     conn.execute(
         """
@@ -38,13 +40,13 @@ def _insert_snapshot(
         (
             timestamp or f"2026-01-01T00:0{index}:00",
             "USDCUSDT",
-            1.0,
+            price,
             0.9999,
             1.0001,
             spread,
             1.0003,
             work_position,
-            1.0003,
+            short_center,
             50.0,
             1.0001,
             50.0,
@@ -131,6 +133,22 @@ def test_strategy_profile_sim_mean_reversion_v2_uses_calibrated_zones(test_confi
     assert small_target.pass_count == v2.pass_count
     assert small_target.buy_candidates == v2.buy_candidates
     assert small_target.sell_candidates == v2.sell_candidates
+
+
+def test_strategy_profile_sim_hf_micro_uses_price_vs_short_center(test_config, tmp_path):
+    database = DatabaseManager(str(tmp_path / "bot.sqlite"))
+    with database.connect() as conn:
+        _insert_snapshot(conn, 0, 50.0, "LOW", "BALANCED", "NEUTRAL", price=1.0, short_center=1.0001)
+        _insert_snapshot(conn, 1, 50.0, "LOW", "BALANCED", "NEUTRAL", price=1.0001, short_center=1.0)
+        _insert_snapshot(conn, 2, 50.0, "LOW", "BALANCED", "NEUTRAL", price=1.0, short_center=1.0)
+        conn.commit()
+
+    report = StrategyProfileSimulationEngine(database, test_config).build_report("mean_reversion_hf_micro_v1")
+
+    assert report.total_entry_zone_samples == 2
+    assert report.pass_count == 2
+    assert report.buy_candidates == 1
+    assert report.sell_candidates == 1
 
 
 def test_strategy_profile_sim_rejects_unknown_profile(test_config, tmp_path):

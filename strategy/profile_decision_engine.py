@@ -7,11 +7,13 @@ from strategy.models import TradeDecision
 
 
 SMALL_TARGET_MULTIPLIER = 0.25
+HF_MICRO_TARGET_PROFIT = 0.000005
 SUPPORTED_RUNTIME_STRATEGY_PROFILES = (
     "strict_current",
     "mean_reversion_v1",
     "mean_reversion_v2",
     "mean_reversion_v2_small_target",
+    "mean_reversion_hf_micro_v1",
 )
 
 
@@ -38,6 +40,8 @@ class StrategyProfileDecisionEngine:
                 buy_zone_max=25.0,
                 sell_zone_min=75.0,
             )
+        if self.profile == "mean_reversion_hf_micro_v1":
+            return self._hf_micro_decision(market_state)
         return self._mean_reversion_decision(
             market_state,
             profile_name="mean_reversion_v1",
@@ -89,6 +93,47 @@ class StrategyProfileDecisionEngine:
 
         return self._decision("WAIT", f"{profile_name}: price outside entry zones", "LOW", 0.0)
 
+    def _hf_micro_decision(self, market_state: MarketState) -> TradeDecision:
+        profile_name = "mean_reversion_hf_micro_v1"
+        if not (0.0 < market_state.price):
+            return self._decision("WAIT", f"{profile_name}: invalid_price", "LOW", 0.0)
+
+        if not (0.0 < market_state.spread <= self.config.max_allowed_spread):
+            return self._decision("WAIT", f"{profile_name}: safety_filter spread invalid", "LOW", 0.0)
+
+        if (
+            market_state.market_health_score < self.config.min_market_health_score
+            or market_state.market_health_status == "UNHEALTHY"
+        ):
+            return self._decision("SAFE_WAIT", f"{profile_name}: safety_filter market health invalid", "LOW", 0.0)
+
+        if market_state.market_regime == "ABNORMAL":
+            return self._decision("SAFE_WAIT", f"{profile_name}: safety_filter abnormal market regime", "LOW", 0.0)
+
+        if market_state.volatility_regime == "EXTREME":
+            return self._decision("SAFE_WAIT", f"{profile_name}: safety_filter extreme volatility", "LOW", 0.0)
+
+        if market_state.short_center <= 0:
+            return self._decision("WAIT", f"{profile_name}: no_short_center", "LOW", 0.0)
+
+        if market_state.price < market_state.short_center:
+            return self._decision(
+                "BUY_USDC",
+                f"{profile_name}: price below short_center",
+                "MEDIUM",
+                self.config.min_cycle_prediction_score,
+            )
+
+        if market_state.price > market_state.short_center:
+            return self._decision(
+                "SELL_USDC",
+                f"{profile_name}: price above short_center",
+                "MEDIUM",
+                self.config.min_cycle_prediction_score,
+            )
+
+        return self._decision("WAIT", f"{profile_name}: price_equals_short_center", "LOW", 0.0)
+
     def _entry_score(self, market_state: MarketState) -> float:
         zone_depth = 100.0
         if self.config.buy_zone_max < market_state.work_position < self.config.sell_zone_min:
@@ -101,6 +146,8 @@ class StrategyProfileDecisionEngine:
             "mean_reversion_v2_small_target",
         }:
             target_profit *= SMALL_TARGET_MULTIPLIER
+        if self.profile == "mean_reversion_hf_micro_v1":
+            target_profit = HF_MICRO_TARGET_PROFIT
 
         return TradeDecision(
             action=action,

@@ -1216,6 +1216,7 @@ class DatabaseManager:
     def save_paper_cycle(self, cycle, strategy_profile: str = "UNKNOWN") -> int:
         from datetime import datetime
 
+        close_reason = getattr(cycle, "close_reason", None)
         with self.connect() as conn:
             if cycle.status.value != "OPEN":
                 cursor = conn.execute(
@@ -1223,7 +1224,7 @@ class DatabaseManager:
                     UPDATE paper_cycles
                     SET timestamp = ?, strategy_profile = ?, status = ?,
                         close_price = ?, close_fee = ?, gross_profit = ?,
-                        net_profit = ?, closed_at = ?
+                        net_profit = ?, closed_at = ?, close_reason = ?
                     WHERE id = ? AND status = 'OPEN'
                     """,
                     (
@@ -1235,6 +1236,7 @@ class DatabaseManager:
                         cycle.gross_profit,
                         cycle.net_profit,
                         cycle.closed_at.isoformat() if cycle.closed_at else None,
+                        close_reason,
                         cycle.id,
                     ),
                 )
@@ -1247,8 +1249,8 @@ class DatabaseManager:
                 INSERT INTO paper_cycles (
                     timestamp, cycle_id, strategy_profile, direction, status, open_price, close_price,
                     quantity, open_fee, close_fee, gross_profit, net_profit,
-                    opened_at, closed_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    opened_at, closed_at, close_reason
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     datetime.utcnow().isoformat(),
@@ -1265,6 +1267,7 @@ class DatabaseManager:
                     cycle.net_profit,
                     cycle.opened_at.isoformat(),
                     cycle.closed_at.isoformat() if cycle.closed_at else None,
+                    close_reason,
                 ),
             )
             row_id = int(cursor.lastrowid)

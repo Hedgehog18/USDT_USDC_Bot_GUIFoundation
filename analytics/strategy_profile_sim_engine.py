@@ -13,6 +13,7 @@ SUPPORTED_STRATEGY_PROFILES = (
     "mean_reversion_v1",
     "mean_reversion_v2",
     "mean_reversion_v2_small_target",
+    "mean_reversion_hf_micro_v1",
 )
 
 
@@ -108,14 +109,16 @@ class StrategyProfileSimulationEngine:
             "mean_reversion_v1",
             "mean_reversion_v2",
             "mean_reversion_v2_small_target",
+            "mean_reversion_hf_micro_v1",
         }:
             filters = {
                 "spread_stability": row["filters"]["spread_stability"],
                 "market_health": row["filters"]["market_health"],
                 "market_regime": row["filters"]["market_regime"],
                 "volatility_regime": row["filters"]["volatility_regime"],
-                "micro_trend": row["filters"]["micro_trend"],
             }
+            if profile != "mean_reversion_hf_micro_v1":
+                filters["micro_trend"] = row["filters"]["micro_trend"]
             return filters
         return dict(row["filters"])
 
@@ -125,8 +128,10 @@ class StrategyProfileSimulationEngine:
                 """
                 SELECT
                     timestamp,
+                    price,
                     work_position,
                     spread,
+                    short_center,
                     center_confidence,
                     market_regime,
                     order_book_pressure,
@@ -145,8 +150,10 @@ class StrategyProfileSimulationEngine:
         for row in rows:
             (
                 timestamp,
+                price,
                 work_position,
                 spread,
+                short_center,
                 center_confidence,
                 market_regime,
                 order_book_pressure,
@@ -160,8 +167,10 @@ class StrategyProfileSimulationEngine:
             position = self._float(work_position)
             result.append({
                 "timestamp": clean_display_text(timestamp),
+                "price": self._float(price),
                 "work_position": position,
                 "spread": self._float(spread),
+                "short_center": self._float(short_center),
                 "center_confidence": self._text(center_confidence),
                 "market_regime": self._text(market_regime),
                 "order_book_pressure": self._text(order_book_pressure),
@@ -175,7 +184,7 @@ class StrategyProfileSimulationEngine:
         return result
 
     def _evaluate_row(self, row: dict, profile: str) -> dict:
-        zone = self._zone(row["work_position"], profile)
+        zone = self._zone(row, profile)
         return {
             **row,
             "zone": zone,
@@ -196,7 +205,13 @@ class StrategyProfileSimulationEngine:
             },
         }
 
-    def _zone(self, work_position: float, profile: str) -> str:
+    def _zone(self, row: dict, profile: str) -> str:
+        if profile == "mean_reversion_hf_micro_v1":
+            if row["short_center"] <= 0 or row["price"] == row["short_center"]:
+                return "CENTER"
+            return "BUY" if row["price"] < row["short_center"] else "SELL"
+
+        work_position = row["work_position"]
         uses_v2_zones = profile in {
             "mean_reversion_v2",
             "mean_reversion_v2_small_target",

@@ -251,6 +251,23 @@ def test_manage_cli_paper_cycle_accepts_small_target_profile():
     assert args.profile == "mean_reversion_v2_small_target"
 
 
+def test_manage_cli_accepts_hf_micro_profile_for_paper_workflow_commands():
+    parser = build_parser()
+    commands = [
+        ["strategy-profile-sim", "--profile", "mean_reversion_hf_micro_v1"],
+        ["paper-cycle-sim", "--iterations", "3", "--profile", "mean_reversion_hf_micro_v1"],
+        ["long-paper-run", "--iterations", "10", "--interval", "1", "--profile", "mean_reversion_hf_micro_v1"],
+        ["collect-closed-cycles", "--profile", "mean_reversion_hf_micro_v1", "--target", "5"],
+        ["validation-summary", "--profile", "mean_reversion_hf_micro_v1"],
+        ["profile-performance-summary", "--profile", "mean_reversion_hf_micro_v1"],
+        ["exit-risk-diagnostics", "--profile", "mean_reversion_hf_micro_v1"],
+    ]
+
+    for command in commands:
+        args = parser.parse_args(command)
+        assert args.profile == "mean_reversion_hf_micro_v1"
+
+
 def test_manage_cli_has_collect_closed_cycles_command():
     parser = build_parser()
     args = parser.parse_args([
