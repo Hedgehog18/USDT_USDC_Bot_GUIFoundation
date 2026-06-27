@@ -3316,6 +3316,10 @@ def command_collect_closed_cycles(args) -> None:
         )
         if result.safety_stops:
             entry_diagnostics["entry_block_reason"] = "safety_filter"
+            _apply_collection_paper_safety_block(
+                entry_diagnostics,
+                getattr(result, "safety_stop_reason", None),
+            )
         nearest_open_cycle = _nearest_collection_open_cycle(config, database, profile, price_info[0], price_info[1], price_info[2])
         if (
             _should_print_collection_iteration(iteration, args.print_every)
@@ -3409,6 +3413,17 @@ def _print_closed_cycle_collection_progress(
     parts.append(f"entry_attempt: {entry_diagnostics['entry_attempt']}")
     parts.append(f"candidate_detected: {entry_diagnostics['candidate_detected']}")
     parts.append(f"entry_block_reason: {entry_diagnostics['entry_block_reason']}")
+    parts.append(f"safety_filter_passed: {entry_diagnostics['safety_filter_passed']}")
+    parts.append(f"safety_block_reason: {entry_diagnostics['safety_block_reason']}")
+    parts.append(f"safety_block_details: {entry_diagnostics['safety_block_details']}")
+    parts.append(f"paper_safety_state: {entry_diagnostics['paper_safety_state']}")
+    parts.append(f"balance_check_passed: {entry_diagnostics['balance_check_passed']}")
+    parts.append(f"spread_check_passed: {entry_diagnostics['spread_check_passed']}")
+    parts.append(f"cooldown_check_passed: {entry_diagnostics['cooldown_check_passed']}")
+    parts.append(f"open_cycle_check_passed: {entry_diagnostics['open_cycle_check_passed']}")
+    parts.append(f"duplicate_entry_check_passed: {entry_diagnostics['duplicate_entry_check_passed']}")
+    parts.append(f"max_open_cycles_check_passed: {entry_diagnostics['max_open_cycles_check_passed']}")
+    parts.append(f"stale_price_check_passed: {entry_diagnostics['stale_price_check_passed']}")
     parts.append(f"short_center: {entry_diagnostics['short_center']}")
     parts.append(f"short_center_samples: {entry_diagnostics['short_center_samples']}")
     parts.append(f"short_center_ready: {entry_diagnostics['short_center_ready']}")
@@ -3507,6 +3522,17 @@ def _collection_entry_diagnostics(entry_debug_items: list[dict], fallback_market
         "entry_direction": "N/A",
         "target_price": "N/A",
         "target_distance": "N/A",
+        "safety_filter_passed": "N/A",
+        "safety_block_reason": "N/A",
+        "safety_block_details": "N/A",
+        "paper_safety_state": "N/A",
+        "balance_check_passed": "N/A",
+        "spread_check_passed": "N/A",
+        "cooldown_check_passed": "N/A",
+        "open_cycle_check_passed": "N/A",
+        "duplicate_entry_check_passed": "N/A",
+        "max_open_cycles_check_passed": "N/A",
+        "stale_price_check_passed": "N/A",
     }
     if not entry_debug_items:
         if fallback_market_state is not None:
@@ -3522,6 +3548,7 @@ def _collection_entry_diagnostics(entry_debug_items: list[dict], fallback_market
     diagnostics["entry_attempt"] = "yes" if order_attempted else "no"
     diagnostics["candidate_detected"] = "yes" if candidate_detected else "no"
     diagnostics["entry_block_reason"] = _collection_entry_block_reason(item)
+    _apply_collection_safety_diagnostics(diagnostics, item)
     if market_state is not None:
         _apply_collection_short_center_diagnostics(diagnostics, market_state)
         price = getattr(market_state, "price", None)
@@ -3547,6 +3574,89 @@ def _apply_collection_short_center_diagnostics(diagnostics: dict[str, str], mark
     diagnostics["short_center_ready"] = "N/A" if ready is None else ("yes" if ready else "no")
     if ready is False:
         diagnostics["entry_block_reason"] = "no_short_center"
+
+
+def _apply_collection_paper_safety_block(diagnostics: dict[str, str], reason: str | None) -> None:
+    details = str(reason or "Paper safety stopped this iteration.")
+    diagnostics["safety_filter_passed"] = "no"
+    diagnostics["paper_safety_state"] = "blocked"
+    diagnostics["safety_block_reason"] = _classify_paper_safety_reason(details)
+    diagnostics["safety_block_details"] = details
+
+
+def _apply_collection_safety_diagnostics(diagnostics: dict[str, str], item: dict) -> None:
+    action = str(item.get("action", "WAIT"))
+    reason = str(item.get("reason", ""))
+    risk_reason = str(item.get("risk_reason", ""))
+    risk_allowed = bool(item.get("risk_allowed", False))
+    entry_block_reason = diagnostics.get("entry_block_reason", "no_signal")
+
+    if entry_block_reason == "existing_cycle":
+        diagnostics["safety_filter_passed"] = "no"
+        diagnostics["safety_block_reason"] = "existing_cycle"
+        diagnostics["safety_block_details"] = reason or risk_reason or "A paper cycle is already open."
+        diagnostics["open_cycle_check_passed"] = "no"
+        diagnostics["duplicate_entry_check_passed"] = "no"
+        diagnostics["max_open_cycles_check_passed"] = "no"
+        return
+
+    if action in {"BUY_USDC", "SELL_USDC"} and risk_allowed:
+        diagnostics["safety_filter_passed"] = "yes"
+        diagnostics["paper_safety_state"] = "passed"
+        diagnostics["balance_check_passed"] = "yes"
+        diagnostics["open_cycle_check_passed"] = "yes"
+        diagnostics["duplicate_entry_check_passed"] = "yes"
+        diagnostics["max_open_cycles_check_passed"] = "yes"
+        if reason:
+            diagnostics["spread_check_passed"] = "yes" if "spread invalid" not in reason.lower() else "no"
+        return
+
+    if entry_block_reason != "safety_filter":
+        return
+
+    details = risk_reason or reason or "Safety filter blocked entry."
+    diagnostics["safety_filter_passed"] = "no"
+    diagnostics["paper_safety_state"] = "passed"
+    diagnostics["safety_block_details"] = details
+
+    block_reason = _classify_collection_safety_block(reason, risk_reason)
+    diagnostics["safety_block_reason"] = block_reason
+    if block_reason == "spread_invalid":
+        diagnostics["spread_check_passed"] = "no"
+    elif block_reason in {"balance_or_reserve_check_failed", "budget_missing"}:
+        diagnostics["balance_check_passed"] = "no"
+
+
+def _classify_collection_safety_block(reason: str, risk_reason: str) -> str:
+    text = f"{reason} {risk_reason}".lower()
+    if "spread invalid" in text:
+        return "spread_invalid"
+    if "market health invalid" in text or "market health unhealthy" in text:
+        return "market_health_invalid"
+    if "abnormal market regime" in text:
+        return "abnormal_market_regime"
+    if "extreme volatility" in text:
+        return "extreme_volatility"
+    if "budget" in text or "бюдж" in text:
+        return "budget_missing"
+    if "reserve" in text or "резерв" in text:
+        return "balance_or_reserve_check_failed"
+    if "notional" in text:
+        return "min_notional_failed"
+    if "profit" in text or "прибут" in text or "rounding" in text:
+        return "risk_profitability_failed"
+    return "risk_manager_or_profile_safety"
+
+
+def _classify_paper_safety_reason(reason: str) -> str:
+    text = reason.lower()
+    if "drawdown" in text:
+        return "paper_max_drawdown"
+    if "portfolio" in text or "value" in text or "мінім" in text:
+        return "paper_min_portfolio_value"
+    if "cycles" in text or "cycle" in text:
+        return "paper_max_losing_cycles"
+    return "paper_safety_blocked"
 
 
 def _collection_entry_block_reason(item: dict) -> str:

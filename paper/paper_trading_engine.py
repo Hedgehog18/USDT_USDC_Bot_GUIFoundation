@@ -26,6 +26,7 @@ class PaperTradingRunResult:
     safety_stops: int
     final_portfolio: PaperPortfolio
     data_source: str = "UNKNOWN"
+    safety_stop_reason: str | None = None
 
 
 class PaperTradingEngine:
@@ -80,6 +81,7 @@ class PaperTradingEngine:
         opened = 0
         closed = 0
         safety_stops = 0
+        safety_stop_reason = None
 
         for index in range(iterations):
             if self.force_refresh_market_data:
@@ -116,6 +118,7 @@ class PaperTradingEngine:
 
             if not safety.allowed:
                 safety_stops += 1
+                safety_stop_reason = safety.reason
                 self.state_manager.transition_to(PaperState.SAFE_STOP, safety.reason)
                 break
 
@@ -206,6 +209,7 @@ class PaperTradingEngine:
             safety_stops=safety_stops,
             final_portfolio=self.portfolio_manager.get_portfolio(),
             data_source=getattr(self.bot.market_analyzer, "last_data_source", "UNKNOWN"),
+            safety_stop_reason=safety_stop_reason,
         )
 
     def _is_potential_entry_state(self, market_state) -> bool:
