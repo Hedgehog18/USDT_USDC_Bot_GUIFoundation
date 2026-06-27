@@ -29,6 +29,7 @@ from paper.paper_insights_engine import PaperInsightsEngine
 from paper.paper_insights_exporter import PaperInsightsExporter
 from paper.paper_report_exporter import PaperReportExporter
 from paper.paper_trading_engine import PaperTradingEngine
+from paper.hf_short_center_provider import HFShortCenterMarketAnalyzer
 from paper.long_paper_run_workflow import LongPaperRunWorkflow
 
 from app.app_logger import AppLogger
@@ -146,6 +147,8 @@ def _profile_decision_engine(config, profile: str):
 def _apply_profile_to_bot(bot: BotEngine, profile: str) -> BotEngine:
     if profile != "strict_current":
         bot.decision_engine = StrategyProfileDecisionEngine(bot.config, profile)
+    if profile == "mean_reversion_hf_micro_v1" and not isinstance(bot.market_analyzer, HFShortCenterMarketAnalyzer):
+        bot.market_analyzer = HFShortCenterMarketAnalyzer(bot.market_analyzer)
     return bot
 
 
@@ -3260,6 +3263,7 @@ def command_collect_closed_cycles(args) -> None:
             _beep_success()
         return
 
+    bot = _apply_profile_to_bot(BotEngine(), profile)
     iteration = 0
     while not _collection_target_reached(stats, new_stats, collection_target, new_mode=use_new_target):
         if args.max_iterations is not None and iteration >= args.max_iterations:
@@ -3293,7 +3297,6 @@ def command_collect_closed_cycles(args) -> None:
             continue
 
         before_stats = database.load_paper_cycle_collection_stats(profile)
-        bot = _apply_profile_to_bot(BotEngine(), profile)
         entry_debug_items: list[dict] = []
         close_debug_items: list[dict] = []
         result = PaperTradingEngine(
@@ -3307,7 +3310,12 @@ def command_collect_closed_cycles(args) -> None:
         stats = database.load_paper_cycle_collection_stats(profile)
         new_stats = database.load_new_paper_cycle_collection_stats(profile, baseline_max_id) if use_new_target else None
         action_taken = _collection_action_taken(before_stats, stats, result)
-        entry_diagnostics = _collection_entry_diagnostics(entry_debug_items)
+        entry_diagnostics = _collection_entry_diagnostics(
+            entry_debug_items,
+            fallback_market_state=getattr(bot.market_analyzer, "last_market_state", None),
+        )
+        if result.safety_stops:
+            entry_diagnostics["entry_block_reason"] = "safety_filter"
         nearest_open_cycle = _nearest_collection_open_cycle(config, database, profile, price_info[0], price_info[1], price_info[2])
         if (
             _should_print_collection_iteration(iteration, args.print_every)
@@ -3402,6 +3410,8 @@ def _print_closed_cycle_collection_progress(
     parts.append(f"candidate_detected: {entry_diagnostics['candidate_detected']}")
     parts.append(f"entry_block_reason: {entry_diagnostics['entry_block_reason']}")
     parts.append(f"short_center: {entry_diagnostics['short_center']}")
+    parts.append(f"short_center_samples: {entry_diagnostics['short_center_samples']}")
+    parts.append(f"short_center_ready: {entry_diagnostics['short_center_ready']}")
     parts.append(f"entry_direction: {entry_diagnostics['entry_direction']}")
     parts.append(f"entry_target_price: {entry_diagnostics['target_price']}")
     parts.append(f"entry_target_distance: {entry_diagnostics['target_distance']}")
@@ -3486,17 +3496,21 @@ def _collection_close_reason(close_debug_items: list[dict], profile: str) -> str
     return "N/A"
 
 
-def _collection_entry_diagnostics(entry_debug_items: list[dict]) -> dict[str, str]:
+def _collection_entry_diagnostics(entry_debug_items: list[dict], fallback_market_state=None) -> dict[str, str]:
     diagnostics = {
         "entry_attempt": "no",
         "candidate_detected": "no",
         "entry_block_reason": "no_signal",
         "short_center": "N/A",
+        "short_center_samples": "N/A",
+        "short_center_ready": "N/A",
         "entry_direction": "N/A",
         "target_price": "N/A",
         "target_distance": "N/A",
     }
     if not entry_debug_items:
+        if fallback_market_state is not None:
+            _apply_collection_short_center_diagnostics(diagnostics, fallback_market_state)
         return diagnostics
 
     item = entry_debug_items[-1]
@@ -3509,9 +3523,8 @@ def _collection_entry_diagnostics(entry_debug_items: list[dict]) -> dict[str, st
     diagnostics["candidate_detected"] = "yes" if candidate_detected else "no"
     diagnostics["entry_block_reason"] = _collection_entry_block_reason(item)
     if market_state is not None:
-        short_center = getattr(market_state, "short_center", None)
+        _apply_collection_short_center_diagnostics(diagnostics, market_state)
         price = getattr(market_state, "price", None)
-        diagnostics["short_center"] = _format_collection_float(short_center)
         diagnostics["entry_direction"] = action if candidate_detected else "N/A"
         if candidate_detected and price is not None:
             target_profit = float(item.get("target_profit", 0.0) or 0.0)
@@ -3523,6 +3536,17 @@ def _collection_entry_diagnostics(entry_debug_items: list[dict]) -> dict[str, st
             diagnostics["target_price"] = _format_collection_float(target_price)
             diagnostics["target_distance"] = _format_collection_float(abs(target_price - price))
     return diagnostics
+
+
+def _apply_collection_short_center_diagnostics(diagnostics: dict[str, str], market_state) -> None:
+    short_center = getattr(market_state, "short_center", None)
+    samples = getattr(market_state, "hf_short_center_samples", None)
+    ready = getattr(market_state, "hf_short_center_ready", None)
+    diagnostics["short_center"] = _format_collection_float(short_center)
+    diagnostics["short_center_samples"] = "N/A" if samples is None else str(samples)
+    diagnostics["short_center_ready"] = "N/A" if ready is None else ("yes" if ready else "no")
+    if ready is False:
+        diagnostics["entry_block_reason"] = "no_short_center"
 
 
 def _collection_entry_block_reason(item: dict) -> str:

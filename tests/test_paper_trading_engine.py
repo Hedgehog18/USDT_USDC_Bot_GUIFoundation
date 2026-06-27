@@ -94,6 +94,18 @@ class FakeProfileBot:
         self.risk_manager = RiskManager(config)
 
 
+class FakeSequenceProfileBot:
+    def __init__(self, config, prices: list[float]):
+        from paper.hf_short_center_provider import HFShortCenterMarketAnalyzer
+        from strategy.profile_decision_engine import StrategyProfileDecisionEngine
+        from strategy.risk_manager import RiskManager
+        from tests.test_hf_short_center_provider import SequenceAnalyzer
+
+        self.market_analyzer = HFShortCenterMarketAnalyzer(SequenceAnalyzer(prices))
+        self.decision_engine = StrategyProfileDecisionEngine(config, "mean_reversion_hf_micro_v1")
+        self.risk_manager = RiskManager(config)
+
+
 class FakeCache:
     def __init__(self):
         self.clear_count = 0
@@ -291,6 +303,79 @@ def test_paper_trading_engine_hf_profile_does_not_open_second_cycle(test_config,
     rows = database.load_open_paper_cycles(limit=10)
     assert result.opened_cycles == 1
     assert len(rows) == 1
+
+
+def test_paper_trading_engine_hf_profile_waits_for_short_center_samples(test_config, tmp_path: Path):
+    database = DatabaseManager(str(tmp_path / "bot.sqlite"))
+    bot = FakeSequenceProfileBot(test_config, prices=[1.0001] * 19)
+    entry_debug_items = []
+
+    result = PaperTradingEngine(
+        test_config,
+        database,
+        bot=bot,
+        entry_zone_debug_callback=entry_debug_items.append,
+        strategy_profile="mean_reversion_hf_micro_v1",
+    ).run(19)
+
+    rows = database.load_open_paper_cycles(limit=10)
+    assert result.opened_cycles == 0
+    assert rows == []
+    assert entry_debug_items[-1]["reason"].endswith("no_short_center")
+    assert entry_debug_items[-1]["market_state"].hf_short_center_samples == 19
+    assert entry_debug_items[-1]["market_state"].hf_short_center_ready is False
+
+
+def test_paper_trading_engine_hf_profile_opens_buy_after_short_center_ready(test_config, tmp_path: Path):
+    database = DatabaseManager(str(tmp_path / "bot.sqlite"))
+    bot = FakeSequenceProfileBot(test_config, prices=([1.0001] * 19) + [1.000005])
+    entry_debug_items = []
+
+    result = PaperTradingEngine(
+        test_config,
+        database,
+        bot=bot,
+        entry_zone_debug_callback=entry_debug_items.append,
+        strategy_profile="mean_reversion_hf_micro_v1",
+    ).run(20)
+
+    rows = database.load_open_paper_cycles(limit=10)
+    assert result.opened_cycles == 1
+    assert rows[0][4] == "BUY_USDC"
+    assert entry_debug_items[-1]["market_state"].hf_short_center_samples == 20
+    assert entry_debug_items[-1]["market_state"].hf_short_center_ready is True
+
+
+def test_paper_trading_engine_hf_profile_opens_sell_after_short_center_ready(test_config, tmp_path: Path):
+    database = DatabaseManager(str(tmp_path / "bot.sqlite"))
+    bot = FakeSequenceProfileBot(test_config, prices=([1.0001] * 19) + [1.0002])
+
+    result = PaperTradingEngine(
+        test_config,
+        database,
+        bot=bot,
+        strategy_profile="mean_reversion_hf_micro_v1",
+    ).run(20)
+
+    rows = database.load_open_paper_cycles(limit=10)
+    assert result.opened_cycles == 1
+    assert rows[0][4] == "SELL_USDC"
+
+
+def test_paper_trading_engine_hf_profile_waits_when_price_equals_short_center_after_ready(test_config, tmp_path: Path):
+    database = DatabaseManager(str(tmp_path / "bot.sqlite"))
+    bot = FakeSequenceProfileBot(test_config, prices=[1.0001] * 20)
+
+    result = PaperTradingEngine(
+        test_config,
+        database,
+        bot=bot,
+        strategy_profile="mean_reversion_hf_micro_v1",
+    ).run(20)
+
+    rows = database.load_open_paper_cycles(limit=10)
+    assert result.opened_cycles == 0
+    assert rows == []
 
 
 def test_paper_trading_engine_hf_profile_closes_buy_on_target(test_config, tmp_path: Path):

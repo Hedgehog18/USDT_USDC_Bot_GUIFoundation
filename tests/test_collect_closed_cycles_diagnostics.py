@@ -55,6 +55,48 @@ def test_collection_entry_diagnostics_reports_attempted_order():
     assert diagnostics["entry_block_reason"] == "no_signal"
 
 
+def test_collection_entry_diagnostics_reports_short_center_readiness():
+    market_state = SimpleNamespace(
+        short_center=1.0001,
+        price=1.0,
+        hf_short_center_samples=20,
+        hf_short_center_ready=True,
+    )
+
+    diagnostics = _collection_entry_diagnostics([
+        {
+            "action": "BUY_USDC",
+            "reason": "mean_reversion_hf_micro_v1: price below short_center",
+            "risk_allowed": True,
+            "order_attempted": True,
+            "target_profit": 0.000005,
+            "market_state": market_state,
+        }
+    ])
+
+    assert diagnostics["short_center"] == "1.00010000"
+    assert diagnostics["short_center_samples"] == "20"
+    assert diagnostics["short_center_ready"] == "yes"
+    assert diagnostics["entry_direction"] == "BUY_USDC"
+    assert diagnostics["target_price"] == "1.00000500"
+    assert diagnostics["target_distance"] == "0.00000500"
+
+
+def test_collection_entry_diagnostics_uses_fallback_short_center_state():
+    market_state = SimpleNamespace(
+        short_center=0.0,
+        hf_short_center_samples=12,
+        hf_short_center_ready=False,
+    )
+
+    diagnostics = _collection_entry_diagnostics([], fallback_market_state=market_state)
+
+    assert diagnostics["short_center"] == "0.00000000"
+    assert diagnostics["short_center_samples"] == "12"
+    assert diagnostics["short_center_ready"] == "no"
+    assert diagnostics["entry_block_reason"] == "no_short_center"
+
+
 def test_collection_action_taken_uses_profile_specific_stats():
     before_stats = {"closed_cycles": 1, "open_cycles": 0}
     after_stats = {"closed_cycles": 1, "open_cycles": 0}
@@ -130,6 +172,8 @@ def test_collection_progress_prints_empty_new_run(capsys):
         "candidate_detected": "no",
         "entry_block_reason": "no_signal",
         "short_center": "N/A",
+        "short_center_samples": "N/A",
+        "short_center_ready": "N/A",
         "entry_direction": "N/A",
         "target_price": "N/A",
         "target_distance": "N/A",

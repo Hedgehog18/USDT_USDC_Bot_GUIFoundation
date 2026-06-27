@@ -15,6 +15,7 @@ from paper.paper_insights_exporter import PaperInsightsExporter
 from paper.paper_report_exporter import PaperReportExporter
 from paper.paper_trading_engine import PaperTradingEngine
 from paper.paper_trading_engine import PaperTradingRunResult
+from paper.hf_short_center_provider import HFShortCenterMarketAnalyzer
 from storage.database_manager import DatabaseManager
 from strategy.profile_decision_engine import StrategyProfileDecisionEngine
 
@@ -61,6 +62,8 @@ class LongPaperRunWorkflow:
         if strategy_profile != "strict_current":
             bot = BotEngine()
             bot.decision_engine = StrategyProfileDecisionEngine(bot.config, strategy_profile)
+            if strategy_profile == "mean_reversion_hf_micro_v1":
+                bot.market_analyzer = HFShortCenterMarketAnalyzer(bot.market_analyzer)
 
         close_debug_kwargs = {}
         if close_debug_callback is not None:
