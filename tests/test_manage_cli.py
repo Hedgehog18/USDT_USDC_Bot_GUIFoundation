@@ -918,6 +918,24 @@ def test_manage_cli_has_high_frequency_dataset_summary_command():
     assert args.command == "high-frequency-dataset-summary"
 
 
+def test_manage_cli_has_micro_cycle_sim_command():
+    parser = build_parser()
+    args = parser.parse_args([
+        "micro-cycle-sim",
+        "--scenario",
+        "short_term_mean_reversion",
+        "--target",
+        "0.001",
+        "--max-holding-seconds",
+        "300",
+    ])
+
+    assert args.command == "micro-cycle-sim"
+    assert args.scenario == "short_term_mean_reversion"
+    assert args.target == 0.001
+    assert args.max_holding_seconds == 300.0
+
+
 def test_manage_cli_has_gui_command():
     parser = build_parser()
     args = parser.parse_args(["gui"])

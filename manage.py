@@ -72,6 +72,11 @@ from analytics.ml_dataset_coverage_engine import MLDatasetCoverageEngine
 from analytics.ml_dataset_exporter import MLDatasetExporter, SUPPORTED_DATASET_MODES
 from analytics.ml_dataset_summary_engine import MLDatasetSummaryEngine
 from analytics.micro_trend_sensitivity_engine import MicroTrendSensitivityEngine
+from analytics.micro_cycle_sim_engine import (
+    MICRO_CYCLE_SCENARIOS,
+    MICRO_CYCLE_TARGET_PERCENTS,
+    MicroCycleSimulationEngine,
+)
 from analytics.order_book_diagnostics_engine import OrderBookDiagnosticsEngine
 from analytics.order_book_rule_sim_engine import OrderBookRuleSimulationEngine
 from analytics.paper_open_cycle_diagnostics_engine import PaperOpenCycleDiagnosticsEngine
@@ -2123,6 +2128,73 @@ def _print_hf_distribution(title: str, rows: list[tuple[str, int]]) -> None:
         print("No data.")
     for name, count in rows:
         print(f"- {name}: {count}")
+
+
+def command_micro_cycle_sim(args) -> None:
+    config, _logger, database = build_context()
+    report = MicroCycleSimulationEngine(database, config).build_report(
+        scenario=args.scenario,
+        target_percent=args.target,
+        max_holding_seconds=args.max_holding_seconds,
+    )
+
+    print("=== High Frequency Micro Cycle Simulation ===")
+    print("Diagnostics only. No paper cycles, no orders, no runtime strategy changes.")
+    print(f"Symbol: {config.symbol}")
+    if args.scenario:
+        print(f"Scenario filter: {args.scenario}")
+    if args.target is not None:
+        print(f"Target filter: {args.target:.4f}%")
+    if args.max_holding_seconds is not None:
+        print(f"Max holding seconds: {args.max_holding_seconds:.2f}")
+    print("")
+
+    if not report.results:
+        print("No high-frequency snapshots available.")
+        print(f"Recommendation: {report.recommendation}")
+        return
+
+    for result in report.results:
+        avg_holding = _format_optional_seconds(result.average_holding_seconds)
+        median_holding = _format_optional_seconds(result.median_holding_seconds)
+        max_holding = _format_optional_seconds(result.max_holding_seconds_observed)
+        print(
+            f"{result.scenario} | target={result.target_percent:.4f}% | "
+            f"opened={result.cycles_opened} target_closed={result.closed_by_target} "
+            f"timeout_closed={result.closed_by_timeout} open_end={result.still_open_at_end} | "
+            f"win_rate={result.win_rate * 100:.2f}% | net={result.net_profit:.8f} | "
+            f"avg_net={result.average_net_per_cycle:.8f} | avg_hold={avg_holding} | "
+            f"median_hold={median_holding} | max_hold={max_holding} | "
+            f"worst_unrealized={result.worst_unrealized_loss:.8f} | "
+            f"skipped_active={result.skipped_opportunities_due_to_active_cycle} | "
+            f"used_rate={result.opportunities_used_rate * 100:.2f}% | "
+            f"cycles/hour={result.cycles_per_hour:.2f} | cycles/day={result.estimated_cycles_per_day:.2f} | "
+            f"score={result.recommendation_score:.4f}"
+        )
+
+    print("")
+    print("--- Summary Recommendation ---")
+    best = report.best_result
+    if best is None:
+        print("Best scenario: N/A")
+        print("Best target: N/A")
+        print("Best result: N/A")
+    else:
+        print(f"Best scenario: {best.scenario}")
+        print(f"Best target: {best.target_percent:.4f}%")
+        print(
+            "Best result: "
+            f"cycles/day={best.estimated_cycles_per_day:.2f}, "
+            f"net_profit={best.net_profit:.8f}, "
+            f"average_holding={_format_optional_seconds(best.average_holding_seconds)}"
+        )
+    print(f"Recommendation: {report.recommendation}")
+
+
+def _format_optional_seconds(value: float | None) -> str:
+    if value is None:
+        return "N/A"
+    return f"{value:.2f}s"
 
 
 def command_market_session_diagnostics(args) -> None:
@@ -4181,6 +4253,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Summarize collected high-frequency market snapshots",
     )
     hf_dataset_summary_parser.set_defaults(func=command_high_frequency_dataset_summary)
+
+    micro_cycle_sim_parser = subparsers.add_parser(
+        "micro-cycle-sim",
+        help="Dry-run high-frequency micro-cycle simulation over collected HF snapshots",
+    )
+    micro_cycle_sim_parser.add_argument("--scenario", choices=MICRO_CYCLE_SCENARIOS, default=None)
+    micro_cycle_sim_parser.add_argument("--target", type=float, choices=MICRO_CYCLE_TARGET_PERCENTS, default=None)
+    micro_cycle_sim_parser.add_argument("--max-holding-seconds", type=float, default=None)
+    micro_cycle_sim_parser.set_defaults(func=command_micro_cycle_sim)
 
     market_session_parser = subparsers.add_parser(
         "market-session-diagnostics",
