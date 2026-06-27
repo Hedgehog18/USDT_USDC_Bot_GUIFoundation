@@ -129,7 +129,8 @@
 | `collect-market-snapshots` | Збирає live HF market snapshots у `market_snapshots_hf` без торгівлі та paper cycles. | `python manage.py collect-market-snapshots --duration-hours 24 --interval 5` |
 | `high-frequency-dataset-summary` | Показує summary для HF dataset: snapshots, micro-entry count, blockers, distributions. | `python manage.py high-frequency-dataset-summary` |
 | `high-frequency-diagnostics` | Оцінює high-frequency потенціал по HF або звичайних market snapshots. | `python manage.py high-frequency-diagnostics` |
-| `micro-cycle-sim` | Dry-run симулятор micro-cycles по HF snapshots з одним active cycle одночасно. | `python manage.py micro-cycle-sim --scenario short_term_mean_reversion --target 0.001 --max-holding-seconds 300` |
+| `micro-cycle-sim` | Dry-run симулятор micro-cycles по HF snapshots з одним active cycle одночасно. `--target` приймає будь-яке додатне decimal значення у відсотках. | `python manage.py micro-cycle-sim --scenario short_term_mean_reversion --target 0.0005 --max-holding-seconds 180` |
+| `micro-cycle-grid-search` | Автоматичний dry-run grid search по scenario, target і max holding для пошуку high-frequency micro-cycle параметрів. | `python manage.py micro-cycle-grid-search --scenario short_term_mean_reversion --top 20 --export-csv reports/micro_cycle_grid_search.csv` |
 
 ## ML research
 
@@ -146,4 +147,3 @@
 |---|---|---|
 | `notifications` | Показує останні notifications. | `python manage.py notifications --limit 20` |
 | `audit` | Показує останні audit записи. | `python manage.py audit --limit 20` |
-

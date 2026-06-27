@@ -1,3 +1,5 @@
+import pytest
+
 from manage import build_parser
 
 
@@ -936,6 +938,53 @@ def test_manage_cli_has_micro_cycle_sim_command():
     assert args.target == 0.001
     assert args.max_holding_seconds == 300.0
     assert args.show_cycles is True
+
+
+def test_manage_cli_micro_cycle_sim_accepts_custom_target():
+    parser = build_parser()
+    args = parser.parse_args([
+        "micro-cycle-sim",
+        "--scenario",
+        "short_term_mean_reversion",
+        "--target",
+        "0.0005",
+        "--max-holding-seconds",
+        "180",
+    ])
+
+    assert args.command == "micro-cycle-sim"
+    assert args.target == 0.0005
+
+
+def test_manage_cli_micro_cycle_sim_rejects_non_positive_target():
+    parser = build_parser()
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["micro-cycle-sim", "--target", "0"])
+
+
+def test_manage_cli_has_micro_cycle_grid_search_command():
+    parser = build_parser()
+    args = parser.parse_args([
+        "micro-cycle-grid-search",
+        "--scenario",
+        "short_term_mean_reversion",
+        "--top",
+        "20",
+        "--min-cycles-day",
+        "100",
+        "--max-drawdown",
+        "0.005",
+        "--export-csv",
+        "reports/micro_cycle_grid_search.csv",
+    ])
+
+    assert args.command == "micro-cycle-grid-search"
+    assert args.scenario == "short_term_mean_reversion"
+    assert args.top == 20
+    assert args.min_cycles_day == 100.0
+    assert args.max_drawdown == 0.005
+    assert args.export_csv == "reports/micro_cycle_grid_search.csv"
 
 
 def test_manage_cli_has_gui_command():

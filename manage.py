@@ -3,6 +3,7 @@
 import sys
 import time
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 
 from backtest.backtest_comparison_engine import BacktestComparisonEngine
 from backtest.backtest_comparison_exporter import BacktestComparisonExporter
@@ -74,8 +75,11 @@ from analytics.ml_dataset_summary_engine import MLDatasetSummaryEngine
 from analytics.micro_trend_sensitivity_engine import MicroTrendSensitivityEngine
 from analytics.micro_cycle_sim_engine import (
     MICRO_CYCLE_SCENARIOS,
-    MICRO_CYCLE_TARGET_PERCENTS,
     MicroCycleSimulationEngine,
+)
+from analytics.micro_cycle_grid_search_engine import (
+    MICRO_CYCLE_GRID_SCENARIOS,
+    MicroCycleGridSearchEngine,
 )
 from analytics.order_book_diagnostics_engine import OrderBookDiagnosticsEngine
 from analytics.order_book_rule_sim_engine import OrderBookRuleSimulationEngine
@@ -113,6 +117,16 @@ def configure_utf8_stdio() -> None:
 
 def _parse_float_list(raw: str) -> list[float]:
     return [float(item.strip()) for item in raw.split(",") if item.strip()]
+
+
+def _positive_decimal_float(raw: str) -> float:
+    try:
+        value = Decimal(raw)
+    except (InvalidOperation, ValueError) as exc:
+        raise argparse.ArgumentTypeError("value must be a positive decimal number.") from exc
+    if not value.is_finite() or value <= 0:
+        raise argparse.ArgumentTypeError("value must be greater than 0.")
+    return float(value)
 
 
 def build_context():
@@ -2144,7 +2158,7 @@ def command_micro_cycle_sim(args) -> None:
     if args.scenario:
         print(f"Scenario filter: {args.scenario}")
     if args.target is not None:
-        print(f"Target filter: {args.target:.4f}%")
+        print(f"Target filter: {args.target:.5f}%")
     if args.max_holding_seconds is not None:
         print(f"Max holding seconds: {args.max_holding_seconds:.2f}")
     print("")
@@ -2159,7 +2173,7 @@ def command_micro_cycle_sim(args) -> None:
         median_holding = _format_optional_seconds(result.median_holding_seconds)
         max_holding = _format_optional_seconds(result.max_holding_seconds_observed)
         print(
-            f"{result.scenario} | target={result.target_percent:.4f}% | "
+            f"{result.scenario} | target={result.target_percent:.5f}% | "
             f"opened={result.cycles_opened} target_closed={result.closed_by_target} "
             f"timeout_closed={result.closed_by_timeout} open_end={result.still_open_at_end} | "
             f"win_rate={result.win_rate * 100:.2f}% | net={result.net_profit:.8f} | "
@@ -2207,7 +2221,7 @@ def command_micro_cycle_sim(args) -> None:
         print("Best result: N/A")
     else:
         print(f"Best scenario: {best.scenario}")
-        print(f"Best target: {best.target_percent:.4f}%")
+        print(f"Best target: {best.target_percent:.5f}%")
         print(
             "Best result: "
             f"cycles/day={best.estimated_cycles_per_day:.2f}, "
@@ -2249,6 +2263,58 @@ def _print_micro_cycle_details(cycles) -> None:
             f"reason={cycle.close_reason} hold={cycle.holding_seconds:.2f}s "
             f"net={cycle.net_profit:.8f} max_unrealized_loss={cycle.max_unrealized_loss:.8f}"
         )
+
+
+def command_micro_cycle_grid_search(args) -> None:
+    config, _logger, database = build_context()
+    engine = MicroCycleGridSearchEngine(database, config)
+    report = engine.run(
+        scenario=args.scenario,
+        min_cycles_day=args.min_cycles_day,
+        max_drawdown=args.max_drawdown,
+        top=args.top,
+    )
+
+    if args.export_csv:
+        output_path = engine.export_csv(args.export_csv, report.results)
+        print(f"CSV exported: {output_path}")
+
+    print("=== Micro Cycle Grid Search ===")
+    print("Diagnostics only. No paper cycles, no orders, no runtime strategy changes.")
+    print(f"Total combinations: {report.total_results}")
+    if args.scenario:
+        print(f"Scenario filter: {args.scenario}")
+    print(f"Top size: {args.top}")
+    print("")
+
+    _print_micro_cycle_grid_section("Top by recommendation score", report.top_by_score, engine)
+    _print_micro_cycle_grid_section("Top by net profit", report.top_by_net_profit, engine)
+    _print_micro_cycle_grid_section("Top by cycles/day with positive net", report.top_by_cycles_per_day, engine)
+    _print_micro_cycle_grid_section("Best balanced candidates", report.balanced_candidates, engine)
+
+
+def _print_micro_cycle_grid_section(title: str, rows, engine: MicroCycleGridSearchEngine) -> None:
+    print(f"--- {title} ---")
+    if not rows:
+        print("No matching candidates.")
+        print("")
+        return
+    for item in rows:
+        print(
+            f"{item.scenario} | target={item.target_percent:.5f}% | "
+            f"max_hold={item.max_holding_seconds:.0f}s | opened={item.cycles_opened} | "
+            f"target={item.closed_by_target} timeout={item.closed_by_timeout} open_end={item.still_open_at_end} | "
+            f"win={item.win_rate * 100:.2f}% | net={item.net_profit:.8f} | "
+            f"avg_net={item.average_net_per_cycle:.8f} | avg_hold={_format_optional_seconds(item.average_holding_seconds)} | "
+            f"median_hold={_format_optional_seconds(item.median_holding_seconds)} | "
+            f"cycles/day={item.estimated_cycles_per_day:.2f} | drawdown={item.max_drawdown_by_realized_equity:.8f} | "
+            f"timeout_net={item.timeout_net_profit:.8f} | timeout_avg={item.timeout_avg_net:.8f} | "
+            f"timeout_losses={item.timeout_loss_count} | loss_streak={item.max_consecutive_losses} | "
+            f"timeout_loss_streak={item.max_consecutive_timeout_losses} | "
+            f"top5_share={item.profit_share_from_top_5_cycles * 100:.2f}% | "
+            f"recommendation={engine.recommendation_for(item)} | score={item.recommendation_score:.4f}"
+        )
+    print("")
 
 
 def command_market_session_diagnostics(args) -> None:
@@ -4313,10 +4379,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="Dry-run high-frequency micro-cycle simulation over collected HF snapshots",
     )
     micro_cycle_sim_parser.add_argument("--scenario", choices=MICRO_CYCLE_SCENARIOS, default=None)
-    micro_cycle_sim_parser.add_argument("--target", type=float, choices=MICRO_CYCLE_TARGET_PERCENTS, default=None)
+    micro_cycle_sim_parser.add_argument("--target", type=_positive_decimal_float, default=None)
     micro_cycle_sim_parser.add_argument("--max-holding-seconds", type=float, default=None)
     micro_cycle_sim_parser.add_argument("--show-cycles", action="store_true")
     micro_cycle_sim_parser.set_defaults(func=command_micro_cycle_sim)
+
+    micro_cycle_grid_search_parser = subparsers.add_parser(
+        "micro-cycle-grid-search",
+        help="Run diagnostics-only grid search over HF micro-cycle parameters",
+    )
+    micro_cycle_grid_search_parser.add_argument("--top", type=int, default=20)
+    micro_cycle_grid_search_parser.add_argument("--scenario", choices=MICRO_CYCLE_GRID_SCENARIOS, default=None)
+    micro_cycle_grid_search_parser.add_argument("--min-cycles-day", type=float, default=100.0)
+    micro_cycle_grid_search_parser.add_argument("--max-drawdown", type=float, default=0.005)
+    micro_cycle_grid_search_parser.add_argument("--export-csv", default=None)
+    micro_cycle_grid_search_parser.set_defaults(func=command_micro_cycle_grid_search)
 
     market_session_parser = subparsers.add_parser(
         "market-session-diagnostics",
