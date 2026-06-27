@@ -85,22 +85,14 @@ class PaperTradingEngine:
             if self.force_refresh_market_data:
                 self._clear_market_data_cache()
             market_state = self.bot.market_analyzer.analyze_market()
-            portfolio = self.portfolio_manager.get_portfolio(market_state.price)
-
-            recent_cycles = self.database.load_recent_paper_cycles(limit=20)
-            safety = self.safety_engine.check(portfolio, recent_cycles)
-            self.database.save_paper_safety_event(safety, portfolio.total_value)
-
-            if not safety.allowed:
-                safety_stops += 1
-                self.state_manager.transition_to(PaperState.SAFE_STOP, safety.reason)
-                break
 
             closed_from_database, has_database_open_cycles = self._process_database_open_cycles(
                 current_price=market_state.price,
                 index=index,
             )
             closed += closed_from_database
+            if closed_from_database > 0:
+                continue
             if has_database_open_cycles:
                 if self.entry_zone_debug_callback:
                     self.entry_zone_debug_callback({
@@ -115,6 +107,17 @@ class PaperTradingEngine:
                         "data_source": getattr(self.bot.market_analyzer, "last_data_source", "UNKNOWN"),
                     })
                 continue
+
+            portfolio = self.portfolio_manager.get_portfolio(market_state.price)
+
+            recent_cycles = self.database.load_recent_paper_cycles(limit=20)
+            safety = self.safety_engine.check(portfolio, recent_cycles)
+            self.database.save_paper_safety_event(safety, portfolio.total_value)
+
+            if not safety.allowed:
+                safety_stops += 1
+                self.state_manager.transition_to(PaperState.SAFE_STOP, safety.reason)
+                break
 
             if self.cycle_manager.has_active_cycle():
                 if self.entry_zone_debug_callback:

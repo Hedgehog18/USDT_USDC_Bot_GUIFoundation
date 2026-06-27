@@ -61,6 +61,14 @@ def test_collection_action_taken_uses_profile_specific_stats():
     assert _collection_action_taken(before_stats, after_stats, result) == "waiting"
 
 
+def test_collection_action_taken_reports_profile_close():
+    before_stats = {"closed_cycles": 0, "open_cycles": 1}
+    after_stats = {"closed_cycles": 1, "open_cycles": 0}
+    result = SimpleNamespace(closed_cycles=1, opened_cycles=0)
+
+    assert _collection_action_taken(before_stats, after_stats, result) == "closed"
+
+
 def test_collection_close_reason_filters_by_profile():
     close_debug_items = [
         {"strategy_profile": "other_profile", "close_reason": "target"},

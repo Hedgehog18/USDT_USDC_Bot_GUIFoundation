@@ -403,3 +403,117 @@ def test_paper_trading_engine_hf_profile_closes_after_270s_timeout(test_config, 
     assert close_debug_items[0]["max_holding_condition_met"] is True
     assert close_debug_items[0]["max_holding_limit"] == 270.0
     assert close_debug_items[0]["close_reason"] == "max_holding_270s"
+
+
+def test_paper_trading_engine_hf_profile_does_not_timeout_before_270s(test_config, tmp_path: Path):
+    from datetime import datetime, timedelta
+    from paper.models import PaperCycle, PaperCycleStatus, PaperOrderSide
+
+    database = DatabaseManager(str(tmp_path / "bot.sqlite"))
+    open_cycle = PaperCycle(
+        id=1,
+        direction=PaperOrderSide.BUY_USDC,
+        status=PaperCycleStatus.OPEN,
+        open_price=1.000005,
+        close_price=1.000500,
+        quantity=10.0,
+        open_fee=0.0,
+        close_fee=0.0,
+        gross_profit=0.0,
+        net_profit=0.0,
+        opened_at=datetime.utcnow() - timedelta(seconds=269),
+    )
+    row_id = database.save_paper_cycle(open_cycle, strategy_profile="mean_reversion_hf_micro_v1")
+    close_debug_items = []
+
+    result = PaperTradingEngine(
+        test_config,
+        database,
+        bot=FakeBot(price=1.000000),
+        close_debug_callback=close_debug_items.append,
+        strategy_profile="mean_reversion_hf_micro_v1",
+    ).run(1)
+
+    with database.connect() as conn:
+        row = conn.execute("SELECT status, close_reason FROM paper_cycles WHERE id = ?", (row_id,)).fetchone()
+
+    assert result.closed_cycles == 0
+    assert row == ("OPEN", None)
+    assert close_debug_items[0]["target_close_condition_met"] is False
+    assert close_debug_items[0]["max_holding_condition_met"] is False
+    assert close_debug_items[0]["close_reason"] is None
+
+
+def test_paper_trading_engine_hf_timeout_ignores_missing_short_center(test_config, tmp_path: Path):
+    from datetime import datetime, timedelta
+    from paper.models import PaperCycle, PaperCycleStatus, PaperOrderSide
+
+    database = DatabaseManager(str(tmp_path / "bot.sqlite"))
+    open_cycle = PaperCycle(
+        id=1,
+        direction=PaperOrderSide.SELL_USDC,
+        status=PaperCycleStatus.OPEN,
+        open_price=1.000005,
+        close_price=0.999500,
+        quantity=10.0,
+        open_fee=0.0,
+        close_fee=0.0,
+        gross_profit=0.0,
+        net_profit=0.0,
+        opened_at=datetime.utcnow() - timedelta(seconds=271),
+    )
+    row_id = database.save_paper_cycle(open_cycle, strategy_profile="mean_reversion_hf_micro_v1")
+    close_debug_items = []
+
+    result = PaperTradingEngine(
+        test_config,
+        database,
+        bot=FakeProfileBot(test_config, price=1.000000, short_center=0.0),
+        close_debug_callback=close_debug_items.append,
+        strategy_profile="mean_reversion_hf_micro_v1",
+    ).run(1)
+
+    with database.connect() as conn:
+        row = conn.execute("SELECT status, close_reason FROM paper_cycles WHERE id = ?", (row_id,)).fetchone()
+
+    assert result.closed_cycles == 1
+    assert row == ("CLOSED", "max_holding_270s")
+    assert close_debug_items[0]["max_holding_condition_met"] is True
+    assert close_debug_items[0]["close_reason"] == "max_holding_270s"
+
+
+def test_paper_trading_engine_hf_timeout_ignores_no_signal_entry_result(test_config, tmp_path: Path):
+    from datetime import datetime, timedelta
+    from paper.models import PaperCycle, PaperCycleStatus, PaperOrderSide
+
+    database = DatabaseManager(str(tmp_path / "bot.sqlite"))
+    open_cycle = PaperCycle(
+        id=1,
+        direction=PaperOrderSide.BUY_USDC,
+        status=PaperCycleStatus.OPEN,
+        open_price=1.000005,
+        close_price=1.000500,
+        quantity=10.0,
+        open_fee=0.0,
+        close_fee=0.0,
+        gross_profit=0.0,
+        net_profit=0.0,
+        opened_at=datetime.utcnow() - timedelta(seconds=271),
+    )
+    row_id = database.save_paper_cycle(open_cycle, strategy_profile="mean_reversion_hf_micro_v1")
+    entry_debug_items = []
+
+    result = PaperTradingEngine(
+        test_config,
+        database,
+        bot=FakeBot(price=1.000000),
+        entry_zone_debug_callback=entry_debug_items.append,
+        strategy_profile="mean_reversion_hf_micro_v1",
+    ).run(1)
+
+    with database.connect() as conn:
+        row = conn.execute("SELECT status, close_reason FROM paper_cycles WHERE id = ?", (row_id,)).fetchone()
+
+    assert result.closed_cycles == 1
+    assert row == ("CLOSED", "max_holding_270s")
+    assert entry_debug_items == []
