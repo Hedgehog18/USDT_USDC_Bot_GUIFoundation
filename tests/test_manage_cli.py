@@ -262,6 +262,7 @@ def test_manage_cli_accepts_hf_micro_profile_for_paper_workflow_commands():
         ["validation-summary", "--profile", "mean_reversion_hf_micro_v1"],
         ["profile-performance-summary", "--profile", "mean_reversion_hf_micro_v1"],
         ["paper-profit-concentration", "--profile", "mean_reversion_hf_micro_v1", "--since-id", "90"],
+        ["paper-outlier-validation", "--profile", "mean_reversion_hf_micro_v1", "--since-id", "90"],
         ["exit-risk-diagnostics", "--profile", "mean_reversion_hf_micro_v1"],
     ]
 
@@ -923,6 +924,21 @@ def test_manage_cli_paper_profit_concentration_accepts_profile_and_since_id():
     ])
 
     assert args.command == "paper-profit-concentration"
+    assert args.profile == "mean_reversion_hf_micro_v1"
+    assert args.since_id == 90
+
+
+def test_manage_cli_paper_outlier_validation_accepts_profile_and_since_id():
+    parser = build_parser()
+    args = parser.parse_args([
+        "paper-outlier-validation",
+        "--profile",
+        "mean_reversion_hf_micro_v1",
+        "--since-id",
+        "90",
+    ])
+
+    assert args.command == "paper-outlier-validation"
     assert args.profile == "mean_reversion_hf_micro_v1"
     assert args.since_id == 90
 

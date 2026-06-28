@@ -85,6 +85,7 @@ from analytics.micro_cycle_grid_search_engine import (
 from analytics.order_book_diagnostics_engine import OrderBookDiagnosticsEngine
 from analytics.order_book_rule_sim_engine import OrderBookRuleSimulationEngine
 from analytics.paper_open_cycle_diagnostics_engine import PaperOpenCycleDiagnosticsEngine
+from analytics.paper_outlier_validation_engine import PaperOutlierValidationEngine
 from analytics.paper_profit_concentration_engine import PaperProfitConcentrationEngine
 from analytics.partial_target_diagnostics_engine import PartialTargetDiagnosticsEngine
 from analytics.post_entry_path_diagnostics_engine import PostEntryPathDiagnosticsEngine
@@ -2784,6 +2785,50 @@ def command_paper_profit_concentration(args) -> None:
     print(f"Recommendation: {summary.recommendation}")
 
 
+def command_paper_outlier_validation(args) -> None:
+    _config, _logger, database = build_context()
+    summary = PaperOutlierValidationEngine(database).build_summary(
+        profile=args.profile,
+        since_id=args.since_id,
+    )
+
+    print("=== Paper Outlier Validation ===")
+    print(f"Profile: {summary.profile}")
+    print(f"Since id: {summary.since_id}")
+    print(f"Total cycles: {summary.total_cycles}")
+    if summary.total_cycles == 0:
+        print("No realized paper cycles available.")
+        print(f"Recommendation: {summary.recommendation}")
+        return
+
+    print(f"Total net: {summary.total_net:.8f}")
+    print(f"Best cycle net: {summary.best_cycle_net:.8f}")
+    print(f"Worst cycle net: {summary.worst_cycle_net:.8f}")
+    print(f"Median net: {summary.median_net:.8f}")
+    print(f"Trimmed net without top 1: {summary.trimmed_net_without_top_1:.8f}")
+    print(f"Trimmed net without top 3: {summary.trimmed_net_without_top_3:.8f}")
+    print(f"Trimmed net without top 5: {summary.trimmed_net_without_top_5:.8f}")
+    print(f"Winsorized net top 1 to median: {summary.winsorized_net_top_1_to_median:.8f}")
+    print(f"Winsorized net top 3 to median: {summary.winsorized_net_top_3_to_median:.8f}")
+    print(f"Positive cycles count: {summary.positive_cycles_count}")
+    print(f"Negative cycles count: {summary.negative_cycles_count}")
+    print(f"Breakeven cycles count: {summary.breakeven_cycles_count}")
+    print(f"Target closed count: {summary.target_closed_count}")
+    print(f"Timeout closed count: {summary.timeout_closed_count}")
+    print(f"Target net: {summary.target_net:.8f}")
+    print(f"Timeout net: {summary.timeout_net:.8f}")
+    print(
+        "Net without outliers positive: "
+        f"{'yes' if summary.net_without_outliers_positive_or_not else 'no'}"
+    )
+    print(f"Top 1 profit share: {summary.top1_profit_share * 100:.2f}%")
+    print(f"Top 5 profit share: {summary.top5_profit_share * 100:.2f}%")
+    print(f"Outlier risk: {summary.outlier_risk}")
+    if summary.total_cycles < 100:
+        print("Sample size warning: total cycles < 100.")
+    print(f"Recommendation: {summary.recommendation}")
+
+
 def _print_profile_cycle_summary(cycle) -> None:
     if cycle is None:
         print("- No realized cycles.")
@@ -4475,6 +4520,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="Only include paper cycles with database id greater than this value",
     )
     paper_profit_concentration_parser.set_defaults(func=command_paper_profit_concentration)
+
+    paper_outlier_validation_parser = subparsers.add_parser(
+        "paper-outlier-validation",
+        help="Show outlier-resistant validation diagnostics for paper profile cycles",
+    )
+    paper_outlier_validation_parser.add_argument(
+        "--profile",
+        choices=SUPPORTED_RUNTIME_STRATEGY_PROFILES,
+        default="mean_reversion_hf_micro_v1",
+    )
+    paper_outlier_validation_parser.add_argument(
+        "--since-id",
+        type=int,
+        default=0,
+        help="Only include paper cycles with database id greater than this value",
+    )
+    paper_outlier_validation_parser.set_defaults(func=command_paper_outlier_validation)
 
     notifications_parser = subparsers.add_parser("notifications", help="РџРѕРєР°Р·Р°С‚Рё РїРѕРІС–РґРѕРјР»РµРЅРЅСЏ")
     notifications_parser.add_argument("--limit", type=int, default=10)
