@@ -85,6 +85,7 @@ from analytics.micro_cycle_grid_search_engine import (
 from analytics.order_book_diagnostics_engine import OrderBookDiagnosticsEngine
 from analytics.order_book_rule_sim_engine import OrderBookRuleSimulationEngine
 from analytics.paper_open_cycle_diagnostics_engine import PaperOpenCycleDiagnosticsEngine
+from analytics.paper_profit_concentration_engine import PaperProfitConcentrationEngine
 from analytics.partial_target_diagnostics_engine import PartialTargetDiagnosticsEngine
 from analytics.post_entry_path_diagnostics_engine import PostEntryPathDiagnosticsEngine
 from analytics.profile_comparison_diagnostics_engine import ProfileComparisonDiagnosticsEngine
@@ -2741,6 +2742,48 @@ def command_profile_performance_summary(args) -> None:
     print(f"Recommendation: {summary.recommendation}")
 
 
+def command_paper_profit_concentration(args) -> None:
+    _config, _logger, database = build_context()
+    summary = PaperProfitConcentrationEngine(database).build_summary(
+        profile=args.profile,
+        since_id=args.since_id,
+    )
+
+    print("=== Paper Profit Concentration ===")
+    print(f"Profile: {summary.profile}")
+    print(f"Since id: {summary.since_id}")
+    print(f"Realized cycles: {summary.realized_cycles_count}")
+    if summary.realized_cycles_count == 0:
+        print("No realized paper cycles available.")
+        print(f"Recommendation: {summary.recommendation}")
+        return
+
+    print(f"Total net profit: {summary.total_net_profit:.8f}")
+    print(f"Best cycle net: {summary.best_cycle_net:.8f}")
+    print(f"Worst cycle net: {summary.worst_cycle_net:.8f}")
+    print(f"Net without best 1: {summary.net_without_best_1:.8f}")
+    print(f"Net without best 3: {summary.net_without_best_3:.8f}")
+    print(f"Net without best 5: {summary.net_without_best_5:.8f}")
+    print(f"Top 1 profit share: {summary.top1_profit_share * 100:.2f}%")
+    print(f"Top 3 profit share: {summary.top3_profit_share * 100:.2f}%")
+    print(f"Top 5 profit share: {summary.top5_profit_share * 100:.2f}%")
+    print(f"Positive cycles count: {summary.positive_cycles_count}")
+    print(f"Negative cycles count: {summary.negative_cycles_count}")
+    print(f"Breakeven cycles count: {summary.breakeven_cycles_count}")
+    print(f"Positive net total: {summary.positive_net_total:.8f}")
+    print(f"Negative net total: {summary.negative_net_total:.8f}")
+    print(f"Average positive cycle: {summary.average_positive_cycle:.8f}")
+    print(f"Average negative cycle: {summary.average_negative_cycle:.8f}")
+    print(f"Median net: {summary.median_net:.8f}")
+    print(f"Target closed net: {summary.target_closed_net:.8f}")
+    print(f"Timeout closed net: {summary.timeout_closed_net:.8f}")
+    print(f"Target closed count: {summary.target_closed_count}")
+    print(f"Timeout closed count: {summary.timeout_closed_count}")
+    print(f"Timeout loss count: {summary.timeout_loss_count}")
+    print(f"Timeout avg net: {summary.timeout_avg_net:.8f}")
+    print(f"Recommendation: {summary.recommendation}")
+
+
 def _print_profile_cycle_summary(cycle) -> None:
     if cycle is None:
         print("- No realized cycles.")
@@ -4415,6 +4458,23 @@ def build_parser() -> argparse.ArgumentParser:
         default="mean_reversion_v2_small_target",
     )
     profile_performance_summary_parser.set_defaults(func=command_profile_performance_summary)
+
+    paper_profit_concentration_parser = subparsers.add_parser(
+        "paper-profit-concentration",
+        help="Show profit concentration diagnostics for paper profile cycles",
+    )
+    paper_profit_concentration_parser.add_argument(
+        "--profile",
+        choices=SUPPORTED_RUNTIME_STRATEGY_PROFILES,
+        default="mean_reversion_hf_micro_v1",
+    )
+    paper_profit_concentration_parser.add_argument(
+        "--since-id",
+        type=int,
+        default=0,
+        help="Only include paper cycles with database id greater than this value",
+    )
+    paper_profit_concentration_parser.set_defaults(func=command_paper_profit_concentration)
 
     notifications_parser = subparsers.add_parser("notifications", help="РџРѕРєР°Р·Р°С‚Рё РїРѕРІС–РґРѕРјР»РµРЅРЅСЏ")
     notifications_parser.add_argument("--limit", type=int, default=10)

@@ -261,6 +261,7 @@ def test_manage_cli_accepts_hf_micro_profile_for_paper_workflow_commands():
         ["collect-closed-cycles", "--profile", "mean_reversion_hf_micro_v1", "--target-new", "5"],
         ["validation-summary", "--profile", "mean_reversion_hf_micro_v1"],
         ["profile-performance-summary", "--profile", "mean_reversion_hf_micro_v1"],
+        ["paper-profit-concentration", "--profile", "mean_reversion_hf_micro_v1", "--since-id", "90"],
         ["exit-risk-diagnostics", "--profile", "mean_reversion_hf_micro_v1"],
     ]
 
@@ -909,6 +910,21 @@ def test_manage_cli_profile_performance_summary_accepts_profile():
 
     assert args.command == "profile-performance-summary"
     assert args.profile == "mean_reversion_v2_small_target"
+
+
+def test_manage_cli_paper_profit_concentration_accepts_profile_and_since_id():
+    parser = build_parser()
+    args = parser.parse_args([
+        "paper-profit-concentration",
+        "--profile",
+        "mean_reversion_hf_micro_v1",
+        "--since-id",
+        "90",
+    ])
+
+    assert args.command == "paper-profit-concentration"
+    assert args.profile == "mean_reversion_hf_micro_v1"
+    assert args.since_id == 90
 
 
 def test_manage_cli_exit_rule_optimizer_accepts_profile():
