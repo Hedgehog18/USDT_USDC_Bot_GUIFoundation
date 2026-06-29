@@ -134,6 +134,12 @@ def test_collection_entry_diagnostics_reports_short_center_readiness():
         price=1.0,
         hf_short_center_samples=20,
         hf_short_center_ready=True,
+        hf_entry_mode="short_center",
+        hf_previous_price=1.0002,
+        hf_last_different_price=1.0002,
+        hf_price_buffer_unique_values=2,
+        hf_flat_samples_count=1,
+        hf_flat_price_buffer=False,
     )
 
     diagnostics = _collection_entry_diagnostics([
@@ -150,6 +156,12 @@ def test_collection_entry_diagnostics_reports_short_center_readiness():
     assert diagnostics["short_center"] == "1.00010000"
     assert diagnostics["short_center_samples"] == "20"
     assert diagnostics["short_center_ready"] == "yes"
+    assert diagnostics["hf_entry_mode"] == "short_center_direct"
+    assert diagnostics["previous_price"] == "1.00020000"
+    assert diagnostics["last_different_price"] == "1.00020000"
+    assert diagnostics["price_buffer_unique_values"] == "2"
+    assert diagnostics["flat_samples_count"] == "1"
+    assert diagnostics["flat_price_buffer"] == "no"
     assert diagnostics["entry_direction"] == "BUY_USDC"
     assert diagnostics["target_price"] == "1.00000500"
     assert diagnostics["target_distance"] == "0.00000500"
@@ -247,6 +259,12 @@ def test_collection_progress_prints_empty_new_run(capsys):
         "short_center": "N/A",
         "short_center_samples": "N/A",
         "short_center_ready": "N/A",
+        "hf_entry_mode": "N/A",
+        "previous_price": "N/A",
+        "last_different_price": "N/A",
+        "price_buffer_unique_values": "N/A",
+        "flat_samples_count": "N/A",
+        "flat_price_buffer": "N/A",
         "entry_direction": "N/A",
         "target_price": "N/A",
         "target_distance": "N/A",

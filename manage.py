@@ -3532,6 +3532,12 @@ def _print_closed_cycle_collection_progress(
     parts.append(f"short_center: {entry_diagnostics['short_center']}")
     parts.append(f"short_center_samples: {entry_diagnostics['short_center_samples']}")
     parts.append(f"short_center_ready: {entry_diagnostics['short_center_ready']}")
+    parts.append(f"hf_entry_mode: {entry_diagnostics['hf_entry_mode']}")
+    parts.append(f"previous_price: {entry_diagnostics['previous_price']}")
+    parts.append(f"last_different_price: {entry_diagnostics['last_different_price']}")
+    parts.append(f"price_buffer_unique_values: {entry_diagnostics['price_buffer_unique_values']}")
+    parts.append(f"flat_samples_count: {entry_diagnostics['flat_samples_count']}")
+    parts.append(f"flat_price_buffer: {entry_diagnostics['flat_price_buffer']}")
     parts.append(f"entry_direction: {entry_diagnostics['entry_direction']}")
     parts.append(f"entry_target_price: {entry_diagnostics['target_price']}")
     parts.append(f"entry_target_distance: {entry_diagnostics['target_distance']}")
@@ -3624,6 +3630,12 @@ def _collection_entry_diagnostics(entry_debug_items: list[dict], fallback_market
         "short_center": "N/A",
         "short_center_samples": "N/A",
         "short_center_ready": "N/A",
+        "hf_entry_mode": "N/A",
+        "previous_price": "N/A",
+        "last_different_price": "N/A",
+        "price_buffer_unique_values": "N/A",
+        "flat_samples_count": "N/A",
+        "flat_price_buffer": "N/A",
         "entry_direction": "N/A",
         "target_price": "N/A",
         "target_distance": "N/A",
@@ -3663,6 +3675,12 @@ def _collection_entry_diagnostics(entry_debug_items: list[dict], fallback_market
     _apply_collection_safety_diagnostics(diagnostics, item)
     if market_state is not None:
         _apply_collection_short_center_diagnostics(diagnostics, market_state)
+        if diagnostics["entry_block_reason"] == "equal_center_last_different_fallback":
+            diagnostics["hf_entry_mode"] = "equal_center_last_different_fallback"
+        elif diagnostics["entry_block_reason"] == "flat_price_buffer":
+            diagnostics["hf_entry_mode"] = "flat_no_trade"
+        elif candidate_detected:
+            diagnostics["hf_entry_mode"] = "short_center_direct"
         price = getattr(market_state, "price", None)
         diagnostics["entry_direction"] = action if candidate_detected else "N/A"
         if candidate_detected and price is not None:
@@ -3684,6 +3702,19 @@ def _apply_collection_short_center_diagnostics(diagnostics: dict[str, str], mark
     diagnostics["short_center"] = _format_collection_float(short_center)
     diagnostics["short_center_samples"] = "N/A" if samples is None else str(samples)
     diagnostics["short_center_ready"] = "N/A" if ready is None else ("yes" if ready else "no")
+    diagnostics["hf_entry_mode"] = str(getattr(market_state, "hf_entry_mode", "N/A"))
+    diagnostics["previous_price"] = _format_collection_float(getattr(market_state, "hf_previous_price", None))
+    diagnostics["last_different_price"] = _format_collection_float(
+        getattr(market_state, "hf_last_different_price", None)
+    )
+    unique_values = getattr(market_state, "hf_price_buffer_unique_values", None)
+    flat_samples = getattr(market_state, "hf_flat_samples_count", None)
+    flat_buffer = getattr(market_state, "hf_flat_price_buffer", None)
+    diagnostics["price_buffer_unique_values"] = "N/A" if unique_values is None else str(unique_values)
+    diagnostics["flat_samples_count"] = "N/A" if flat_samples is None else str(flat_samples)
+    diagnostics["flat_price_buffer"] = (
+        "N/A" if flat_buffer is None else ("yes" if bool(flat_buffer) else "no")
+    )
     if ready is False:
         diagnostics["entry_block_reason"] = "no_short_center"
 
@@ -3803,6 +3834,10 @@ def _collection_entry_block_reason(item: dict) -> str:
         return "existing_cycle"
     if "no_short_center" in reason:
         return "no_short_center"
+    if "flat_price_buffer" in reason:
+        return "flat_price_buffer"
+    if "equal_center_last_different_fallback" in reason:
+        return "equal_center_last_different_fallback"
     if "price_equals_short_center" in reason:
         return "price_equals_short_center"
     if "invalid_price" in reason:

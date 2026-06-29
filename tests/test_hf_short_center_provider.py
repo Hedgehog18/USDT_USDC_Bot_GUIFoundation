@@ -77,3 +77,28 @@ def test_hf_short_center_ready_at_min_samples():
     assert third.short_center == 1.0001
     assert third.hf_short_center_samples == 3
     assert third.hf_short_center_ready is True
+
+
+def test_hf_short_center_tracks_last_different_price_and_flat_buffer():
+    provider = HFShortCenterMarketAnalyzer(
+        SequenceAnalyzer([1.0, 1.0, 1.0001, 1.0001]),
+        min_samples=3,
+        window=10,
+    )
+
+    provider.analyze_market()
+    second = provider.analyze_market()
+    third = provider.analyze_market()
+    fourth = provider.analyze_market()
+
+    assert second.hf_previous_price == 1.0
+    assert second.hf_last_different_price is None
+    assert second.hf_price_buffer_unique_values == 1
+    assert second.hf_flat_samples_count == 2
+    assert second.hf_flat_price_buffer is True
+    assert third.hf_last_different_price == 1.0
+    assert third.hf_price_buffer_unique_values == 2
+    assert third.hf_flat_price_buffer is False
+    assert fourth.hf_previous_price == 1.0001
+    assert fourth.hf_last_different_price == 1.0
+    assert fourth.hf_flat_samples_count == 2

@@ -144,6 +144,45 @@ def test_profile_decision_engine_hf_micro_waits_when_price_equals_short_center(t
     assert "price_equals_short_center" in decision.reason
 
 
+def test_profile_decision_engine_hf_micro_fallback_sells_when_equal_center_and_last_different_lower(test_config):
+    market_state = _state(price=1.000005, short_center=1.000005)
+    setattr(market_state, "hf_last_different_price", 1.000000)
+    setattr(market_state, "hf_flat_price_buffer", False)
+
+    decision = StrategyProfileDecisionEngine(test_config, "mean_reversion_hf_micro_v1").make_decision(
+        market_state
+    )
+
+    assert decision.action == "SELL_USDC"
+    assert "equal_center_last_different_fallback" in decision.reason
+
+
+def test_profile_decision_engine_hf_micro_fallback_buys_when_equal_center_and_last_different_higher(test_config):
+    market_state = _state(price=1.000005, short_center=1.000005)
+    setattr(market_state, "hf_last_different_price", 1.000010)
+    setattr(market_state, "hf_flat_price_buffer", False)
+
+    decision = StrategyProfileDecisionEngine(test_config, "mean_reversion_hf_micro_v1").make_decision(
+        market_state
+    )
+
+    assert decision.action == "BUY_USDC"
+    assert "equal_center_last_different_fallback" in decision.reason
+
+
+def test_profile_decision_engine_hf_micro_waits_on_flat_price_buffer(test_config):
+    market_state = _state(price=1.000005, short_center=1.000005)
+    setattr(market_state, "hf_last_different_price", None)
+    setattr(market_state, "hf_flat_price_buffer", True)
+
+    decision = StrategyProfileDecisionEngine(test_config, "mean_reversion_hf_micro_v1").make_decision(
+        market_state
+    )
+
+    assert decision.action == "WAIT"
+    assert "flat_price_buffer" in decision.reason
+
+
 def test_profile_decision_engine_hf_micro_waits_without_short_center(test_config):
     decision = StrategyProfileDecisionEngine(test_config, "mean_reversion_hf_micro_v1").make_decision(
         _state(price=1.000005, short_center=0.0)

@@ -378,6 +378,44 @@ def test_paper_trading_engine_hf_profile_waits_when_price_equals_short_center_af
     assert rows == []
 
 
+def test_paper_trading_engine_hf_profile_fallback_sells_when_equal_center_after_lower_price(test_config, tmp_path: Path):
+    database = DatabaseManager(str(tmp_path / "bot.sqlite"))
+    bot = FakeSequenceProfileBot(test_config, prices=[1.0000] + ([1.0001] * 19))
+    entry_debug_items = []
+
+    result = PaperTradingEngine(
+        test_config,
+        database,
+        bot=bot,
+        entry_zone_debug_callback=entry_debug_items.append,
+        strategy_profile="mean_reversion_hf_micro_v1",
+    ).run(20)
+
+    rows = database.load_open_paper_cycles(limit=10)
+    assert result.opened_cycles == 1
+    assert rows[0][4] == "SELL_USDC"
+    assert "equal_center_last_different_fallback" in entry_debug_items[-1]["reason"]
+    assert entry_debug_items[-1]["market_state"].hf_last_different_price == 1.0000
+
+
+def test_paper_trading_engine_hf_profile_fallback_buys_when_equal_center_after_higher_price(test_config, tmp_path: Path):
+    database = DatabaseManager(str(tmp_path / "bot.sqlite"))
+    bot = FakeSequenceProfileBot(test_config, prices=[1.0002] + ([1.0001] * 19))
+    entry_debug_items = []
+
+    PaperTradingEngine(
+        test_config,
+        database,
+        bot=bot,
+        entry_zone_debug_callback=entry_debug_items.append,
+        strategy_profile="mean_reversion_hf_micro_v1",
+    ).run(20)
+
+    assert entry_debug_items[-1]["action"] == "BUY_USDC"
+    assert "equal_center_last_different_fallback" in entry_debug_items[-1]["reason"]
+    assert entry_debug_items[-1]["market_state"].hf_last_different_price == 1.0002
+
+
 def test_paper_trading_engine_hf_profile_closes_buy_on_target(test_config, tmp_path: Path):
     from datetime import datetime
     from paper.models import PaperCycle, PaperCycleStatus, PaperOrderSide

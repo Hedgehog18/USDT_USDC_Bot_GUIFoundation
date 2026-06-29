@@ -132,6 +132,27 @@ class StrategyProfileDecisionEngine:
                 self.config.min_cycle_prediction_score,
             )
 
+        last_different_price = getattr(market_state, "hf_last_different_price", None)
+        flat_price_buffer = bool(getattr(market_state, "hf_flat_price_buffer", False))
+        if flat_price_buffer:
+            return self._decision("WAIT", f"{profile_name}: flat_price_buffer", "LOW", 0.0)
+
+        if last_different_price is not None:
+            if market_state.price > float(last_different_price):
+                return self._decision(
+                    "SELL_USDC",
+                    f"{profile_name}: equal_center_last_different_fallback sell",
+                    "MEDIUM",
+                    self.config.min_cycle_prediction_score,
+                )
+            if market_state.price < float(last_different_price):
+                return self._decision(
+                    "BUY_USDC",
+                    f"{profile_name}: equal_center_last_different_fallback buy",
+                    "MEDIUM",
+                    self.config.min_cycle_prediction_score,
+                )
+
         return self._decision("WAIT", f"{profile_name}: price_equals_short_center", "LOW", 0.0)
 
     def _entry_score(self, market_state: MarketState) -> float:

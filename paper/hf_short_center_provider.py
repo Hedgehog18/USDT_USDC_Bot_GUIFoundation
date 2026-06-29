@@ -26,6 +26,7 @@ class HFShortCenterMarketAnalyzer:
     def analyze_market(self):
         market_state = self.analyzer.analyze_market()
         price = float(getattr(market_state, "price", 0.0) or 0.0)
+        previous_price = self._prices[-1] if self._prices else None
         if price > 0.0:
             self._prices.append(price)
 
@@ -45,6 +46,12 @@ class HFShortCenterMarketAnalyzer:
         )
         setattr(updated_state, "hf_short_center_samples", samples)
         setattr(updated_state, "hf_short_center_ready", ready)
+        setattr(updated_state, "hf_entry_mode", "short_center")
+        setattr(updated_state, "hf_previous_price", previous_price)
+        setattr(updated_state, "hf_last_different_price", self._last_different_price(price))
+        setattr(updated_state, "hf_price_buffer_unique_values", len(set(self._prices)))
+        setattr(updated_state, "hf_flat_samples_count", self._flat_samples_count(price))
+        setattr(updated_state, "hf_flat_price_buffer", len(set(self._prices)) == 1 if self._prices else False)
         self.last_market_state = updated_state
         return updated_state
 
@@ -65,3 +72,17 @@ class HFShortCenterMarketAnalyzer:
         if short_high <= short_low:
             return 50.0
         return max(0.0, min(100.0, ((price - short_low) / (short_high - short_low)) * 100.0))
+
+    def _last_different_price(self, price: float) -> float | None:
+        for item in reversed(self._prices):
+            if item != price:
+                return float(item)
+        return None
+
+    def _flat_samples_count(self, price: float) -> int:
+        count = 0
+        for item in reversed(self._prices):
+            if item != price:
+                break
+            count += 1
+        return count
