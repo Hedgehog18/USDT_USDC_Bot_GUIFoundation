@@ -2598,10 +2598,26 @@ def command_hf_micro_grid_guard_sweep(args) -> None:
         report.top_by_lowest_drawdown_positive_net,
     )
     _print_hf_grid_guard_sweep_section("Balanced candidates", report.balanced_candidates)
+    _print_hf_grid_guard_sweep_recommendation(report)
 
     if args.export_csv:
         output_path = engine.export_csv(args.export_csv, report.results)
         print(f"CSV exported: {output_path}")
+
+
+def _print_hf_grid_guard_sweep_recommendation(report) -> None:
+    print("Final recommendation:")
+    if not report.balanced_candidates:
+        print("- No balanced candidates found under current risk threshold.")
+        print("- HF Grid remains research-only.")
+        print("- Do not promote HF Grid to a paper profile yet.")
+        print("- Baseline remains mean_reversion_hf_micro_v1.")
+        print("- Next research direction: improve HF v1 entry direction using hf-losing-cycle-diagnostics.")
+        print("")
+        return
+    print("- Balanced candidates exist, but HF Grid should remain diagnostics-only until manually reviewed.")
+    print("- Compare every candidate against mean_reversion_hf_micro_v1 before any paper-profile decision.")
+    print("")
 
 
 def _print_hf_grid_guard_sweep_section(title: str, rows) -> None:
