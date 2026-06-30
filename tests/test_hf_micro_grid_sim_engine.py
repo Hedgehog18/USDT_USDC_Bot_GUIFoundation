@@ -67,6 +67,8 @@ def test_hf_micro_grid_sim_empty_dataset(test_config, tmp_path: Path) -> None:
 
     assert report.total_samples == 0
     assert report.opened_layers == 0
+    assert report.max_total_equity_drawdown == 0.0
+    assert report.final_active_layers == 0
     assert report.recommendation == "NOT WORTH TESTING"
 
 
@@ -165,3 +167,65 @@ def test_hf_micro_grid_sim_comparison_with_hf_v1(test_config, tmp_path: Path) ->
 
     assert report.comparison.baseline_cycles_per_day > 0
     assert report.comparison.verdict in {"BETTER", "SIMILAR", "WORSE"}
+
+
+def test_hf_micro_grid_sim_unrealized_pnl_for_buy_layer(test_config, tmp_path: Path) -> None:
+    report = _simulate(test_config, tmp_path, [
+        _snapshot(timestamp="2026-06-26T13:00:00", price=1.0),
+        _snapshot(timestamp="2026-06-26T13:01:00", price=0.9999),
+    ])
+
+    assert report.worst_single_layer_unrealized_loss < 0
+    assert report.worst_open_basket_loss < 0
+    assert report.final_unrealized_pnl < 0
+
+
+def test_hf_micro_grid_sim_unrealized_pnl_for_sell_layer(test_config, tmp_path: Path) -> None:
+    report = _simulate(test_config, tmp_path, [
+        _snapshot(timestamp="2026-06-26T13:00:00", price=1.0, short_center=0.9999),
+        _snapshot(timestamp="2026-06-26T13:01:00", price=1.0001, short_center=1.0),
+    ])
+
+    assert report.worst_single_layer_unrealized_loss < 0
+    assert report.worst_open_basket_loss < 0
+    assert report.final_unrealized_pnl < 0
+
+
+def test_hf_micro_grid_sim_total_equity_drawdown_includes_unrealized(test_config, tmp_path: Path) -> None:
+    report = _simulate(test_config, tmp_path, [
+        _snapshot(timestamp="2026-06-26T13:00:00", price=1.0),
+        _snapshot(timestamp="2026-06-26T13:01:00", price=0.9999),
+    ])
+
+    assert report.max_realized_drawdown == 0.0
+    assert report.max_total_equity_drawdown < 0
+    assert report.max_total_equity_drawdown == report.worst_open_basket_loss
+
+
+def test_hf_micro_grid_sim_worst_basket_snapshot_and_final_active_layers(test_config, tmp_path: Path) -> None:
+    report = _simulate(test_config, tmp_path, [
+        _snapshot(timestamp="2026-06-26T13:00:00", price=1.0),
+        _snapshot(timestamp="2026-06-26T13:04:30", price=0.9999),
+    ])
+
+    assert report.final_active_layers == 2
+    assert report.final_capital_locked == 20.0
+    assert report.final_total_equity_pnl == report.final_unrealized_pnl
+    assert report.worst_basket_snapshot is not None
+    assert report.worst_basket_snapshot.active_layers_count == 2
+    assert report.worst_basket_snapshot.unrealized_pnl < 0
+
+
+def test_hf_micro_grid_sim_recommendation_downgrades_when_drawdown_too_high(test_config, tmp_path: Path) -> None:
+    snapshots = [
+        _snapshot(
+            timestamp=f"2026-06-26T13:{minute:02d}:00",
+            price=1.0 - index * 0.001,
+        )
+        for index, minute in enumerate(range(0, 55, 5))
+    ]
+
+    report = _simulate(test_config, tmp_path, snapshots, max_holding_seconds=270, max_layers=10)
+
+    assert report.max_total_equity_drawdown < -0.01
+    assert report.recommendation != "STRONG PAPER CANDIDATE"

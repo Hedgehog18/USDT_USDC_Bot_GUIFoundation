@@ -2356,8 +2356,8 @@ def command_hf_micro_grid_sim(args) -> None:
     print(f"- average profit per layer: {report.average_profit_per_layer:.8f}")
     print(f"- median profit: {report.median_profit:.8f}")
     print("")
-    print("Risk:")
-    print(f"- max drawdown: {report.max_drawdown:.8f}")
+    print("Close-Only Risk:")
+    print(f"- close-only realized drawdown: {report.max_drawdown:.8f}")
     print(f"- worst unrealized drawdown: {report.worst_unrealized_drawdown:.8f}")
     print(f"- longest recovery: {_format_optional_seconds(report.longest_recovery_seconds)}")
     print(
@@ -2366,6 +2366,44 @@ def command_hf_micro_grid_sim(args) -> None:
         f"avg={_format_optional_seconds(report.all_layers_average_duration_seconds)}, "
         f"longest={_format_optional_seconds(report.all_layers_longest_duration_seconds)}"
     )
+    print("")
+    print("Realistic Risk:")
+    print(f"- max realized drawdown: {report.max_realized_drawdown:.8f}")
+    print(f"- max unrealized drawdown: {report.max_unrealized_drawdown:.8f}")
+    print(f"- max total equity drawdown: {report.max_total_equity_drawdown:.8f}")
+    print(f"- worst open basket loss: {report.worst_open_basket_loss:.8f}")
+    print(f"- worst single layer unrealized loss: {report.worst_single_layer_unrealized_loss:.8f}")
+    print(f"- longest time underwater: {_format_optional_seconds(report.longest_time_underwater_seconds)}")
+    print(
+        "- recovery after worst drawdown: "
+        f"{_format_optional_seconds(report.recovery_time_after_worst_drawdown_seconds)}"
+    )
+    print(
+        "- longest time with max layers used: "
+        f"{_format_optional_seconds(report.longest_time_with_max_layers_used_seconds)}"
+    )
+    print(
+        "- capital exposure time: "
+        f"50%={_format_optional_seconds(report.time_with_50_percent_capital_used_seconds)}, "
+        f"80%={_format_optional_seconds(report.time_with_80_percent_capital_used_seconds)}, "
+        f"100%={_format_optional_seconds(report.time_with_100_percent_capital_used_seconds)}"
+    )
+    print(f"- final active layers: {report.final_active_layers}")
+    print(f"- final unrealized pnl: {report.final_unrealized_pnl:.8f}")
+    print(f"- final total equity pnl: {report.final_total_equity_pnl:.8f}")
+    print(f"- final capital locked: {report.final_capital_locked:.2f}")
+    if report.worst_basket_snapshot is None:
+        print("- worst basket snapshot: N/A")
+    else:
+        snapshot = report.worst_basket_snapshot
+        print(
+            "- worst basket snapshot: "
+            f"timestamp={snapshot.timestamp} active_layers={snapshot.active_layers_count} "
+            f"capital_locked={snapshot.capital_locked:.2f} realized={snapshot.realized_pnl:.8f} "
+            f"unrealized={snapshot.unrealized_pnl:.8f} total={snapshot.total_equity_pnl:.8f} "
+            f"worst_layer={snapshot.worst_layer_direction}@{snapshot.worst_layer_entry_price:.8f} "
+            f"worst_layer_unrealized={snapshot.worst_layer_unrealized_pnl:.8f}"
+        )
     print("")
     print("Occupancy histogram:")
     for layer_count in sorted(report.occupancy_histogram):

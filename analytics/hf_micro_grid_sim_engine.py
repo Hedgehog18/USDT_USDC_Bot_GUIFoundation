@@ -20,6 +20,10 @@ HF_GRID_DEFAULT_TARGET_PERCENT = 0.0005
 HF_GRID_DEFAULT_MAX_HOLDING_SECONDS = 270.0
 HF_GRID_DEFAULT_LAYER_SIZE = 10.0
 HF_GRID_DEFAULT_MAX_LAYERS = 10
+HF_GRID_MAX_TOTAL_EQUITY_DRAWDOWN = -0.01
+HF_GRID_WORST_OPEN_BASKET_LOSS = -0.02
+HF_GRID_MAX_FULL_CAPITAL_SECONDS = 1800.0
+HF_GRID_MAX_FINAL_UNREALIZED_LOSS = -0.005
 
 
 @dataclass(frozen=True)
@@ -50,6 +54,19 @@ class HFMicroGridComparison:
 
 
 @dataclass(frozen=True)
+class HFMicroGridWorstBasketSnapshot:
+    timestamp: str
+    active_layers_count: int
+    capital_locked: float
+    realized_pnl: float
+    unrealized_pnl: float
+    total_equity_pnl: float
+    worst_layer_direction: str
+    worst_layer_entry_price: float
+    worst_layer_unrealized_pnl: float
+
+
+@dataclass(frozen=True)
 class HFMicroGridSimulationReport:
     scenario: str
     target_percent: float
@@ -70,11 +87,22 @@ class HFMicroGridSimulationReport:
     average_profit_per_layer: float
     median_profit: float
     max_drawdown: float
+    max_realized_drawdown: float
     worst_unrealized_drawdown: float
+    max_unrealized_drawdown: float
+    max_total_equity_drawdown: float
+    worst_open_basket_loss: float
+    worst_single_layer_unrealized_loss: float
     longest_recovery_seconds: float
+    longest_time_underwater_seconds: float
+    recovery_time_after_worst_drawdown_seconds: float
     all_layers_occupied_count: int
     all_layers_average_duration_seconds: float
     all_layers_longest_duration_seconds: float
+    longest_time_with_max_layers_used_seconds: float
+    time_with_50_percent_capital_used_seconds: float
+    time_with_80_percent_capital_used_seconds: float
+    time_with_100_percent_capital_used_seconds: float
     average_occupied_layers: float
     occupancy_histogram: dict[int, int]
     timeout_closes: int
@@ -89,6 +117,11 @@ class HFMicroGridSimulationReport:
     recommendation_score: float
     recommendation: str
     comparison: HFMicroGridComparison
+    worst_basket_snapshot: HFMicroGridWorstBasketSnapshot | None
+    final_active_layers: int
+    final_unrealized_pnl: float
+    final_total_equity_pnl: float
+    final_capital_locked: float
     closed_layer_details: list[HFMicroGridClosedLayer]
 
 
@@ -165,9 +198,30 @@ class HFMicroGridSimulationEngine:
         skipped_spacing = 0
         occupancy_histogram = {index: 0 for index in range(max_layers + 1)}
         occupancy_samples: list[int] = []
+        occupancy_longest_by_count = {index: 0.0 for index in range(max_layers + 1)}
+        occupancy_period_count_by_count = {index: 0 for index in range(max_layers + 1)}
+        current_occupancy: int | None = None
+        current_occupancy_duration = 0.0
         all_layers_periods: list[float] = []
         all_layers_started_at: datetime | None = None
         previous_occupancy = 0
+        realized_pnl = 0.0
+        realized_peak = 0.0
+        total_peak = 0.0
+        max_realized_drawdown = 0.0
+        max_total_equity_drawdown = 0.0
+        max_unrealized_drawdown = 0.0
+        worst_open_basket_loss = 0.0
+        worst_single_layer_unrealized_loss = 0.0
+        worst_basket_snapshot: HFMicroGridWorstBasketSnapshot | None = None
+        underwater_since: datetime | None = None
+        longest_time_underwater = 0.0
+        worst_drawdown_timestamp: datetime | None = None
+        worst_drawdown_peak = 0.0
+        recovery_after_worst_drawdown: float | None = None
+        time_with_50_percent_capital = 0.0
+        time_with_80_percent_capital = 0.0
+        time_with_100_percent_capital = 0.0
 
         for index, row in enumerate(rows):
             timestamp = row["parsed_timestamp"]
@@ -181,6 +235,7 @@ class HFMicroGridSimulationEngine:
                     still_active.append(layer)
                     continue
                 closed_layers.append(self._closed_layer(layer, row, close_reason, profit))
+                realized_pnl += profit.net_profit
             active_layers = still_active
 
             direction = self.micro_engine._direction_for_scenario(row, index, scenario)
@@ -203,9 +258,83 @@ class HFMicroGridSimulationEngine:
                     next_layer_id += 1
                     last_opened_at = timestamp
 
+            layer_unrealized = [self._profit(layer, row["price"]).net_profit for layer in active_layers]
+            unrealized_pnl = sum(layer_unrealized)
+            total_equity_pnl = realized_pnl + unrealized_pnl
+            if layer_unrealized:
+                worst_single_layer_unrealized_loss = min(worst_single_layer_unrealized_loss, min(layer_unrealized))
+            max_unrealized_drawdown = min(max_unrealized_drawdown, unrealized_pnl)
+            worst_open_basket_loss = min(worst_open_basket_loss, unrealized_pnl)
+            if active_layers and unrealized_pnl <= worst_open_basket_loss:
+                worst_index = min(range(len(active_layers)), key=lambda item: layer_unrealized[item])
+                worst_layer = active_layers[worst_index]
+                worst_basket_snapshot = HFMicroGridWorstBasketSnapshot(
+                    timestamp=timestamp.isoformat() if timestamp else "",
+                    active_layers_count=len(active_layers),
+                    capital_locked=len(active_layers) * layer_size,
+                    realized_pnl=realized_pnl,
+                    unrealized_pnl=unrealized_pnl,
+                    total_equity_pnl=total_equity_pnl,
+                    worst_layer_direction=worst_layer.direction,
+                    worst_layer_entry_price=worst_layer.entry_price,
+                    worst_layer_unrealized_pnl=layer_unrealized[worst_index],
+                )
+
+            realized_peak = max(realized_peak, realized_pnl)
+            max_realized_drawdown = min(max_realized_drawdown, realized_pnl - realized_peak)
+            if total_equity_pnl >= total_peak:
+                if underwater_since is not None and timestamp is not None:
+                    longest_time_underwater = max(
+                        longest_time_underwater,
+                        self._holding_seconds(underwater_since, timestamp),
+                    )
+                total_peak = total_equity_pnl
+                underwater_since = None
+            elif underwater_since is None:
+                underwater_since = timestamp
+
+            current_total_drawdown = total_equity_pnl - total_peak
+            if current_total_drawdown < max_total_equity_drawdown:
+                max_total_equity_drawdown = current_total_drawdown
+                worst_drawdown_timestamp = timestamp
+                worst_drawdown_peak = total_peak
+                recovery_after_worst_drawdown = None
+            elif (
+                worst_drawdown_timestamp is not None
+                and recovery_after_worst_drawdown is None
+                and total_equity_pnl >= worst_drawdown_peak
+                and timestamp is not None
+            ):
+                recovery_after_worst_drawdown = self._holding_seconds(worst_drawdown_timestamp, timestamp)
+
             occupancy = len(active_layers)
             occupancy_histogram[occupancy] = occupancy_histogram.get(occupancy, 0) + 1
             occupancy_samples.append(occupancy)
+            next_timestamp = rows[index + 1]["parsed_timestamp"] if index + 1 < len(rows) else timestamp
+            sample_duration = self._holding_seconds(timestamp, next_timestamp)
+            if current_occupancy is None:
+                current_occupancy = occupancy
+                current_occupancy_duration = sample_duration
+                occupancy_period_count_by_count[occupancy] = occupancy_period_count_by_count.get(occupancy, 0) + 1
+            elif current_occupancy == occupancy:
+                current_occupancy_duration += sample_duration
+            else:
+                occupancy_longest_by_count[current_occupancy] = max(
+                    occupancy_longest_by_count.get(current_occupancy, 0.0),
+                    current_occupancy_duration,
+                )
+                current_occupancy = occupancy
+                current_occupancy_duration = sample_duration
+                occupancy_period_count_by_count[occupancy] = occupancy_period_count_by_count.get(occupancy, 0) + 1
+
+            capital_locked = occupancy * layer_size
+            max_capital = max_layers * layer_size
+            if max_capital > 0 and capital_locked >= max_capital * 0.50:
+                time_with_50_percent_capital += sample_duration
+            if max_capital > 0 and capital_locked >= max_capital * 0.80:
+                time_with_80_percent_capital += sample_duration
+            if max_capital > 0 and capital_locked >= max_capital:
+                time_with_100_percent_capital += sample_duration
             if occupancy == max_layers and previous_occupancy < max_layers:
                 all_layers_started_at = timestamp
             if previous_occupancy == max_layers and occupancy < max_layers and all_layers_started_at is not None:
@@ -215,6 +344,21 @@ class HFMicroGridSimulationEngine:
 
         if all_layers_started_at is not None and rows:
             all_layers_periods.append(self._holding_seconds(all_layers_started_at, rows[-1]["parsed_timestamp"]))
+        if current_occupancy is not None:
+            occupancy_longest_by_count[current_occupancy] = max(
+                occupancy_longest_by_count.get(current_occupancy, 0.0),
+                current_occupancy_duration,
+            )
+        if underwater_since is not None and rows:
+            longest_time_underwater = max(
+                longest_time_underwater,
+                self._holding_seconds(underwater_since, rows[-1]["parsed_timestamp"]),
+            )
+        if recovery_after_worst_drawdown is None and worst_drawdown_timestamp is not None and rows:
+            recovery_after_worst_drawdown = self._holding_seconds(
+                worst_drawdown_timestamp,
+                rows[-1]["parsed_timestamp"],
+            )
 
         sample_span_hours = self.micro_engine._sample_span_hours(rows)
         closed_count = len(closed_layers)
@@ -227,9 +371,14 @@ class HFMicroGridSimulationEngine:
         max_drawdown = self._max_drawdown(closed_layers)
         average_layers = sum(occupancy_samples) / len(occupancy_samples) if occupancy_samples else 0.0
         maximum_layers = max(occupancy_samples, default=0)
+        final_unrealized_pnl = 0.0
+        if rows:
+            final_price = rows[-1]["price"]
+            final_unrealized_pnl = sum(self._profit(layer, final_price).net_profit for layer in active_layers)
+        final_total_equity_pnl = net_profit + final_unrealized_pnl
         recommendation_score = self._score(
             net_profit=net_profit,
-            drawdown=max_drawdown,
+            drawdown=max_total_equity_drawdown,
             cycles_per_day=cycles_per_hour * 24.0,
             active_layers=len(active_layers),
             max_layers=max_layers,
@@ -237,7 +386,7 @@ class HFMicroGridSimulationEngine:
         comparison = self._comparison(
             baseline=baseline,
             grid_net_profit=net_profit,
-            grid_drawdown=max_drawdown,
+            grid_drawdown=max_total_equity_drawdown,
             grid_cycles_per_day=cycles_per_hour * 24.0,
             average_capital_used=average_layers * layer_size,
             max_capital=max_layers * layer_size,
@@ -263,13 +412,24 @@ class HFMicroGridSimulationEngine:
             average_profit_per_layer=net_profit / closed_count if closed_count else 0.0,
             median_profit=float(median(net_values)) if net_values else 0.0,
             max_drawdown=max_drawdown,
+            max_realized_drawdown=max_realized_drawdown,
             worst_unrealized_drawdown=worst_unrealized_drawdown,
+            max_unrealized_drawdown=max_unrealized_drawdown,
+            max_total_equity_drawdown=max_total_equity_drawdown,
+            worst_open_basket_loss=worst_open_basket_loss,
+            worst_single_layer_unrealized_loss=worst_single_layer_unrealized_loss,
             longest_recovery_seconds=self._longest_recovery_seconds(closed_layers),
+            longest_time_underwater_seconds=longest_time_underwater,
+            recovery_time_after_worst_drawdown_seconds=recovery_after_worst_drawdown or 0.0,
             all_layers_occupied_count=len(all_layers_periods),
             all_layers_average_duration_seconds=(
                 sum(all_layers_periods) / len(all_layers_periods) if all_layers_periods else 0.0
             ),
             all_layers_longest_duration_seconds=max(all_layers_periods, default=0.0),
+            longest_time_with_max_layers_used_seconds=occupancy_longest_by_count.get(maximum_layers, 0.0),
+            time_with_50_percent_capital_used_seconds=time_with_50_percent_capital,
+            time_with_80_percent_capital_used_seconds=time_with_80_percent_capital,
+            time_with_100_percent_capital_used_seconds=time_with_100_percent_capital,
             average_occupied_layers=average_layers,
             occupancy_histogram=occupancy_histogram,
             timeout_closes=len(timeout_closes),
@@ -286,10 +446,19 @@ class HFMicroGridSimulationEngine:
                 rows=rows,
                 net_profit=net_profit,
                 closed_count=closed_count,
-                max_drawdown=max_drawdown,
+                max_total_equity_drawdown=max_total_equity_drawdown,
+                worst_open_basket_loss=worst_open_basket_loss,
+                time_with_100_percent_capital=time_with_100_percent_capital,
+                final_active_layers=len(active_layers),
+                final_unrealized_pnl=final_unrealized_pnl,
                 comparison=comparison,
             ),
             comparison=comparison,
+            worst_basket_snapshot=worst_basket_snapshot,
+            final_active_layers=len(active_layers),
+            final_unrealized_pnl=final_unrealized_pnl,
+            final_total_equity_pnl=final_total_equity_pnl,
+            final_capital_locked=len(active_layers) * layer_size,
             closed_layer_details=closed_layers,
         )
 
@@ -447,14 +616,25 @@ class HFMicroGridSimulationEngine:
         rows: list[dict],
         net_profit: float,
         closed_count: int,
-        max_drawdown: float,
+        max_total_equity_drawdown: float,
+        worst_open_basket_loss: float,
+        time_with_100_percent_capital: float,
+        final_active_layers: int,
+        final_unrealized_pnl: float,
         comparison: HFMicroGridComparison,
     ) -> str:
         if not rows or closed_count < 5:
             return "NOT WORTH TESTING"
         if net_profit <= 0 or comparison.verdict == "WORSE":
             return "NOT WORTH TESTING"
-        if comparison.verdict == "BETTER" and max_drawdown >= -0.01:
+        if (
+            max_total_equity_drawdown < HF_GRID_MAX_TOTAL_EQUITY_DRAWDOWN
+            or worst_open_basket_loss < HF_GRID_WORST_OPEN_BASKET_LOSS
+            or time_with_100_percent_capital > HF_GRID_MAX_FULL_CAPITAL_SECONDS
+            or (final_active_layers > 0 and final_unrealized_pnl < HF_GRID_MAX_FINAL_UNREALIZED_LOSS)
+        ):
+            return "PAPER CANDIDATE"
+        if comparison.verdict == "BETTER":
             return "STRONG PAPER CANDIDATE"
         return "PAPER CANDIDATE"
 
