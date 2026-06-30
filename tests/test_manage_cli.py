@@ -1073,6 +1073,28 @@ def test_manage_cli_has_micro_cycle_grid_search_command():
     assert args.export_csv == "reports/micro_cycle_grid_search.csv"
 
 
+def test_manage_cli_has_hf_micro_grid_sim_command():
+    parser = build_parser()
+    args = parser.parse_args([
+        "hf-micro-grid-sim",
+        "--max-layers",
+        "10",
+        "--layer-size",
+        "10",
+        "--max-holding-seconds",
+        "270",
+        "--target",
+        "0.0005",
+    ])
+
+    assert args.command == "hf-micro-grid-sim"
+    assert args.scenario == "short_term_mean_reversion"
+    assert args.max_layers == 10
+    assert args.layer_size == 10.0
+    assert args.max_holding_seconds == 270.0
+    assert args.target == 0.0005
+
+
 def test_manage_cli_has_target_resolution_compare_command():
     parser = build_parser()
     args = parser.parse_args([

@@ -68,6 +68,14 @@ from analytics.high_frequency_dataset_summary_engine import HighFrequencyDataset
 from analytics.high_frequency_diagnostics_engine import HighFrequencyDiagnosticsEngine
 from analytics.high_frequency_snapshot_collector import HighFrequencySnapshotCollector
 from analytics.hf_losing_cycle_diagnostics_engine import HFLosingCycleDiagnosticsEngine
+from analytics.hf_micro_grid_sim_engine import (
+    HF_GRID_DEFAULT_LAYER_SIZE,
+    HF_GRID_DEFAULT_MAX_HOLDING_SECONDS,
+    HF_GRID_DEFAULT_MAX_LAYERS,
+    HF_GRID_DEFAULT_SCENARIO,
+    HF_GRID_DEFAULT_TARGET_PERCENT,
+    HFMicroGridSimulationEngine,
+)
 from analytics.max_holding_sensitivity_engine import MaxHoldingSensitivityEngine
 from analytics.market_session_diagnostics_engine import MarketSessionDiagnosticsEngine
 from analytics.ml_baseline_trainer import MLBaselineTrainer
@@ -132,6 +140,16 @@ def _positive_decimal_float(raw: str) -> float:
     if not value.is_finite() or value <= 0:
         raise argparse.ArgumentTypeError("value must be greater than 0.")
     return float(value)
+
+
+def _positive_int(raw: str) -> int:
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("value must be a positive integer.") from exc
+    if value <= 0:
+        raise argparse.ArgumentTypeError("value must be greater than 0.")
+    return value
 
 
 def build_context():
@@ -2298,6 +2316,89 @@ def command_micro_cycle_grid_search(args) -> None:
     _print_micro_cycle_grid_section("Top by net profit", report.top_by_net_profit, engine)
     _print_micro_cycle_grid_section("Top by cycles/day with positive net", report.top_by_cycles_per_day, engine)
     _print_micro_cycle_grid_section("Best balanced candidates", report.balanced_candidates, engine)
+
+
+def command_hf_micro_grid_sim(args) -> None:
+    config, _logger, database = build_context()
+    report = HFMicroGridSimulationEngine(database, config).build_report(
+        scenario=args.scenario,
+        target_percent=args.target,
+        max_holding_seconds=args.max_holding_seconds,
+        layer_size=args.layer_size,
+        max_layers=args.max_layers,
+    )
+
+    print("=== HF Micro Grid Simulation ===")
+    print("Diagnostics only. No paper cycles, no orders, no runtime strategy changes.")
+    print("Baseline: mean_reversion_hf_micro_v1")
+    print(f"Scenario: {report.scenario}")
+    print(f"Target: {report.target_percent:.5f}%")
+    print(f"Max holding/layer spacing: {report.max_holding_seconds:.2f}s")
+    print(f"Layer size: {report.layer_size:.2f} USD")
+    print(f"Maximum layers: {report.max_layers}")
+    print("")
+    print("Total:")
+    print(f"- opened layers: {report.opened_layers}")
+    print(f"- closed layers: {report.closed_layers}")
+    print(f"- active layers: {report.active_layers}")
+    print(f"- cycles/hour: {report.cycles_per_hour:.2f}")
+    print(f"- estimated cycles/day: {report.estimated_cycles_per_day:.2f}")
+    print("")
+    print("Capital:")
+    print(f"- average capital used: {report.average_capital_used:.2f}")
+    print(f"- maximum capital used: {report.maximum_capital_used:.2f}")
+    print(f"- average layers in market: {report.average_layers_in_market:.2f}")
+    print(f"- maximum simultaneous layers: {report.maximum_simultaneous_layers}")
+    print("")
+    print("Profit:")
+    print(f"- gross profit: {report.gross_profit:.8f}")
+    print(f"- net profit: {report.net_profit:.8f}")
+    print(f"- average profit per layer: {report.average_profit_per_layer:.8f}")
+    print(f"- median profit: {report.median_profit:.8f}")
+    print("")
+    print("Risk:")
+    print(f"- max drawdown: {report.max_drawdown:.8f}")
+    print(f"- worst unrealized drawdown: {report.worst_unrealized_drawdown:.8f}")
+    print(f"- longest recovery: {_format_optional_seconds(report.longest_recovery_seconds)}")
+    print(
+        "- all layers occupied: "
+        f"{report.all_layers_occupied_count} times, "
+        f"avg={_format_optional_seconds(report.all_layers_average_duration_seconds)}, "
+        f"longest={_format_optional_seconds(report.all_layers_longest_duration_seconds)}"
+    )
+    print("")
+    print("Occupancy histogram:")
+    for layer_count in sorted(report.occupancy_histogram):
+        print(f"- {layer_count} layers: {report.occupancy_histogram[layer_count]}")
+    print("")
+    print("Timeout:")
+    print(f"- timeout closes: {report.timeout_closes}")
+    print(f"- timeout wins: {report.timeout_wins}")
+    print(f"- timeout losses: {report.timeout_losses}")
+    print("")
+    print("Target:")
+    print(f"- target closes: {report.target_closes}")
+    print(f"- target wins: {report.target_wins}")
+    print("")
+    print("Skipped opportunities:")
+    print(f"- all layers occupied: {report.skipped_opportunities_no_layer}")
+    print(f"- layer spacing active: {report.skipped_opportunities_spacing}")
+    print("")
+    print("Comparison vs mean_reversion_hf_micro_v1:")
+    comparison = report.comparison
+    print(
+        f"- HF v1: net={comparison.baseline_net_profit:.8f}, "
+        f"drawdown={comparison.baseline_drawdown:.8f}, cycles/day={comparison.baseline_cycles_per_day:.2f}"
+    )
+    print(
+        f"- HF Grid: net={comparison.grid_net_profit:.8f}, "
+        f"drawdown={comparison.grid_drawdown:.8f}, cycles/day={comparison.grid_cycles_per_day:.2f}, "
+        f"capital_utilization={comparison.capital_utilization * 100:.2f}%"
+    )
+    print(f"- verdict: {comparison.verdict}")
+    print("")
+    print(f"Recommendation score: {report.recommendation_score:.4f}")
+    print(f"Recommendation: {report.recommendation}")
 
 
 def _print_micro_cycle_grid_section(title: str, rows, engine: MicroCycleGridSearchEngine) -> None:
@@ -5053,6 +5154,37 @@ def build_parser() -> argparse.ArgumentParser:
     micro_cycle_grid_search_parser.add_argument("--max-drawdown", type=float, default=0.005)
     micro_cycle_grid_search_parser.add_argument("--export-csv", default=None)
     micro_cycle_grid_search_parser.set_defaults(func=command_micro_cycle_grid_search)
+
+    hf_micro_grid_sim_parser = subparsers.add_parser(
+        "hf-micro-grid-sim",
+        help="Dry-run HF micro-cycle grid simulation with layered capital allocation",
+    )
+    hf_micro_grid_sim_parser.add_argument(
+        "--scenario",
+        choices=MICRO_CYCLE_SCENARIOS,
+        default=HF_GRID_DEFAULT_SCENARIO,
+    )
+    hf_micro_grid_sim_parser.add_argument(
+        "--target",
+        type=_positive_decimal_float,
+        default=HF_GRID_DEFAULT_TARGET_PERCENT,
+    )
+    hf_micro_grid_sim_parser.add_argument(
+        "--max-holding-seconds",
+        type=_positive_decimal_float,
+        default=HF_GRID_DEFAULT_MAX_HOLDING_SECONDS,
+    )
+    hf_micro_grid_sim_parser.add_argument(
+        "--layer-size",
+        type=_positive_decimal_float,
+        default=HF_GRID_DEFAULT_LAYER_SIZE,
+    )
+    hf_micro_grid_sim_parser.add_argument(
+        "--max-layers",
+        type=_positive_int,
+        default=HF_GRID_DEFAULT_MAX_LAYERS,
+    )
+    hf_micro_grid_sim_parser.set_defaults(func=command_hf_micro_grid_sim)
 
     target_resolution_parser = subparsers.add_parser(
         "target-resolution-diagnostics",
