@@ -206,7 +206,12 @@ class PaperTradingEngine:
                 target_profit=decision.target_profit,
             )
             if opened_cycle:
-                self.database.save_paper_cycle(opened_cycle, strategy_profile=self.strategy_profile)
+                row_id = self.database.save_paper_cycle(opened_cycle, strategy_profile=self.strategy_profile)
+                self._save_hf_entry_diagnostics(
+                    paper_cycle_id=row_id,
+                    market_state=market_state,
+                    decision=decision,
+                )
                 opened += 1
 
         if self.state_manager.current_state == PaperState.RUNNING:
@@ -222,6 +227,47 @@ class PaperTradingEngine:
             safety_stop_reason=safety_stop_reason,
             safety_diagnostics=safety_diagnostics,
         )
+
+    def _save_hf_entry_diagnostics(self, *, paper_cycle_id: int, market_state, decision) -> None:
+        if self.strategy_profile != "mean_reversion_hf_micro_v1":
+            return
+        save_method = getattr(self.database, "save_hf_paper_cycle_entry_diagnostics", None)
+        if not callable(save_method):
+            return
+        save_method(
+            paper_cycle_id=paper_cycle_id,
+            strategy_profile=self.strategy_profile,
+            current_price=self._optional_float(getattr(market_state, "price", None)),
+            short_center=self._optional_float(getattr(market_state, "short_center", None)),
+            previous_price=self._optional_float(getattr(market_state, "hf_previous_price", None)),
+            last_different_price=self._optional_float(getattr(market_state, "hf_last_different_price", None)),
+            hf_entry_mode=str(getattr(market_state, "hf_entry_mode", "")) or None,
+            price_buffer_unique_values=self._optional_int(
+                getattr(market_state, "hf_price_buffer_unique_values", None)
+            ),
+            flat_samples_count=self._optional_int(getattr(market_state, "hf_flat_samples_count", None)),
+            flat_price_buffer=getattr(market_state, "hf_flat_price_buffer", None),
+            entry_direction=decision.action,
+            entry_reason=decision.reason,
+        )
+
+    @staticmethod
+    def _optional_float(value) -> float | None:
+        if value is None:
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _optional_int(value) -> int | None:
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
 
     def _load_safety_cycles(self) -> list[tuple]:
         if self.strategy_profile == "mean_reversion_hf_micro_v1":

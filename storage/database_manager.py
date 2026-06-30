@@ -327,6 +327,25 @@ class DatabaseManager:
                 )
             """)
             conn.execute("""
+                CREATE TABLE IF NOT EXISTS hf_paper_cycle_entry_diagnostics (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    paper_cycle_id INTEGER NOT NULL UNIQUE,
+                    timestamp TEXT NOT NULL,
+                    strategy_profile TEXT NOT NULL,
+                    current_price REAL,
+                    short_center REAL,
+                    previous_price REAL,
+                    last_different_price REAL,
+                    hf_entry_mode TEXT,
+                    price_buffer_unique_values INTEGER,
+                    flat_samples_count INTEGER,
+                    flat_price_buffer INTEGER,
+                    entry_direction TEXT,
+                    entry_reason TEXT,
+                    FOREIGN KEY(paper_cycle_id) REFERENCES paper_cycles(id)
+                )
+            """)
+            conn.execute("""
                 CREATE TABLE IF NOT EXISTS paper_safety_events (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     timestamp TEXT NOT NULL,
@@ -1279,6 +1298,53 @@ class DatabaseManager:
                 cycle.id = row_id
             conn.commit()
             return row_id
+
+    def save_hf_paper_cycle_entry_diagnostics(
+        self,
+        *,
+        paper_cycle_id: int,
+        strategy_profile: str,
+        current_price: float | None,
+        short_center: float | None,
+        previous_price: float | None,
+        last_different_price: float | None,
+        hf_entry_mode: str | None,
+        price_buffer_unique_values: int | None,
+        flat_samples_count: int | None,
+        flat_price_buffer: bool | None,
+        entry_direction: str,
+        entry_reason: str,
+    ) -> int:
+        from datetime import datetime
+
+        with self.connect() as conn:
+            cursor = conn.execute(
+                """
+                INSERT OR REPLACE INTO hf_paper_cycle_entry_diagnostics (
+                    paper_cycle_id, timestamp, strategy_profile,
+                    current_price, short_center, previous_price, last_different_price,
+                    hf_entry_mode, price_buffer_unique_values, flat_samples_count,
+                    flat_price_buffer, entry_direction, entry_reason
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    paper_cycle_id,
+                    datetime.utcnow().isoformat(),
+                    strategy_profile,
+                    current_price,
+                    short_center,
+                    previous_price,
+                    last_different_price,
+                    hf_entry_mode,
+                    price_buffer_unique_values,
+                    flat_samples_count,
+                    None if flat_price_buffer is None else int(bool(flat_price_buffer)),
+                    entry_direction,
+                    entry_reason,
+                ),
+            )
+            conn.commit()
+            return int(cursor.lastrowid)
 
     def load_recent_paper_cycles(self, limit: int = 20) -> list[tuple]:
         with self.connect() as conn:

@@ -67,6 +67,7 @@ from analytics.holding_horizon_diagnostics_engine import HoldingHorizonDiagnosti
 from analytics.high_frequency_dataset_summary_engine import HighFrequencyDatasetSummaryEngine
 from analytics.high_frequency_diagnostics_engine import HighFrequencyDiagnosticsEngine
 from analytics.high_frequency_snapshot_collector import HighFrequencySnapshotCollector
+from analytics.hf_losing_cycle_diagnostics_engine import HFLosingCycleDiagnosticsEngine
 from analytics.max_holding_sensitivity_engine import MaxHoldingSensitivityEngine
 from analytics.market_session_diagnostics_engine import MarketSessionDiagnosticsEngine
 from analytics.ml_baseline_trainer import MLBaselineTrainer
@@ -2829,6 +2830,82 @@ def command_paper_outlier_validation(args) -> None:
     print(f"Recommendation: {summary.recommendation}")
 
 
+def command_hf_losing_cycle_diagnostics(args) -> None:
+    _config, _logger, database = build_context()
+    report = HFLosingCycleDiagnosticsEngine(database).build_report(
+        profile=args.profile,
+        since_id=args.since_id,
+        limit=args.limit,
+    )
+
+    print("=== HF Losing Cycle Diagnostics ===")
+    print(f"Profile: {report.profile}")
+    print(f"Since id: {report.since_id}")
+    print(f"Limit: {report.limit if report.limit is not None else 'N/A'}")
+    print("")
+    print("Summary:")
+    print(f"Total cycles: {report.total_cycles}")
+    print(f"Losing cycles count: {report.losing_cycles_count}")
+    print(f"Losing cycles rate: {report.losing_cycles_rate * 100:.2f}%")
+    print(f"Total loss net: {report.total_loss_net:.8f}")
+    print(f"Average loss: {report.average_loss:.8f}")
+    print(f"Median loss: {report.median_loss:.8f}")
+    print(f"Worst loss: {report.worst_loss:.8f}")
+    print(f"BUY losses: count={report.buy_losses_count} net={report.buy_losses_net:.8f}")
+    print(f"SELL losses: count={report.sell_losses_count} net={report.sell_losses_net:.8f}")
+    print(f"Timeout losses: count={report.timeout_losses_count} net={report.timeout_losses_net:.8f}")
+    print(f"Target losses: count={report.target_losses_count} net={report.target_losses_net:.8f}")
+    print("")
+    print("Loss categories:")
+    if report.categories:
+        for item in report.categories:
+            print(
+                f"- {item.category}: count={item.count} "
+                f"net={item.net_loss:.8f} avg={item.average_loss:.8f}"
+            )
+    else:
+        print("- No losing cycles.")
+    print("")
+    print("Losing cycles:")
+    if report.details:
+        for detail in report.details:
+            print(
+                f"- db_id={detail.db_id} direction={detail.direction} "
+                f"open={detail.open_price:.8f} close={detail.close_price:.8f} "
+                f"target={detail.target_price:.8f} net={detail.net_profit:.8f} "
+                f"reason={detail.close_reason} category={detail.category}"
+            )
+            print(
+                f"  holding={_format_optional_duration(detail.holding_time_seconds)} "
+                f"immediate_adverse={detail.immediate_adverse_move} "
+                f"against_short_center_movement={detail.against_short_center_movement} "
+                f"flat_before_entry={detail.flat_before_entry} "
+                f"last_different_fallback={detail.last_different_fallback_used}"
+            )
+            print(
+                f"  entry_context: short_center={detail.short_center_at_entry} "
+                f"entry_price={detail.current_price_at_entry} previous_price={detail.previous_price} "
+                f"last_different_price={detail.last_different_price} "
+                f"hf_entry_mode={detail.hf_entry_mode} "
+                f"unique_values={detail.price_buffer_unique_values} "
+                f"flat_samples={detail.flat_samples_count} flat_buffer={detail.flat_price_buffer}"
+            )
+            print(
+                f"  movement: max_favorable={detail.max_favorable_move} "
+                f"max_adverse={detail.max_adverse_move} "
+                f"target_touched={detail.did_price_ever_touch_target_before_timeout} "
+                f"min_distance_to_target={detail.minimum_distance_to_target} "
+                f"near_target_samples={detail.near_target_samples} "
+                f"price_at_timeout_close={detail.price_at_timeout_close}"
+            )
+    else:
+        print("- No losing cycles.")
+    print("")
+    print("Recommendations:")
+    for item in report.recommendations:
+        print(f"- {item}")
+
+
 def _print_profile_cycle_summary(cycle) -> None:
     if cycle is None:
         print("- No realized cycles.")
@@ -4572,6 +4649,29 @@ def build_parser() -> argparse.ArgumentParser:
         help="Only include paper cycles with database id greater than this value",
     )
     paper_outlier_validation_parser.set_defaults(func=command_paper_outlier_validation)
+
+    hf_losing_cycle_diagnostics_parser = subparsers.add_parser(
+        "hf-losing-cycle-diagnostics",
+        help="Show diagnostics for losing HF paper profile cycles",
+    )
+    hf_losing_cycle_diagnostics_parser.add_argument(
+        "--profile",
+        choices=SUPPORTED_RUNTIME_STRATEGY_PROFILES,
+        default="mean_reversion_hf_micro_v1",
+    )
+    hf_losing_cycle_diagnostics_parser.add_argument(
+        "--since-id",
+        type=int,
+        default=0,
+        help="Only include paper cycles with database id greater than this value",
+    )
+    hf_losing_cycle_diagnostics_parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Maximum losing cycles to include in detail output",
+    )
+    hf_losing_cycle_diagnostics_parser.set_defaults(func=command_hf_losing_cycle_diagnostics)
 
     notifications_parser = subparsers.add_parser("notifications", help="РџРѕРєР°Р·Р°С‚Рё РїРѕРІС–РґРѕРјР»РµРЅРЅСЏ")
     notifications_parser.add_argument("--limit", type=int, default=10)

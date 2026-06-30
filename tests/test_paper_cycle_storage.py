@@ -244,3 +244,66 @@ def test_database_loads_new_paper_cycle_collection_stats_after_baseline(tmp_path
     assert stats["net_profit"] == pytest.approx(-0.02)
     assert stats["winning_cycles"] == 1
     assert stats["win_rate"] == pytest.approx(1 / 3)
+
+
+def test_database_saves_hf_paper_cycle_entry_diagnostics(tmp_path: Path):
+    database = DatabaseManager(str(tmp_path / "bot.sqlite"))
+    opened_at = datetime.utcnow()
+    cycle = PaperCycle(
+        id=0,
+        direction=PaperOrderSide.BUY_USDC,
+        status=PaperCycleStatus.CLOSED,
+        open_price=1.0,
+        close_price=0.9999,
+        quantity=10.0,
+        open_fee=0.0,
+        close_fee=0.0,
+        gross_profit=-0.001,
+        net_profit=-0.001,
+        opened_at=opened_at,
+        closed_at=opened_at,
+    )
+    setattr(cycle, "close_reason", "max_holding_270s")
+    db_id = database.save_paper_cycle(cycle, strategy_profile="mean_reversion_hf_micro_v1")
+
+    row_id = database.save_hf_paper_cycle_entry_diagnostics(
+        paper_cycle_id=db_id,
+        strategy_profile="mean_reversion_hf_micro_v1",
+        current_price=1.0,
+        short_center=1.0001,
+        previous_price=1.00005,
+        last_different_price=1.00005,
+        hf_entry_mode="short_center",
+        price_buffer_unique_values=2,
+        flat_samples_count=0,
+        flat_price_buffer=False,
+        entry_direction="BUY_USDC",
+        entry_reason="mean_reversion_hf_micro_v1: price below short_center",
+    )
+
+    with database.connect() as conn:
+        row = conn.execute(
+            """
+            SELECT id, paper_cycle_id, strategy_profile, current_price, short_center,
+                   previous_price, last_different_price, hf_entry_mode,
+                   price_buffer_unique_values, flat_samples_count, flat_price_buffer,
+                   entry_direction, entry_reason
+            FROM hf_paper_cycle_entry_diagnostics
+            WHERE paper_cycle_id = ?
+            """,
+            (db_id,),
+        ).fetchone()
+
+    assert row[0] == row_id
+    assert row[1] == db_id
+    assert row[2] == "mean_reversion_hf_micro_v1"
+    assert row[3] == pytest.approx(1.0)
+    assert row[4] == pytest.approx(1.0001)
+    assert row[5] == pytest.approx(1.00005)
+    assert row[6] == pytest.approx(1.00005)
+    assert row[7] == "short_center"
+    assert row[8] == 2
+    assert row[9] == 0
+    assert row[10] == 0
+    assert row[11] == "BUY_USDC"
+    assert row[12] == "mean_reversion_hf_micro_v1: price below short_center"
