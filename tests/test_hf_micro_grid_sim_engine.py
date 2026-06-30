@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from analytics.hf_micro_grid_guard_sweep_engine import HFMicroGridGuardSweepEngine
 from analytics.hf_micro_grid_sim_engine import HFMicroGridSimulationEngine
 from analytics.micro_cycle_sim_engine import MicroCycleSimulationEngine
 from storage.database_manager import DatabaseManager
@@ -60,6 +61,8 @@ def _simulate(test_config, tmp_path: Path, snapshots: list[dict], **overrides):
         max_layers=overrides.pop("max_layers", 10),
         baseline=None,
         directional_exposure_guard=overrides.pop("directional_exposure_guard", False),
+        guard_min_layers=overrides.pop("guard_min_layers", 1),
+        guard_loss_threshold=overrides.pop("guard_loss_threshold", 0.0),
     )
 
 
@@ -366,3 +369,109 @@ def test_hf_micro_grid_directional_guard_improves_drawdown_vs_grid_v1(test_confi
     assert report.grid_v1_comparison is not None
     assert report.directional_guard_blocks >= 1
     assert report.max_total_equity_drawdown > report.grid_v1_comparison.grid_v1_drawdown
+
+
+def test_hf_micro_grid_guard_allows_same_direction_before_min_layers(test_config, tmp_path: Path) -> None:
+    report = _simulate(
+        test_config,
+        tmp_path,
+        [
+            _snapshot(timestamp="2026-06-26T13:00:00", price=1.0),
+            _snapshot(timestamp="2026-06-26T13:04:30", price=0.9999),
+        ],
+        directional_exposure_guard=True,
+        guard_min_layers=2,
+        guard_loss_threshold=0.0,
+    )
+
+    assert report.opened_layers == 2
+    assert report.directional_guard_blocks == 0
+
+
+def test_hf_micro_grid_guard_blocks_only_when_loss_threshold_reached(test_config, tmp_path: Path) -> None:
+    allowed_dir = tmp_path / "allowed"
+    blocked_dir = tmp_path / "blocked"
+    allowed_dir.mkdir()
+    blocked_dir.mkdir()
+    allowed = _simulate(
+        test_config,
+        allowed_dir,
+        [
+            _snapshot(timestamp="2026-06-26T13:00:00", price=1.0),
+            _snapshot(timestamp="2026-06-26T13:04:30", price=0.99998),
+        ],
+        directional_exposure_guard=True,
+        guard_min_layers=1,
+        guard_loss_threshold=-0.001,
+    )
+    blocked = _simulate(
+        test_config,
+        blocked_dir,
+        [
+            _snapshot(timestamp="2026-06-26T13:00:00", price=1.0),
+            _snapshot(timestamp="2026-06-26T13:04:30", price=0.9998),
+        ],
+        directional_exposure_guard=True,
+        guard_min_layers=1,
+        guard_loss_threshold=-0.001,
+    )
+
+    assert allowed.directional_guard_blocks == 0
+    assert allowed.opened_layers == 2
+    assert blocked.directional_guard_blocks == 1
+    assert blocked.opened_layers == 1
+
+
+def test_hf_micro_grid_guard_sweep_produces_multiple_rows(test_config, tmp_path: Path) -> None:
+    database = _database_with_snapshots(tmp_path, [
+        _snapshot(timestamp="2026-06-26T13:00:00", price=1.0),
+        _snapshot(timestamp="2026-06-26T13:04:30", price=0.9999),
+        _snapshot(timestamp="2026-06-26T13:09:00", price=0.9998),
+    ])
+
+    report = HFMicroGridGuardSweepEngine(database, test_config).run(top=5)
+
+    assert report.total_results > 1
+    assert report.grid_v1_reference.directional_exposure_guard is False
+    assert report.results[0].directional_exposure_guard is True
+
+
+def test_hf_micro_grid_guard_sweep_balanced_filtering(test_config, tmp_path: Path) -> None:
+    database = _database_with_snapshots(tmp_path, [
+        _snapshot(timestamp="2026-06-26T13:00:00", price=1.0),
+        _snapshot(timestamp="2026-06-26T13:04:30", price=0.9999),
+        _snapshot(timestamp="2026-06-26T13:09:00", price=1.00002, short_center=1.00012),
+        _snapshot(timestamp="2026-06-26T13:14:00", price=1.00004, short_center=1.00014),
+    ])
+
+    report = HFMicroGridGuardSweepEngine(database, test_config).run(
+        top=5,
+        min_cycles_day=0,
+        max_drawdown=1.0,
+        max_average_capital=100.0,
+    )
+
+    assert isinstance(report.balanced_candidates, list)
+
+
+def test_hf_micro_grid_guard_sweep_export_csv(test_config, tmp_path: Path) -> None:
+    database = _database_with_snapshots(tmp_path, [
+        _snapshot(timestamp="2026-06-26T13:00:00", price=1.0),
+        _snapshot(timestamp="2026-06-26T13:04:30", price=0.9999),
+    ])
+    engine = HFMicroGridGuardSweepEngine(database, test_config)
+    report = engine.run(top=3)
+
+    output_path = engine.export_csv(tmp_path / "guard_sweep.csv", report.results)
+
+    assert output_path.exists()
+    assert "guard_min_layers" in output_path.read_text(encoding="utf-8")
+
+
+def test_hf_micro_grid_guard_sweep_empty_dataset(test_config, tmp_path: Path) -> None:
+    database = _database_with_snapshots(tmp_path, [])
+
+    report = HFMicroGridGuardSweepEngine(database, test_config).run(top=3)
+
+    assert report.total_results > 0
+    assert all(item.total_samples == 0 for item in report.results)

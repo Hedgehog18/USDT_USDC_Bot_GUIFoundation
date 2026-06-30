@@ -24,6 +24,8 @@ HF_GRID_MAX_TOTAL_EQUITY_DRAWDOWN = -0.01
 HF_GRID_WORST_OPEN_BASKET_LOSS = -0.02
 HF_GRID_MAX_FULL_CAPITAL_SECONDS = 1800.0
 HF_GRID_MAX_FINAL_UNREALIZED_LOSS = -0.005
+HF_GRID_DEFAULT_GUARD_MIN_LAYERS = 1
+HF_GRID_DEFAULT_GUARD_LOSS_THRESHOLD = 0.0
 
 
 @dataclass(frozen=True)
@@ -136,6 +138,8 @@ class HFMicroGridSimulationReport:
     layer_size: float
     max_layers: int
     directional_exposure_guard: bool
+    guard_min_layers: int
+    guard_loss_threshold: float
     directional_guard_blocks: int
     directional_guard_buy_blocks: int
     directional_guard_sell_blocks: int
@@ -220,6 +224,8 @@ class HFMicroGridSimulationEngine:
         layer_size: float = HF_GRID_DEFAULT_LAYER_SIZE,
         max_layers: int = HF_GRID_DEFAULT_MAX_LAYERS,
         directional_exposure_guard: bool = False,
+        guard_min_layers: int = HF_GRID_DEFAULT_GUARD_MIN_LAYERS,
+        guard_loss_threshold: float = HF_GRID_DEFAULT_GUARD_LOSS_THRESHOLD,
     ) -> HFMicroGridSimulationReport:
         rows = self.micro_engine._load_rows()
         baseline = self.micro_engine.simulate(
@@ -239,6 +245,8 @@ class HFMicroGridSimulationEngine:
                 max_layers=max_layers,
                 baseline=baseline,
                 directional_exposure_guard=False,
+                guard_min_layers=guard_min_layers,
+                guard_loss_threshold=guard_loss_threshold,
             )
         return self.simulate(
             rows=rows,
@@ -249,6 +257,8 @@ class HFMicroGridSimulationEngine:
             max_layers=max_layers,
             baseline=baseline,
             directional_exposure_guard=directional_exposure_guard,
+            guard_min_layers=guard_min_layers,
+            guard_loss_threshold=guard_loss_threshold,
             grid_v1_reference=grid_v1_reference,
         )
 
@@ -263,6 +273,8 @@ class HFMicroGridSimulationEngine:
         max_layers: int,
         baseline: MicroCycleSimulationResult | None = None,
         directional_exposure_guard: bool = False,
+        guard_min_layers: int = HF_GRID_DEFAULT_GUARD_MIN_LAYERS,
+        guard_loss_threshold: float = HF_GRID_DEFAULT_GUARD_LOSS_THRESHOLD,
         grid_v1_reference: HFMicroGridSimulationReport | None = None,
     ) -> HFMicroGridSimulationReport:
         self._validate(
@@ -271,6 +283,7 @@ class HFMicroGridSimulationEngine:
             max_holding_seconds=max_holding_seconds,
             layer_size=layer_size,
             max_layers=max_layers,
+            guard_min_layers=guard_min_layers,
         )
 
         active_layers: list[_GridLayer] = []
@@ -343,7 +356,13 @@ class HFMicroGridSimulationEngine:
                     skipped_no_layer += 1
                 elif last_opened_at is not None and self._holding_seconds(last_opened_at, timestamp) < max_holding_seconds:
                     skipped_spacing += 1
-                elif directional_exposure_guard and self._directional_guard_blocks(direction, active_layers, row["price"]):
+                elif directional_exposure_guard and self._directional_guard_blocks(
+                    direction,
+                    active_layers,
+                    row["price"],
+                    guard_min_layers=guard_min_layers,
+                    guard_loss_threshold=guard_loss_threshold,
+                ):
                     directional_guard_blocks += 1
                     if direction == "BUY":
                         directional_guard_buy_blocks += 1
@@ -550,6 +569,8 @@ class HFMicroGridSimulationEngine:
             layer_size=layer_size,
             max_layers=max_layers,
             directional_exposure_guard=directional_exposure_guard,
+            guard_min_layers=guard_min_layers,
+            guard_loss_threshold=guard_loss_threshold,
             directional_guard_blocks=directional_guard_blocks,
             directional_guard_buy_blocks=directional_guard_buy_blocks,
             directional_guard_sell_blocks=directional_guard_sell_blocks,
@@ -809,14 +830,22 @@ class HFMicroGridSimulationEngine:
             opened_at=row["parsed_timestamp"],
         )
 
-    def _directional_guard_blocks(self, direction: str, active_layers: list[_GridLayer], current_price: float) -> bool:
+    def _directional_guard_blocks(
+        self,
+        direction: str,
+        active_layers: list[_GridLayer],
+        current_price: float,
+        *,
+        guard_min_layers: int,
+        guard_loss_threshold: float,
+    ) -> bool:
         same_direction_pnl = sum(
             self._profit(layer, current_price).net_profit
             for layer in active_layers
             if layer.direction == direction
         )
         same_direction_count = sum(1 for layer in active_layers if layer.direction == direction)
-        return same_direction_count > 0 and same_direction_pnl < 0
+        return same_direction_count >= guard_min_layers and same_direction_pnl <= guard_loss_threshold
 
     def _close_reason(
         self,
@@ -1013,6 +1042,7 @@ class HFMicroGridSimulationEngine:
         max_holding_seconds: float,
         layer_size: float,
         max_layers: int,
+        guard_min_layers: int = HF_GRID_DEFAULT_GUARD_MIN_LAYERS,
     ) -> None:
         if scenario not in MICRO_CYCLE_SCENARIOS:
             raise ValueError(f"Unsupported micro-cycle scenario: {scenario}")
@@ -1024,6 +1054,8 @@ class HFMicroGridSimulationEngine:
             raise ValueError("layer_size must be greater than 0.")
         if max_layers <= 0:
             raise ValueError("max_layers must be greater than 0.")
+        if guard_min_layers <= 0:
+            raise ValueError("guard_min_layers must be greater than 0.")
 
     @staticmethod
     def _parse_datetime(value: str) -> datetime | None:

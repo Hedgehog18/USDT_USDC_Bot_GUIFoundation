@@ -1086,6 +1086,10 @@ def test_manage_cli_has_hf_micro_grid_sim_command():
         "--target",
         "0.0005",
         "--directional-exposure-guard",
+        "--guard-min-layers",
+        "2",
+        "--guard-loss-threshold",
+        "-0.001",
         "--show-drawdown-events",
         "--drawdown-events-limit",
         "7",
@@ -1098,8 +1102,34 @@ def test_manage_cli_has_hf_micro_grid_sim_command():
     assert args.max_holding_seconds == 270.0
     assert args.target == 0.0005
     assert args.directional_exposure_guard is True
+    assert args.guard_min_layers == 2
+    assert args.guard_loss_threshold == -0.001
     assert args.show_drawdown_events is True
     assert args.drawdown_events_limit == 7
+
+
+def test_manage_cli_has_hf_micro_grid_guard_sweep_command():
+    parser = build_parser()
+    args = parser.parse_args([
+        "hf-micro-grid-guard-sweep",
+        "--top",
+        "10",
+        "--min-cycles-day",
+        "150",
+        "--max-drawdown",
+        "0.01",
+        "--max-average-capital",
+        "50",
+        "--export-csv",
+        "reports/hf_micro_grid_guard_sweep.csv",
+    ])
+
+    assert args.command == "hf-micro-grid-guard-sweep"
+    assert args.top == 10
+    assert args.min_cycles_day == 150.0
+    assert args.max_drawdown == 0.01
+    assert args.max_average_capital == 50.0
+    assert args.export_csv == "reports/hf_micro_grid_guard_sweep.csv"
 
 
 def test_manage_cli_has_target_resolution_compare_command():

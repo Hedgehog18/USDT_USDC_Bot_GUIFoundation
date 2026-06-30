@@ -68,8 +68,11 @@ from analytics.high_frequency_dataset_summary_engine import HighFrequencyDataset
 from analytics.high_frequency_diagnostics_engine import HighFrequencyDiagnosticsEngine
 from analytics.high_frequency_snapshot_collector import HighFrequencySnapshotCollector
 from analytics.hf_losing_cycle_diagnostics_engine import HFLosingCycleDiagnosticsEngine
+from analytics.hf_micro_grid_guard_sweep_engine import HFMicroGridGuardSweepEngine
 from analytics.hf_micro_grid_sim_engine import (
     HF_GRID_DEFAULT_LAYER_SIZE,
+    HF_GRID_DEFAULT_GUARD_LOSS_THRESHOLD,
+    HF_GRID_DEFAULT_GUARD_MIN_LAYERS,
     HF_GRID_DEFAULT_MAX_HOLDING_SECONDS,
     HF_GRID_DEFAULT_MAX_LAYERS,
     HF_GRID_DEFAULT_SCENARIO,
@@ -139,6 +142,16 @@ def _positive_decimal_float(raw: str) -> float:
         raise argparse.ArgumentTypeError("value must be a positive decimal number.") from exc
     if not value.is_finite() or value <= 0:
         raise argparse.ArgumentTypeError("value must be greater than 0.")
+    return float(value)
+
+
+def _decimal_float(raw: str) -> float:
+    try:
+        value = Decimal(raw)
+    except (InvalidOperation, ValueError) as exc:
+        raise argparse.ArgumentTypeError("value must be a decimal number.") from exc
+    if not value.is_finite():
+        raise argparse.ArgumentTypeError("value must be finite.")
     return float(value)
 
 
@@ -2327,6 +2340,8 @@ def command_hf_micro_grid_sim(args) -> None:
         layer_size=args.layer_size,
         max_layers=args.max_layers,
         directional_exposure_guard=args.directional_exposure_guard,
+        guard_min_layers=args.guard_min_layers,
+        guard_loss_threshold=args.guard_loss_threshold,
     )
 
     print("=== HF Micro Grid Simulation ===")
@@ -2338,6 +2353,9 @@ def command_hf_micro_grid_sim(args) -> None:
     print(f"Layer size: {report.layer_size:.2f} USD")
     print(f"Maximum layers: {report.max_layers}")
     print(f"Directional exposure guard: {'ON' if report.directional_exposure_guard else 'OFF'}")
+    if report.directional_exposure_guard:
+        print(f"Guard min layers: {report.guard_min_layers}")
+        print(f"Guard loss threshold: {report.guard_loss_threshold:.8f}")
     print("")
     print("Total:")
     print(f"- opened layers: {report.opened_layers}")
@@ -2426,6 +2444,8 @@ def command_hf_micro_grid_sim(args) -> None:
     print("")
     print("Directional Exposure Guard:")
     print(f"- enabled: {'yes' if report.directional_exposure_guard else 'no'}")
+    print(f"- guard_min_layers: {report.guard_min_layers}")
+    print(f"- guard_loss_threshold: {report.guard_loss_threshold:.8f}")
     print(f"- directional_guard_blocks: {report.directional_guard_blocks}")
     print(f"- blocked BUY layers: {report.directional_guard_buy_blocks}")
     print(f"- blocked SELL layers: {report.directional_guard_sell_blocks}")
@@ -2534,6 +2554,74 @@ def _print_hf_grid_drawdown_bucket(rows) -> None:
             f"- {key}: count={bucket.count} "
             f"avg_drawdown={bucket.average_drawdown:.8f} worst_drawdown={bucket.worst_drawdown:.8f}"
         )
+
+
+def command_hf_micro_grid_guard_sweep(args) -> None:
+    config, _logger, database = build_context()
+    engine = HFMicroGridGuardSweepEngine(database, config)
+    report = engine.run(
+        top=args.top,
+        min_cycles_day=args.min_cycles_day,
+        max_drawdown=args.max_drawdown,
+        max_average_capital=args.max_average_capital,
+    )
+
+    print("=== HF Micro Grid Directional Guard Sweep ===")
+    print("Diagnostics only. No paper cycles, no orders, no runtime strategy changes.")
+    print("Base parameters: scenario=short_term_mean_reversion target=0.00050% layer_size=10 max_layers=10 spacing=180s")
+    print(f"Total guard variants: {report.total_results}")
+    print("")
+    reference = report.grid_v1_reference
+    print("Reference rows:")
+    print(
+        f"- Grid v1 no guard: net={reference.net_profit:.8f}, "
+        f"cycles/day={reference.estimated_cycles_per_day:.2f}, "
+        f"drawdown={reference.max_total_equity_drawdown:.8f}, "
+        f"worst_basket={reference.worst_open_basket_loss:.8f}, "
+        f"max_layers={reference.maximum_simultaneous_layers}, "
+        f"avg_capital={reference.average_capital_used:.2f}, "
+        f"recommendation={reference.recommendation}"
+    )
+    print(
+        f"- HF v1 baseline: net={reference.comparison.baseline_net_profit:.8f}, "
+        f"cycles/day={reference.comparison.baseline_cycles_per_day:.2f}, "
+        f"drawdown={reference.comparison.baseline_drawdown:.8f}"
+    )
+    print("")
+    _print_hf_grid_guard_sweep_section("Top by recommendation score", report.top_by_score)
+    _print_hf_grid_guard_sweep_section(
+        "Top by net profit with drawdown better than -0.015",
+        report.top_by_net_profit_with_drawdown,
+    )
+    _print_hf_grid_guard_sweep_section(
+        "Top by lowest drawdown with positive net",
+        report.top_by_lowest_drawdown_positive_net,
+    )
+    _print_hf_grid_guard_sweep_section("Balanced candidates", report.balanced_candidates)
+
+    if args.export_csv:
+        output_path = engine.export_csv(args.export_csv, report.results)
+        print(f"CSV exported: {output_path}")
+
+
+def _print_hf_grid_guard_sweep_section(title: str, rows) -> None:
+    print(f"--- {title} ---")
+    if not rows:
+        print("No matching candidates.")
+        print("")
+        return
+    for item in rows:
+        print(
+            f"min_layers={item.guard_min_layers} | loss_threshold={item.guard_loss_threshold:.8f} | "
+            f"net={item.net_profit:.8f} | cycles/day={item.estimated_cycles_per_day:.2f} | "
+            f"drawdown={item.max_total_equity_drawdown:.8f} | "
+            f"worst_basket={item.worst_open_basket_loss:.8f} | "
+            f"max_layers={item.maximum_simultaneous_layers} | avg_capital={item.average_capital_used:.2f} | "
+            f"blocks={item.directional_guard_blocks} | buy={item.directional_guard_buy_blocks} | "
+            f"sell={item.directional_guard_sell_blocks} | score={item.recommendation_score:.4f} | "
+            f"recommendation={item.recommendation}"
+        )
+    print("")
 
 
 def _print_micro_cycle_grid_section(title: str, rows, engine: MicroCycleGridSearchEngine) -> None:
@@ -5325,6 +5413,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="Block same-direction layers when that active direction basket is already unrealized-negative",
     )
     hf_micro_grid_sim_parser.add_argument(
+        "--guard-min-layers",
+        type=_positive_int,
+        default=HF_GRID_DEFAULT_GUARD_MIN_LAYERS,
+        help="Minimum same-direction active layers before directional exposure guard can block",
+    )
+    hf_micro_grid_sim_parser.add_argument(
+        "--guard-loss-threshold",
+        type=_decimal_float,
+        default=HF_GRID_DEFAULT_GUARD_LOSS_THRESHOLD,
+        help="Same-direction unrealized basket PnL threshold for directional guard blocking",
+    )
+    hf_micro_grid_sim_parser.add_argument(
         "--show-drawdown-events",
         action="store_true",
         help="Show detailed worst basket drawdown events and aggregate causes",
@@ -5336,6 +5436,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Number of worst drawdown events to print when --show-drawdown-events is used",
     )
     hf_micro_grid_sim_parser.set_defaults(func=command_hf_micro_grid_sim)
+
+    hf_micro_grid_guard_sweep_parser = subparsers.add_parser(
+        "hf-micro-grid-guard-sweep",
+        help="Run diagnostics-only sweep over HF grid directional exposure guard parameters",
+    )
+    hf_micro_grid_guard_sweep_parser.add_argument("--top", type=_positive_int, default=20)
+    hf_micro_grid_guard_sweep_parser.add_argument("--min-cycles-day", type=_positive_decimal_float, default=150.0)
+    hf_micro_grid_guard_sweep_parser.add_argument("--max-drawdown", type=_positive_decimal_float, default=0.01)
+    hf_micro_grid_guard_sweep_parser.add_argument("--max-average-capital", type=_positive_decimal_float, default=50.0)
+    hf_micro_grid_guard_sweep_parser.add_argument("--export-csv", default=None)
+    hf_micro_grid_guard_sweep_parser.set_defaults(func=command_hf_micro_grid_guard_sweep)
 
     target_resolution_parser = subparsers.add_parser(
         "target-resolution-diagnostics",
