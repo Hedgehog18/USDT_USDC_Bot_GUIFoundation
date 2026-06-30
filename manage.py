@@ -2326,6 +2326,7 @@ def command_hf_micro_grid_sim(args) -> None:
         max_holding_seconds=args.max_holding_seconds,
         layer_size=args.layer_size,
         max_layers=args.max_layers,
+        directional_exposure_guard=args.directional_exposure_guard,
     )
 
     print("=== HF Micro Grid Simulation ===")
@@ -2336,6 +2337,7 @@ def command_hf_micro_grid_sim(args) -> None:
     print(f"Max holding/layer spacing: {report.max_holding_seconds:.2f}s")
     print(f"Layer size: {report.layer_size:.2f} USD")
     print(f"Maximum layers: {report.max_layers}")
+    print(f"Directional exposure guard: {'ON' if report.directional_exposure_guard else 'OFF'}")
     print("")
     print("Total:")
     print(f"- opened layers: {report.opened_layers}")
@@ -2422,6 +2424,12 @@ def command_hf_micro_grid_sim(args) -> None:
     print(f"- all layers occupied: {report.skipped_opportunities_no_layer}")
     print(f"- layer spacing active: {report.skipped_opportunities_spacing}")
     print("")
+    print("Directional Exposure Guard:")
+    print(f"- enabled: {'yes' if report.directional_exposure_guard else 'no'}")
+    print(f"- directional_guard_blocks: {report.directional_guard_blocks}")
+    print(f"- blocked BUY layers: {report.directional_guard_buy_blocks}")
+    print(f"- blocked SELL layers: {report.directional_guard_sell_blocks}")
+    print("")
     print("Comparison vs mean_reversion_hf_micro_v1:")
     comparison = report.comparison
     print(
@@ -2434,6 +2442,19 @@ def command_hf_micro_grid_sim(args) -> None:
         f"capital_utilization={comparison.capital_utilization * 100:.2f}%"
     )
     print(f"- verdict: {comparison.verdict}")
+    if report.grid_v1_comparison is not None:
+        grid_v1 = report.grid_v1_comparison
+        print("")
+        print("Comparison vs HF Grid v1:")
+        print(
+            f"- Grid v1: net={grid_v1.grid_v1_net_profit:.8f}, "
+            f"drawdown={grid_v1.grid_v1_drawdown:.8f}, cycles/day={grid_v1.grid_v1_cycles_per_day:.2f}"
+        )
+        print(
+            f"- Guarded Grid: net={grid_v1.guarded_net_profit:.8f}, "
+            f"drawdown={grid_v1.guarded_drawdown:.8f}, cycles/day={grid_v1.guarded_cycles_per_day:.2f}"
+        )
+        print(f"- verdict: {grid_v1.verdict}")
     print("")
     print(f"Recommendation score: {report.recommendation_score:.4f}")
     print(f"Recommendation: {report.recommendation}")
@@ -5297,6 +5318,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--max-layers",
         type=_positive_int,
         default=HF_GRID_DEFAULT_MAX_LAYERS,
+    )
+    hf_micro_grid_sim_parser.add_argument(
+        "--directional-exposure-guard",
+        action="store_true",
+        help="Block same-direction layers when that active direction basket is already unrealized-negative",
     )
     hf_micro_grid_sim_parser.add_argument(
         "--show-drawdown-events",

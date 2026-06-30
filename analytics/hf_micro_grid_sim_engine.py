@@ -54,6 +54,17 @@ class HFMicroGridComparison:
 
 
 @dataclass(frozen=True)
+class HFMicroGridV1Comparison:
+    grid_v1_net_profit: float
+    grid_v1_drawdown: float
+    grid_v1_cycles_per_day: float
+    guarded_net_profit: float
+    guarded_drawdown: float
+    guarded_cycles_per_day: float
+    verdict: str
+
+
+@dataclass(frozen=True)
 class HFMicroGridWorstBasketSnapshot:
     timestamp: str
     active_layers_count: int
@@ -124,6 +135,10 @@ class HFMicroGridSimulationReport:
     max_holding_seconds: float
     layer_size: float
     max_layers: int
+    directional_exposure_guard: bool
+    directional_guard_blocks: int
+    directional_guard_buy_blocks: int
+    directional_guard_sell_blocks: int
     total_samples: int
     sample_span_hours: float
     opened_layers: int
@@ -168,6 +183,7 @@ class HFMicroGridSimulationReport:
     recommendation_score: float
     recommendation: str
     comparison: HFMicroGridComparison
+    grid_v1_comparison: HFMicroGridV1Comparison | None
     worst_basket_snapshot: HFMicroGridWorstBasketSnapshot | None
     final_active_layers: int
     final_unrealized_pnl: float
@@ -203,6 +219,7 @@ class HFMicroGridSimulationEngine:
         max_holding_seconds: float = HF_GRID_DEFAULT_MAX_HOLDING_SECONDS,
         layer_size: float = HF_GRID_DEFAULT_LAYER_SIZE,
         max_layers: int = HF_GRID_DEFAULT_MAX_LAYERS,
+        directional_exposure_guard: bool = False,
     ) -> HFMicroGridSimulationReport:
         rows = self.micro_engine._load_rows()
         baseline = self.micro_engine.simulate(
@@ -211,6 +228,18 @@ class HFMicroGridSimulationEngine:
             target_percent=HF_GRID_DEFAULT_TARGET_PERCENT,
             max_holding_seconds=HF_GRID_DEFAULT_MAX_HOLDING_SECONDS,
         )
+        grid_v1_reference = None
+        if directional_exposure_guard:
+            grid_v1_reference = self.simulate(
+                rows=rows,
+                scenario=scenario,
+                target_percent=target_percent,
+                max_holding_seconds=max_holding_seconds,
+                layer_size=layer_size,
+                max_layers=max_layers,
+                baseline=baseline,
+                directional_exposure_guard=False,
+            )
         return self.simulate(
             rows=rows,
             scenario=scenario,
@@ -219,6 +248,8 @@ class HFMicroGridSimulationEngine:
             layer_size=layer_size,
             max_layers=max_layers,
             baseline=baseline,
+            directional_exposure_guard=directional_exposure_guard,
+            grid_v1_reference=grid_v1_reference,
         )
 
     def simulate(
@@ -231,6 +262,8 @@ class HFMicroGridSimulationEngine:
         layer_size: float,
         max_layers: int,
         baseline: MicroCycleSimulationResult | None = None,
+        directional_exposure_guard: bool = False,
+        grid_v1_reference: HFMicroGridSimulationReport | None = None,
     ) -> HFMicroGridSimulationReport:
         self._validate(
             scenario=scenario,
@@ -284,6 +317,9 @@ class HFMicroGridSimulationEngine:
         layer_additions_count = 0
         layer_additions_worsened_drawdown = 0
         previous_total_drawdown = 0.0
+        directional_guard_blocks = 0
+        directional_guard_buy_blocks = 0
+        directional_guard_sell_blocks = 0
 
         for index, row in enumerate(rows):
             timestamp = row["parsed_timestamp"]
@@ -307,6 +343,12 @@ class HFMicroGridSimulationEngine:
                     skipped_no_layer += 1
                 elif last_opened_at is not None and self._holding_seconds(last_opened_at, timestamp) < max_holding_seconds:
                     skipped_spacing += 1
+                elif directional_exposure_guard and self._directional_guard_blocks(direction, active_layers, row["price"]):
+                    directional_guard_blocks += 1
+                    if direction == "BUY":
+                        directional_guard_buy_blocks += 1
+                    elif direction == "SELL":
+                        directional_guard_sell_blocks += 1
                 else:
                     active_layers.append(
                         self._open_layer(
@@ -494,6 +536,12 @@ class HFMicroGridSimulationEngine:
             average_capital_used=average_layers * layer_size,
             max_capital=max_layers * layer_size,
         )
+        grid_v1_comparison = self._grid_v1_comparison(
+            grid_v1_reference=grid_v1_reference,
+            guarded_net_profit=net_profit,
+            guarded_drawdown=max_total_equity_drawdown,
+            guarded_cycles_per_day=cycles_per_hour * 24.0,
+        )
 
         return HFMicroGridSimulationReport(
             scenario=scenario,
@@ -501,6 +549,10 @@ class HFMicroGridSimulationEngine:
             max_holding_seconds=max_holding_seconds,
             layer_size=layer_size,
             max_layers=max_layers,
+            directional_exposure_guard=directional_exposure_guard,
+            directional_guard_blocks=directional_guard_blocks,
+            directional_guard_buy_blocks=directional_guard_buy_blocks,
+            directional_guard_sell_blocks=directional_guard_sell_blocks,
             total_samples=len(rows),
             sample_span_hours=sample_span_hours,
             opened_layers=opened_layers,
@@ -555,8 +607,10 @@ class HFMicroGridSimulationEngine:
                 final_active_layers=len(active_layers),
                 final_unrealized_pnl=final_unrealized_pnl,
                 comparison=comparison,
+                grid_v1_comparison=grid_v1_comparison,
             ),
             comparison=comparison,
+            grid_v1_comparison=grid_v1_comparison,
             worst_basket_snapshot=worst_basket_snapshot,
             final_active_layers=len(active_layers),
             final_unrealized_pnl=final_unrealized_pnl,
@@ -755,6 +809,15 @@ class HFMicroGridSimulationEngine:
             opened_at=row["parsed_timestamp"],
         )
 
+    def _directional_guard_blocks(self, direction: str, active_layers: list[_GridLayer], current_price: float) -> bool:
+        same_direction_pnl = sum(
+            self._profit(layer, current_price).net_profit
+            for layer in active_layers
+            if layer.direction == direction
+        )
+        same_direction_count = sum(1 for layer in active_layers if layer.direction == direction)
+        return same_direction_count > 0 and same_direction_pnl < 0
+
     def _close_reason(
         self,
         layer: _GridLayer,
@@ -865,6 +928,34 @@ class HFMicroGridSimulationEngine:
         )
 
     @staticmethod
+    def _grid_v1_comparison(
+        *,
+        grid_v1_reference: HFMicroGridSimulationReport | None,
+        guarded_net_profit: float,
+        guarded_drawdown: float,
+        guarded_cycles_per_day: float,
+    ) -> HFMicroGridV1Comparison | None:
+        if grid_v1_reference is None:
+            return None
+        drawdown_improved = guarded_drawdown > grid_v1_reference.max_total_equity_drawdown
+        net_positive = guarded_net_profit > 0
+        if drawdown_improved and net_positive:
+            verdict = "BETTER"
+        elif guarded_net_profit < grid_v1_reference.net_profit * 0.50:
+            verdict = "WORSE"
+        else:
+            verdict = "SIMILAR"
+        return HFMicroGridV1Comparison(
+            grid_v1_net_profit=grid_v1_reference.net_profit,
+            grid_v1_drawdown=grid_v1_reference.max_total_equity_drawdown,
+            grid_v1_cycles_per_day=grid_v1_reference.estimated_cycles_per_day,
+            guarded_net_profit=guarded_net_profit,
+            guarded_drawdown=guarded_drawdown,
+            guarded_cycles_per_day=guarded_cycles_per_day,
+            verdict=verdict,
+        )
+
+    @staticmethod
     def _score(
         *,
         net_profit: float,
@@ -891,10 +982,15 @@ class HFMicroGridSimulationEngine:
         final_active_layers: int,
         final_unrealized_pnl: float,
         comparison: HFMicroGridComparison,
+        grid_v1_comparison: HFMicroGridV1Comparison | None = None,
     ) -> str:
         if not rows or closed_count < 5:
             return "NOT WORTH TESTING"
-        if net_profit <= 0 or comparison.verdict == "WORSE":
+        if net_profit <= 0:
+            return "NOT WORTH TESTING"
+        if comparison.verdict == "WORSE" and (
+            grid_v1_comparison is None or grid_v1_comparison.verdict != "BETTER"
+        ):
             return "NOT WORTH TESTING"
         if (
             max_total_equity_drawdown < HF_GRID_MAX_TOTAL_EQUITY_DRAWDOWN
@@ -903,7 +999,9 @@ class HFMicroGridSimulationEngine:
             or (final_active_layers > 0 and final_unrealized_pnl < HF_GRID_MAX_FINAL_UNREALIZED_LOSS)
         ):
             return "PAPER CANDIDATE"
-        if comparison.verdict == "BETTER":
+        if comparison.verdict == "BETTER" or (
+            grid_v1_comparison is not None and grid_v1_comparison.verdict == "BETTER"
+        ):
             return "STRONG PAPER CANDIDATE"
         return "PAPER CANDIDATE"
 

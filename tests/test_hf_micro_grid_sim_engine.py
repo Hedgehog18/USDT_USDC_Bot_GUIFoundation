@@ -59,6 +59,7 @@ def _simulate(test_config, tmp_path: Path, snapshots: list[dict], **overrides):
         layer_size=overrides.pop("layer_size", 10),
         max_layers=overrides.pop("max_layers", 10),
         baseline=None,
+        directional_exposure_guard=overrides.pop("directional_exposure_guard", False),
     )
 
 
@@ -299,3 +300,69 @@ def test_hf_micro_grid_sim_drawdown_aggregates_and_recommendations(test_config, 
     assert diagnostics.by_dominant_direction
     assert diagnostics.layer_additions_count == report.opened_layers
     assert "add basket stop" in diagnostics.recommendations
+
+
+def test_hf_micro_grid_directional_guard_blocks_negative_buy_basket(test_config, tmp_path: Path) -> None:
+    report = _simulate(
+        test_config,
+        tmp_path,
+        [
+            _snapshot(timestamp="2026-06-26T13:00:00", price=1.0),
+            _snapshot(timestamp="2026-06-26T13:04:30", price=0.9999),
+        ],
+        directional_exposure_guard=True,
+    )
+
+    assert report.opened_layers == 1
+    assert report.directional_guard_blocks == 1
+    assert report.directional_guard_buy_blocks == 1
+    assert report.directional_guard_sell_blocks == 0
+
+
+def test_hf_micro_grid_directional_guard_blocks_negative_sell_basket(test_config, tmp_path: Path) -> None:
+    report = _simulate(
+        test_config,
+        tmp_path,
+        [
+            _snapshot(timestamp="2026-06-26T13:00:00", price=1.0, short_center=0.9999),
+            _snapshot(timestamp="2026-06-26T13:04:30", price=1.0001, short_center=1.0),
+        ],
+        directional_exposure_guard=True,
+    )
+
+    assert report.opened_layers == 1
+    assert report.directional_guard_blocks == 1
+    assert report.directional_guard_buy_blocks == 0
+    assert report.directional_guard_sell_blocks == 1
+
+
+def test_hf_micro_grid_directional_guard_allows_opposite_direction(test_config, tmp_path: Path) -> None:
+    report = _simulate(
+        test_config,
+        tmp_path,
+        [
+            _snapshot(timestamp="2026-06-26T13:00:00", price=1.0),
+            _snapshot(timestamp="2026-06-26T13:04:30", price=0.9999, short_center=0.9998),
+        ],
+        directional_exposure_guard=True,
+    )
+
+    assert report.opened_layers == 2
+    assert report.directional_guard_blocks == 0
+
+
+def test_hf_micro_grid_directional_guard_improves_drawdown_vs_grid_v1(test_config, tmp_path: Path) -> None:
+    database = _database_with_snapshots(tmp_path, [
+        _snapshot(timestamp="2026-06-26T13:00:00", price=1.0),
+        _snapshot(timestamp="2026-06-26T13:04:30", price=0.9999),
+        _snapshot(timestamp="2026-06-26T13:05:00", price=0.9998),
+    ])
+
+    report = HFMicroGridSimulationEngine(database, test_config).build_report(
+        max_holding_seconds=270,
+        directional_exposure_guard=True,
+    )
+
+    assert report.grid_v1_comparison is not None
+    assert report.directional_guard_blocks >= 1
+    assert report.max_total_equity_drawdown > report.grid_v1_comparison.grid_v1_drawdown
