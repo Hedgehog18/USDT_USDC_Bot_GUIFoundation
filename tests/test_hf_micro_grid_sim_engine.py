@@ -69,6 +69,7 @@ def test_hf_micro_grid_sim_empty_dataset(test_config, tmp_path: Path) -> None:
     assert report.opened_layers == 0
     assert report.max_total_equity_drawdown == 0.0
     assert report.final_active_layers == 0
+    assert report.drawdown_diagnostics.events == []
     assert report.recommendation == "NOT WORTH TESTING"
 
 
@@ -229,3 +230,72 @@ def test_hf_micro_grid_sim_recommendation_downgrades_when_drawdown_too_high(test
 
     assert report.max_total_equity_drawdown < -0.01
     assert report.recommendation != "STRONG PAPER CANDIDATE"
+
+
+def test_hf_micro_grid_sim_collects_drawdown_events(test_config, tmp_path: Path) -> None:
+    report = _simulate(test_config, tmp_path, [
+        _snapshot(timestamp="2026-06-26T13:00:00", price=1.0),
+        _snapshot(timestamp="2026-06-26T13:04:30", price=0.9999),
+    ])
+
+    events = report.drawdown_diagnostics.events
+
+    assert events
+    assert events[0].total_equity_pnl < 0
+    assert events[0].active_layers_count == 2
+
+
+def test_hf_micro_grid_sim_worst_drawdown_events_sorted(test_config, tmp_path: Path) -> None:
+    report = _simulate(test_config, tmp_path, [
+        _snapshot(timestamp="2026-06-26T13:00:00", price=1.0),
+        _snapshot(timestamp="2026-06-26T13:04:30", price=0.99995),
+        _snapshot(timestamp="2026-06-26T13:09:00", price=0.9998),
+    ])
+
+    values = [event.total_equity_drawdown for event in report.drawdown_diagnostics.events]
+
+    assert values == sorted(values)
+
+
+def test_hf_micro_grid_sim_dominant_direction_calculated(test_config, tmp_path: Path) -> None:
+    report = _simulate(test_config, tmp_path, [
+        _snapshot(timestamp="2026-06-26T13:00:00", price=1.0),
+        _snapshot(timestamp="2026-06-26T13:04:30", price=0.9999),
+    ])
+
+    event = report.drawdown_diagnostics.events[0]
+
+    assert event.dominant_direction == "BUY"
+    assert event.buy_layers_count == 2
+    assert event.sell_layers_count == 0
+
+
+def test_hf_micro_grid_sim_layer_age_diagnostics_calculated(test_config, tmp_path: Path) -> None:
+    report = _simulate(test_config, tmp_path, [
+        _snapshot(timestamp="2026-06-26T13:00:00", price=1.0),
+        _snapshot(timestamp="2026-06-26T13:04:30", price=0.9999),
+    ])
+
+    event = report.drawdown_diagnostics.events[0]
+
+    assert len(event.layer_ages_seconds) == 2
+    assert event.oldest_layer_age_seconds == 270.0
+    assert event.newest_layer_age_seconds == 0.0
+
+
+def test_hf_micro_grid_sim_drawdown_aggregates_and_recommendations(test_config, tmp_path: Path) -> None:
+    snapshots = [
+        _snapshot(
+            timestamp=f"2026-06-26T13:{minute:02d}:00",
+            price=1.0 - index * 0.001,
+        )
+        for index, minute in enumerate(range(0, 55, 5))
+    ]
+
+    report = _simulate(test_config, tmp_path, snapshots, max_holding_seconds=270, max_layers=10)
+    diagnostics = report.drawdown_diagnostics
+
+    assert diagnostics.by_active_layer_count
+    assert diagnostics.by_dominant_direction
+    assert diagnostics.layer_additions_count == report.opened_layers
+    assert "add basket stop" in diagnostics.recommendations

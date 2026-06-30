@@ -423,7 +423,8 @@ class MicroCycleSimulationEngine:
                     spread,
                     market_regime,
                     micro_trend,
-                    volatility_regime
+                    volatility_regime,
+                    session
                 FROM market_snapshots_hf
                 ORDER BY timestamp ASC
                 """
@@ -440,6 +441,7 @@ class MicroCycleSimulationEngine:
                 market_regime,
                 micro_trend,
                 volatility_regime,
+                session,
             ) = row
             current_price = self._float(price)
             result.append({
@@ -453,6 +455,7 @@ class MicroCycleSimulationEngine:
                 "market_regime": self._text(market_regime),
                 "micro_trend": self._text(micro_trend),
                 "volatility_regime": self._text(volatility_regime),
+                "session": self._text(session),
             })
         return result
 

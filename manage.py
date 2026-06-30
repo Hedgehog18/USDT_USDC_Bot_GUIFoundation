@@ -2437,6 +2437,82 @@ def command_hf_micro_grid_sim(args) -> None:
     print("")
     print(f"Recommendation score: {report.recommendation_score:.4f}")
     print(f"Recommendation: {report.recommendation}")
+    if args.show_drawdown_events:
+        _print_hf_grid_drawdown_diagnostics(report, args.drawdown_events_limit)
+
+
+def _print_hf_grid_drawdown_diagnostics(report, limit: int) -> None:
+    diagnostics = report.drawdown_diagnostics
+    print("")
+    print("=== HF Grid Drawdown Diagnostics ===")
+    print(f"Top drawdown events shown: {min(limit, len(diagnostics.events))} / {len(diagnostics.events)}")
+    if not diagnostics.events:
+        print("No drawdown events available.")
+        print("")
+    for index, event in enumerate(diagnostics.events[:limit], start=1):
+        layer_ages = ", ".join(f"{age:.0f}s" for age in event.layer_ages_seconds)
+        print(f"--- Drawdown Event #{index} ---")
+        print(f"timestamp: {event.timestamp}")
+        print(f"total_equity_drawdown: {event.total_equity_drawdown:.8f}")
+        print(f"total_equity_pnl: {event.total_equity_pnl:.8f}")
+        print(f"realized_pnl: {event.realized_pnl:.8f}")
+        print(f"unrealized_pnl: {event.unrealized_pnl:.8f}")
+        print(f"active_layers_count: {event.active_layers_count}")
+        print(f"capital_locked: {event.capital_locked:.2f}")
+        print(f"dominant_direction: {event.dominant_direction}")
+        print(f"buy_layers_count: {event.buy_layers_count}")
+        print(f"sell_layers_count: {event.sell_layers_count}")
+        print(f"buy_unrealized_pnl: {event.buy_unrealized_pnl:.8f}")
+        print(f"sell_unrealized_pnl: {event.sell_unrealized_pnl:.8f}")
+        print(f"price: {event.price:.8f}")
+        print(f"short_center: {event.short_center:.8f}")
+        print(f"distance_from_short_center: {event.distance_from_short_center:.8f}")
+        print(f"price_buffer_unique_values: {event.price_buffer_unique_values}")
+        print(f"flat_samples_count: {event.flat_samples_count}")
+        print(f"layer_ages: {layer_ages}")
+        print(f"oldest_layer_age: {_format_optional_seconds(event.oldest_layer_age_seconds)}")
+        print(f"newest_layer_age: {_format_optional_seconds(event.newest_layer_age_seconds)}")
+        print(f"worst_layer_id: {event.worst_layer_id}")
+        print(f"worst_layer_direction: {event.worst_layer_direction}")
+        print(f"worst_layer_entry_price: {event.worst_layer_entry_price:.8f}")
+        print(f"worst_layer_unrealized_pnl: {event.worst_layer_unrealized_pnl:.8f}")
+        print("")
+
+    print("Drawdown by active layer count:")
+    _print_hf_grid_drawdown_bucket(diagnostics.by_active_layer_count)
+    print("Drawdown by dominant direction:")
+    _print_hf_grid_drawdown_bucket(diagnostics.by_dominant_direction)
+    print("Drawdown by session:")
+    _print_hf_grid_drawdown_bucket(diagnostics.by_session)
+    print("Drawdown by flat/non-flat state:")
+    _print_hf_grid_drawdown_bucket(diagnostics.by_flat_state)
+    print("Aggregated drawdown causes:")
+    print(
+        "- average drawdown before recovery: "
+        f"{_format_optional_seconds(diagnostics.average_drawdown_before_recovery)}"
+    )
+    print(
+        "- adding next layer made drawdown worse: "
+        f"{diagnostics.layer_additions_worsened_drawdown_count} / {diagnostics.layer_additions_count}"
+    )
+    print(
+        "- next layer eventually recovered basket: "
+        f"{diagnostics.layer_additions_recovered_count} / {diagnostics.layer_additions_count}"
+    )
+    print("Recommendations:")
+    for recommendation in diagnostics.recommendations:
+        print(f"- {recommendation}")
+
+
+def _print_hf_grid_drawdown_bucket(rows) -> None:
+    if not rows:
+        print("- N/A")
+        return
+    for key, bucket in sorted(rows.items(), key=lambda item: str(item[0])):
+        print(
+            f"- {key}: count={bucket.count} "
+            f"avg_drawdown={bucket.average_drawdown:.8f} worst_drawdown={bucket.worst_drawdown:.8f}"
+        )
 
 
 def _print_micro_cycle_grid_section(title: str, rows, engine: MicroCycleGridSearchEngine) -> None:
@@ -5221,6 +5297,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--max-layers",
         type=_positive_int,
         default=HF_GRID_DEFAULT_MAX_LAYERS,
+    )
+    hf_micro_grid_sim_parser.add_argument(
+        "--show-drawdown-events",
+        action="store_true",
+        help="Show detailed worst basket drawdown events and aggregate causes",
+    )
+    hf_micro_grid_sim_parser.add_argument(
+        "--drawdown-events-limit",
+        type=_positive_int,
+        default=5,
+        help="Number of worst drawdown events to print when --show-drawdown-events is used",
     )
     hf_micro_grid_sim_parser.set_defaults(func=command_hf_micro_grid_sim)
 

@@ -1085,6 +1085,9 @@ def test_manage_cli_has_hf_micro_grid_sim_command():
         "270",
         "--target",
         "0.0005",
+        "--show-drawdown-events",
+        "--drawdown-events-limit",
+        "7",
     ])
 
     assert args.command == "hf-micro-grid-sim"
@@ -1093,6 +1096,8 @@ def test_manage_cli_has_hf_micro_grid_sim_command():
     assert args.layer_size == 10.0
     assert args.max_holding_seconds == 270.0
     assert args.target == 0.0005
+    assert args.show_drawdown_events is True
+    assert args.drawdown_events_limit == 7
 
 
 def test_manage_cli_has_target_resolution_compare_command():

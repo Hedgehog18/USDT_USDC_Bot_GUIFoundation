@@ -67,6 +67,57 @@ class HFMicroGridWorstBasketSnapshot:
 
 
 @dataclass(frozen=True)
+class HFMicroGridDrawdownEvent:
+    timestamp: str
+    total_equity_drawdown: float
+    total_equity_pnl: float
+    realized_pnl: float
+    unrealized_pnl: float
+    active_layers_count: int
+    capital_locked: float
+    dominant_direction: str
+    buy_layers_count: int
+    sell_layers_count: int
+    buy_unrealized_pnl: float
+    sell_unrealized_pnl: float
+    price: float
+    short_center: float
+    distance_from_short_center: float
+    price_buffer_unique_values: str
+    flat_samples_count: str
+    layer_ages_seconds: list[float]
+    oldest_layer_age_seconds: float
+    newest_layer_age_seconds: float
+    worst_layer_id: int
+    worst_layer_direction: str
+    worst_layer_entry_price: float
+    worst_layer_unrealized_pnl: float
+    session: str
+    flat_state: str
+
+
+@dataclass(frozen=True)
+class HFMicroGridDrawdownBucket:
+    count: int
+    average_drawdown: float
+    worst_drawdown: float
+
+
+@dataclass(frozen=True)
+class HFMicroGridDrawdownDiagnostics:
+    events: list[HFMicroGridDrawdownEvent]
+    by_active_layer_count: dict[int, HFMicroGridDrawdownBucket]
+    by_dominant_direction: dict[str, HFMicroGridDrawdownBucket]
+    by_session: dict[str, HFMicroGridDrawdownBucket]
+    by_flat_state: dict[str, HFMicroGridDrawdownBucket]
+    average_drawdown_before_recovery: float
+    layer_additions_count: int
+    layer_additions_worsened_drawdown_count: int
+    layer_additions_recovered_count: int
+    recommendations: list[str]
+
+
+@dataclass(frozen=True)
 class HFMicroGridSimulationReport:
     scenario: str
     target_percent: float
@@ -122,6 +173,7 @@ class HFMicroGridSimulationReport:
     final_unrealized_pnl: float
     final_total_equity_pnl: float
     final_capital_locked: float
+    drawdown_diagnostics: HFMicroGridDrawdownDiagnostics
     closed_layer_details: list[HFMicroGridClosedLayer]
 
 
@@ -222,6 +274,16 @@ class HFMicroGridSimulationEngine:
         time_with_50_percent_capital = 0.0
         time_with_80_percent_capital = 0.0
         time_with_100_percent_capital = 0.0
+        drawdown_events: list[HFMicroGridDrawdownEvent] = []
+        drawdown_values_by_layer_count: dict[int, list[float]] = {}
+        drawdown_values_by_direction: dict[str, list[float]] = {}
+        drawdown_values_by_session: dict[str, list[float]] = {}
+        drawdown_values_by_flat_state: dict[str, list[float]] = {}
+        drawdown_periods: list[float] = []
+        pending_layer_additions: list[dict] = []
+        layer_additions_count = 0
+        layer_additions_worsened_drawdown = 0
+        previous_total_drawdown = 0.0
 
         for index, row in enumerate(rows):
             timestamp = row["parsed_timestamp"]
@@ -239,6 +301,7 @@ class HFMicroGridSimulationEngine:
             active_layers = still_active
 
             direction = self.micro_engine._direction_for_scenario(row, index, scenario)
+            opened_this_row = False
             if direction is not None:
                 if len(active_layers) >= max_layers:
                     skipped_no_layer += 1
@@ -257,6 +320,7 @@ class HFMicroGridSimulationEngine:
                     opened_layers += 1
                     next_layer_id += 1
                     last_opened_at = timestamp
+                    opened_this_row = True
 
             layer_unrealized = [self._profit(layer, row["price"]).net_profit for layer in active_layers]
             unrealized_pnl = sum(layer_unrealized)
@@ -284,16 +348,31 @@ class HFMicroGridSimulationEngine:
             max_realized_drawdown = min(max_realized_drawdown, realized_pnl - realized_peak)
             if total_equity_pnl >= total_peak:
                 if underwater_since is not None and timestamp is not None:
-                    longest_time_underwater = max(
-                        longest_time_underwater,
-                        self._holding_seconds(underwater_since, timestamp),
-                    )
+                    recovered_duration = self._holding_seconds(underwater_since, timestamp)
+                    longest_time_underwater = max(longest_time_underwater, recovered_duration)
+                    drawdown_periods.append(recovered_duration)
                 total_peak = total_equity_pnl
                 underwater_since = None
             elif underwater_since is None:
                 underwater_since = timestamp
 
             current_total_drawdown = total_equity_pnl - total_peak
+            if opened_this_row:
+                layer_additions_count += 1
+                if current_total_drawdown < previous_total_drawdown:
+                    layer_additions_worsened_drawdown += 1
+                pending_layer_additions.append({
+                    "total_equity_pnl": total_equity_pnl,
+                    "opened_index": index,
+                    "recovered": False,
+                })
+            for addition in pending_layer_additions:
+                if (
+                    not addition["recovered"]
+                    and index > addition["opened_index"]
+                    and total_equity_pnl >= addition["total_equity_pnl"]
+                ):
+                    addition["recovered"] = True
             if current_total_drawdown < max_total_equity_drawdown:
                 max_total_equity_drawdown = current_total_drawdown
                 worst_drawdown_timestamp = timestamp
@@ -306,6 +385,31 @@ class HFMicroGridSimulationEngine:
                 and timestamp is not None
             ):
                 recovery_after_worst_drawdown = self._holding_seconds(worst_drawdown_timestamp, timestamp)
+            if current_total_drawdown < 0 and active_layers:
+                event = self._drawdown_event(
+                    row=row,
+                    active_layers=active_layers,
+                    layer_unrealized=layer_unrealized,
+                    realized_pnl=realized_pnl,
+                    unrealized_pnl=unrealized_pnl,
+                    total_equity_pnl=total_equity_pnl,
+                    total_equity_drawdown=current_total_drawdown,
+                    layer_size=layer_size,
+                )
+                drawdown_events.append(event)
+                self._append_bucket_value(
+                    drawdown_values_by_layer_count,
+                    event.active_layers_count,
+                    event.total_equity_drawdown,
+                )
+                self._append_bucket_value(
+                    drawdown_values_by_direction,
+                    event.dominant_direction,
+                    event.total_equity_drawdown,
+                )
+                self._append_bucket_value(drawdown_values_by_session, event.session, event.total_equity_drawdown)
+                self._append_bucket_value(drawdown_values_by_flat_state, event.flat_state, event.total_equity_drawdown)
+            previous_total_drawdown = current_total_drawdown
 
             occupancy = len(active_layers)
             occupancy_histogram[occupancy] = occupancy_histogram.get(occupancy, 0) + 1
@@ -350,10 +454,9 @@ class HFMicroGridSimulationEngine:
                 current_occupancy_duration,
             )
         if underwater_since is not None and rows:
-            longest_time_underwater = max(
-                longest_time_underwater,
-                self._holding_seconds(underwater_since, rows[-1]["parsed_timestamp"]),
-            )
+            open_underwater_duration = self._holding_seconds(underwater_since, rows[-1]["parsed_timestamp"])
+            longest_time_underwater = max(longest_time_underwater, open_underwater_duration)
+            drawdown_periods.append(open_underwater_duration)
         if recovery_after_worst_drawdown is None and worst_drawdown_timestamp is not None and rows:
             recovery_after_worst_drawdown = self._holding_seconds(
                 worst_drawdown_timestamp,
@@ -459,8 +562,174 @@ class HFMicroGridSimulationEngine:
             final_unrealized_pnl=final_unrealized_pnl,
             final_total_equity_pnl=final_total_equity_pnl,
             final_capital_locked=len(active_layers) * layer_size,
+            drawdown_diagnostics=self._drawdown_diagnostics(
+                events=drawdown_events,
+                by_active_layer_count=drawdown_values_by_layer_count,
+                by_dominant_direction=drawdown_values_by_direction,
+                by_session=drawdown_values_by_session,
+                by_flat_state=drawdown_values_by_flat_state,
+                drawdown_periods=drawdown_periods,
+                layer_additions_count=layer_additions_count,
+                layer_additions_worsened_drawdown_count=layer_additions_worsened_drawdown,
+                layer_additions_recovered_count=sum(1 for addition in pending_layer_additions if addition["recovered"]),
+                max_total_equity_drawdown=max_total_equity_drawdown,
+                worst_open_basket_loss=worst_open_basket_loss,
+                max_layers=max_layers,
+                maximum_simultaneous_layers=maximum_layers,
+            ),
             closed_layer_details=closed_layers,
         )
+
+    def _drawdown_event(
+        self,
+        *,
+        row: dict,
+        active_layers: list[_GridLayer],
+        layer_unrealized: list[float],
+        realized_pnl: float,
+        unrealized_pnl: float,
+        total_equity_pnl: float,
+        total_equity_drawdown: float,
+        layer_size: float,
+    ) -> HFMicroGridDrawdownEvent:
+        buy_values = [
+            value for layer, value in zip(active_layers, layer_unrealized, strict=False) if layer.direction == "BUY"
+        ]
+        sell_values = [
+            value for layer, value in zip(active_layers, layer_unrealized, strict=False) if layer.direction == "SELL"
+        ]
+        buy_count = len(buy_values)
+        sell_count = len(sell_values)
+        if buy_count > sell_count:
+            dominant_direction = "BUY"
+        elif sell_count > buy_count:
+            dominant_direction = "SELL"
+        else:
+            dominant_direction = "MIXED"
+
+        worst_index = min(range(len(active_layers)), key=lambda item: layer_unrealized[item])
+        worst_layer = active_layers[worst_index]
+        timestamp = row["parsed_timestamp"]
+        layer_ages = [self._holding_seconds(layer.opened_at, timestamp) for layer in active_layers]
+        price = row["price"]
+        short_center = row.get("short_center", 0.0)
+        distance_from_short_center = price - short_center
+        flat_state = "FLAT" if abs(distance_from_short_center) < 1e-12 else "NON_FLAT"
+        return HFMicroGridDrawdownEvent(
+            timestamp=timestamp.isoformat() if timestamp else "",
+            total_equity_drawdown=total_equity_drawdown,
+            total_equity_pnl=total_equity_pnl,
+            realized_pnl=realized_pnl,
+            unrealized_pnl=unrealized_pnl,
+            active_layers_count=len(active_layers),
+            capital_locked=len(active_layers) * layer_size,
+            dominant_direction=dominant_direction,
+            buy_layers_count=buy_count,
+            sell_layers_count=sell_count,
+            buy_unrealized_pnl=sum(buy_values),
+            sell_unrealized_pnl=sum(sell_values),
+            price=price,
+            short_center=short_center,
+            distance_from_short_center=distance_from_short_center,
+            price_buffer_unique_values="N/A",
+            flat_samples_count="N/A",
+            layer_ages_seconds=layer_ages,
+            oldest_layer_age_seconds=max(layer_ages, default=0.0),
+            newest_layer_age_seconds=min(layer_ages, default=0.0),
+            worst_layer_id=worst_layer.layer_id,
+            worst_layer_direction=worst_layer.direction,
+            worst_layer_entry_price=worst_layer.entry_price,
+            worst_layer_unrealized_pnl=layer_unrealized[worst_index],
+            session=row.get("session", "UNKNOWN") or "UNKNOWN",
+            flat_state=flat_state,
+        )
+
+    @staticmethod
+    def _append_bucket_value(bucket: dict, key, value: float) -> None:
+        bucket.setdefault(key, []).append(value)
+
+    def _drawdown_diagnostics(
+        self,
+        *,
+        events: list[HFMicroGridDrawdownEvent],
+        by_active_layer_count: dict[int, list[float]],
+        by_dominant_direction: dict[str, list[float]],
+        by_session: dict[str, list[float]],
+        by_flat_state: dict[str, list[float]],
+        drawdown_periods: list[float],
+        layer_additions_count: int,
+        layer_additions_worsened_drawdown_count: int,
+        layer_additions_recovered_count: int,
+        max_total_equity_drawdown: float,
+        worst_open_basket_loss: float,
+        max_layers: int,
+        maximum_simultaneous_layers: int,
+    ) -> HFMicroGridDrawdownDiagnostics:
+        sorted_events = sorted(events, key=lambda event: event.total_equity_drawdown)
+        return HFMicroGridDrawdownDiagnostics(
+            events=sorted_events,
+            by_active_layer_count=self._bucket_summary(by_active_layer_count),
+            by_dominant_direction=self._bucket_summary(by_dominant_direction),
+            by_session=self._bucket_summary(by_session),
+            by_flat_state=self._bucket_summary(by_flat_state),
+            average_drawdown_before_recovery=(
+                sum(drawdown_periods) / len(drawdown_periods) if drawdown_periods else 0.0
+            ),
+            layer_additions_count=layer_additions_count,
+            layer_additions_worsened_drawdown_count=layer_additions_worsened_drawdown_count,
+            layer_additions_recovered_count=layer_additions_recovered_count,
+            recommendations=self._drawdown_recommendations(
+                events=sorted_events,
+                max_total_equity_drawdown=max_total_equity_drawdown,
+                worst_open_basket_loss=worst_open_basket_loss,
+                max_layers=max_layers,
+                maximum_simultaneous_layers=maximum_simultaneous_layers,
+            ),
+        )
+
+    @staticmethod
+    def _bucket_summary(values_by_key: dict) -> dict:
+        return {
+            key: HFMicroGridDrawdownBucket(
+                count=len(values),
+                average_drawdown=sum(values) / len(values) if values else 0.0,
+                worst_drawdown=min(values) if values else 0.0,
+            )
+            for key, values in values_by_key.items()
+        }
+
+    @staticmethod
+    def _drawdown_recommendations(
+        *,
+        events: list[HFMicroGridDrawdownEvent],
+        max_total_equity_drawdown: float,
+        worst_open_basket_loss: float,
+        max_layers: int,
+        maximum_simultaneous_layers: int,
+    ) -> list[str]:
+        if not events:
+            return ["grid not viable: no drawdown evidence is available yet"]
+
+        recommendations: list[str] = []
+        worst_event = events[0]
+        if maximum_simultaneous_layers >= max_layers:
+            recommendations.append("stop adding layers before all layers are occupied")
+        elif worst_event.active_layers_count > 1:
+            recommendations.append(f"stop adding layers after {max(worst_event.active_layers_count - 1, 1)} layers")
+        if worst_event.dominant_direction in {"BUY", "SELL"}:
+            recommendations.append("require direction confirmation before adding layer")
+            recommendations.append("pause layering in trend")
+        if worst_event.flat_state == "FLAT":
+            recommendations.append("pause layering in flat")
+        if max_total_equity_drawdown < HF_GRID_MAX_TOTAL_EQUITY_DRAWDOWN:
+            recommendations.append("add basket stop")
+        if worst_open_basket_loss < HF_GRID_WORST_OPEN_BASKET_LOSS:
+            recommendations.append("add basket take-profit or basket risk cap")
+        if max_total_equity_drawdown < HF_GRID_MAX_TOTAL_EQUITY_DRAWDOWN:
+            recommendations.append("grid not viable without stronger basket risk controls")
+        if not recommendations:
+            recommendations.append("grid not viable: collect more data before paper testing")
+        return list(dict.fromkeys(recommendations))
 
     def _open_layer(
         self,
