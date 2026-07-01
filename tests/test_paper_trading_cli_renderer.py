@@ -142,6 +142,7 @@ def test_renderer_prints_open_cycle(capsys):
         entry_diagnostics=diagnostics,
         lifetime_stats={"closed_cycles": 12, "net_profit": 0.02, "win_rate": 0.5},
         collection_id="test-collection",
+        tracking_limit_seconds=270,
     )
 
     output = capsys.readouterr().out
@@ -150,7 +151,8 @@ def test_renderer_prints_open_cycle(capsys):
     assert "collection test-collection" in output
     assert "Lifetime: 12" in output
     assert "uPnL: -0.00020000" in output
-    assert "Age: 168s" in output
+    assert "Tracking: 2m 48s / 4m 30s" in output
+    assert "Age:" not in output
 
 
 def test_renderer_verbose_progress_keeps_full_panels(capsys):
@@ -262,6 +264,8 @@ def test_renderer_prints_recovery_required_warning(capsys):
     assert "Target Status: not reached" in output
     assert "Est. PnL Now: +0.00050000" in output
     assert "Decision Hint: target not reached / estimated profit if closed now" in output
+    assert "Elapsed since opened: 3h 2m" in output
+    assert "Active tracking: paused" in output
     assert "Automatic close: DISABLED" in output
     assert "paper-recovery-action --db-id 9 --action resume" in output
     assert "paper-close-cycle --db-id 9 --reason manual" in output

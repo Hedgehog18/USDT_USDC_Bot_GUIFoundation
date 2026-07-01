@@ -317,6 +317,8 @@ def test_manage_cli_has_collect_closed_cycles_command():
         "--require-binance",
         "--print-every",
         "2",
+        "--progress-interval",
+        "5",
         "--no-beep",
         "--safe-stop",
         "--resume-recovery",
@@ -333,6 +335,7 @@ def test_manage_cli_has_collect_closed_cycles_command():
     assert args.max_iterations == 20
     assert args.require_binance is True
     assert args.print_every == 2
+    assert args.progress_interval == 5
     assert args.beep is False
     assert args.safe_stop is True
     assert args.resume_recovery is True
@@ -353,6 +356,7 @@ def test_manage_cli_has_collect_closed_cycles_target_new():
 
     assert args.command == "collect-closed-cycles"
     assert args.profile == "mean_reversion_hf_micro_v1"
+    assert args.progress_interval == 60.0
     assert args.target is None
     assert args.target_new == 50
 

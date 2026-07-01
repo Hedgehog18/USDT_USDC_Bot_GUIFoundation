@@ -187,6 +187,7 @@ class PaperTradingCliRenderer:
         entry_diagnostics: dict[str, str],
         lifetime_stats: dict[str, float | int] | None = None,
         collection_id: str | int | None = None,
+        tracking_limit_seconds: float | None = None,
     ) -> None:
         current_price, _data_source, _price_timestamp = price_info if price_info else (None, "N/A", "N/A")
         lifetime = lifetime_stats or {}
@@ -213,8 +214,10 @@ class PaperTradingCliRenderer:
                 f"{getattr(nearest_open_cycle, 'direction', 'N/A')} | "
                 f"Price: {self._format_float(getattr(nearest_open_cycle, 'current_price', current_price))} | "
                 f"Target: {self._format_float(getattr(nearest_open_cycle, 'target_price', None))} | "
-                f"Distance: {self._format_float(getattr(nearest_open_cycle, 'distance_to_target', None))} | "
-                f"Age: {self._format_seconds(getattr(nearest_open_cycle, 'age_seconds', None))} | "
+                f"Remain: {self._format_float(getattr(nearest_open_cycle, 'distance_to_target', None))} | "
+                "Tracking: "
+                f"{self._format_seconds(getattr(nearest_open_cycle, 'age_seconds', None))}"
+                f"{self._format_tracking_limit(tracking_limit_seconds)} | "
                 f"uPnL: {self._format_signed(getattr(nearest_open_cycle, 'unrealized_pnl', 0.0))}"
             )
             return
@@ -322,7 +325,8 @@ class PaperTradingCliRenderer:
                 ("Opened Session", cycle.get("opened_session_id")),
                 ("Current Session", cycle.get("current_session_id")),
                 ("Opened At", cycle.get("opened_at")),
-                ("Elapsed", cycle.get("elapsed")),
+                ("Elapsed since opened", cycle.get("elapsed")),
+                ("Active tracking", cycle.get("active_tracking", "paused")),
                 ("Recovery Status", cycle.get("recovery_status")),
             ])
         rows.extend([
@@ -503,4 +507,13 @@ class PaperTradingCliRenderer:
     def _format_seconds(value: Any) -> str:
         if value is None or str(value) == "N/A":
             return "N/A"
-        return f"{float(value):.0f}s"
+        seconds = int(float(value))
+        if seconds < 60:
+            return f"{seconds}s"
+        minutes, remaining_seconds = divmod(seconds, 60)
+        return f"{minutes}m {remaining_seconds}s"
+
+    def _format_tracking_limit(self, value: Any) -> str:
+        if value is None or str(value) in {"", "N/A", "None"}:
+            return ""
+        return f" / {self._format_seconds(value)}"

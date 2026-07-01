@@ -10,8 +10,10 @@ from manage import (
     _enrich_collection_recovery_cycle,
     _find_collection_recovery_cycle,
     _load_recovery_current_price_info,
+    _print_closed_cycle_collection_event,
     command_collect_closed_cycles,
     _print_closed_cycle_collection_progress,
+    _should_print_collection_progress,
 )
 
 
@@ -67,6 +69,51 @@ def test_collection_entry_diagnostics_reports_attempted_order():
     assert diagnostics["safety_filter_passed"] == "yes"
     assert diagnostics["balance_check_passed"] == "yes"
     assert diagnostics["open_cycle_check_passed"] == "yes"
+
+
+def test_collection_progress_throttle_respects_interval():
+    assert _should_print_collection_progress(None, 100.0, 60.0) is True
+    assert _should_print_collection_progress(100.0, 159.9, 60.0) is False
+    assert _should_print_collection_progress(100.0, 160.0, 60.0) is True
+
+
+def test_collection_events_only_prints_open_event(capsys):
+    open_cycle = SimpleNamespace(
+        direction="BUY_USDC",
+        db_id=1201,
+        open_price=1.000665,
+        target_price=1.000670,
+    )
+
+    _print_closed_cycle_collection_event(
+        action_taken="opened",
+        close_reason="N/A",
+        close_debug_items=[],
+        nearest_open_cycle=open_cycle,
+        result=SimpleNamespace(recovery_required=False, safety_stops=0),
+    )
+
+    output = capsys.readouterr().out
+
+    assert "OPEN BUY_USDC" in output
+    assert "db_id=1201" in output
+    assert "price=1.00066500" in output
+    assert "target=1.00067000" in output
+
+
+def test_collection_events_only_prints_close_event(capsys):
+    _print_closed_cycle_collection_event(
+        action_taken="closed",
+        close_reason="max_holding_270s",
+        close_debug_items=[{"db_id": 1202, "close_attempted": True, "close_result": "CLOSED"}],
+        nearest_open_cycle=None,
+        result=SimpleNamespace(recovery_required=False, safety_stops=0),
+    )
+
+    output = capsys.readouterr().out
+
+    assert "CLOSE TIMEOUT" in output
+    assert "db_id=1202" in output
 
 
 def test_collection_entry_diagnostics_reports_spread_safety_block():
@@ -408,6 +455,7 @@ def test_collect_closed_cycles_stops_before_progress_when_recovery_exists(monkey
         target=500,
         target_new=None,
         interval=0,
+        progress_interval=60.0,
         max_iterations=1,
         print_every=1,
         safe_stop=False,

@@ -3702,6 +3702,8 @@ def command_collect_closed_cycles(args) -> None:
         raise ValueError("--max-iterations must be greater than 0 when provided.")
     if args.print_every <= 0:
         raise ValueError("--print-every must be greater than 0.")
+    if args.progress_interval < 0:
+        raise ValueError("--progress-interval must be 0 or greater.")
 
     logger.debug(
         "Closed cycle collection watcher started: profile=%s target=%s interval=%s max_iterations=%s",
@@ -3747,6 +3749,7 @@ def command_collect_closed_cycles(args) -> None:
 
     bot = _apply_profile_to_bot(BotEngine(), profile)
     iteration = 0
+    last_regular_progress_at: float | None = None
     while not _collection_target_reached(stats, new_stats, collection_target, new_mode=use_new_target):
         if args.max_iterations is not None and iteration >= args.max_iterations:
             print("STOPPED: max iterations reached before target closed cycles.")
@@ -3757,23 +3760,22 @@ def command_collect_closed_cycles(args) -> None:
         if price_info is None:
             stats = database.load_paper_cycle_collection_stats(profile)
             new_stats = database.load_new_paper_cycle_collection_stats(profile, baseline_max_id)
-            if not args.events_only and _should_print_collection_iteration(iteration, args.print_every):
-                progress_label = (
-                    f"NEW CLOSED {int(new_stats['closed_cycles'])} / {collection_target}"
-                    if use_new_target
-                    else f"CLOSED {int(new_stats['closed_cycles'])} / {collection_target}"
-                )
-                print(
-                    f"[collection {iteration}] WARNING: Binance price unavailable; "
-                    "iteration skipped because --require-binance is enabled. "
-                    f"{progress_label} | "
-                    f"lifetime closed: {int(stats['closed_cycles'])} | "
-                    f"open cycles: {int(new_stats['open_cycles'])} | "
-                    "action_taken: skipped_no_live_price | "
-                    "entry_attempt: no | "
-                    "candidate_detected: no | "
-                    "entry_block_reason: no_signal"
-                )
+            progress_label = (
+                f"NEW CLOSED {int(new_stats['closed_cycles'])} / {collection_target}"
+                if use_new_target
+                else f"CLOSED {int(new_stats['closed_cycles'])} / {collection_target}"
+            )
+            print(
+                f"[collection {iteration}] WARNING: Binance price unavailable; "
+                "iteration skipped because --require-binance is enabled. "
+                f"{progress_label} | "
+                f"lifetime closed: {int(stats['closed_cycles'])} | "
+                f"open cycles: {int(new_stats['open_cycles'])} | "
+                "action_taken: skipped_no_live_price | "
+                "entry_attempt: no | "
+                "candidate_detected: no | "
+                "entry_block_reason: no_signal"
+            )
             if args.interval:
                 time.sleep(args.interval)
             continue
@@ -3822,10 +3824,29 @@ def command_collect_closed_cycles(args) -> None:
             or result.recovery_required
             or _collection_target_reached(stats, new_stats, collection_target, new_mode=use_new_target)
         )
+        now_monotonic = time.monotonic()
         should_print_progress = (
-            important_event
-            or (not args.events_only and _should_print_collection_iteration(iteration, args.print_every))
+            not args.events_only
+            and (
+                important_event
+                or (
+                    _should_print_collection_iteration(iteration, args.print_every)
+                    and _should_print_collection_progress(
+                        last_regular_progress_at,
+                        now_monotonic,
+                        args.progress_interval,
+                    )
+                )
+            )
         )
+        if args.events_only and important_event:
+            _print_closed_cycle_collection_event(
+                action_taken=action_taken,
+                close_reason=_collection_close_reason(close_debug_items, profile),
+                close_debug_items=close_debug_items,
+                nearest_open_cycle=nearest_open_cycle,
+                result=result,
+            )
         if should_print_progress:
             _print_closed_cycle_collection_progress(
                 new_stats,
@@ -3842,6 +3863,7 @@ def command_collect_closed_cycles(args) -> None:
                 profile=profile,
                 verbose_rich=args.verbose_rich,
             )
+            last_regular_progress_at = now_monotonic
         if result.recovery_required:
             PaperTradingCliRenderer().render_recovery_required(result.recovery_message)
             break
@@ -3894,6 +3916,9 @@ def _print_closed_cycle_collection_progress(
             entry_diagnostics=entry_diagnostics,
             lifetime_stats=lifetime_stats,
             collection_id=collection_id,
+            tracking_limit_seconds=_collection_max_holding_limit(
+                getattr(nearest_open_cycle, "profile", profile or "")
+            ) if nearest_open_cycle is not None else None,
         )
         return
     renderer.render_collection_progress(
@@ -4388,6 +4413,55 @@ def _collection_entry_block_reason(item: dict) -> str:
 
 def _should_print_collection_iteration(iteration: int, print_every: int) -> bool:
     return print_every <= 1 or iteration % print_every == 0
+
+
+def _should_print_collection_progress(
+    last_printed_at: float | None,
+    now: float,
+    progress_interval: float,
+) -> bool:
+    if last_printed_at is None:
+        return True
+    return (now - last_printed_at) >= progress_interval
+
+
+def _print_closed_cycle_collection_event(
+    *,
+    action_taken: str,
+    close_reason: str,
+    close_debug_items: list[dict],
+    nearest_open_cycle,
+    result,
+) -> None:
+    timestamp = datetime.now().strftime("%H:%M:%S")
+    if getattr(result, "recovery_required", False):
+        print(f"{timestamp} RECOVERY REQUIRED automatic_close=disabled")
+        return
+    if getattr(result, "safety_stops", 0):
+        reason = getattr(result, "safety_stop_reason", None) or "safety_filter"
+        print(f"{timestamp} SAFETY BLOCK reason={reason}")
+        return
+    if action_taken == "opened" and nearest_open_cycle is not None:
+        print(
+            f"{timestamp} OPEN {getattr(nearest_open_cycle, 'direction', 'N/A')} "
+            f"db_id={getattr(nearest_open_cycle, 'db_id', 'N/A')} "
+            f"price={_format_collection_float(getattr(nearest_open_cycle, 'open_price', None))} "
+            f"target={_format_collection_float(getattr(nearest_open_cycle, 'target_price', None))}"
+        )
+        return
+    if action_taken == "closed":
+        item = _latest_collection_close_debug(close_debug_items)
+        reason = close_reason or "N/A"
+        label = "TARGET" if reason == "target" else "TIMEOUT" if "holding" in reason or "timeout" in reason else reason.upper()
+        db_id = item.get("db_id", "N/A") if item else "N/A"
+        print(f"{timestamp} CLOSE {label} db_id={db_id}")
+
+
+def _latest_collection_close_debug(close_debug_items: list[dict]) -> dict | None:
+    for item in reversed(close_debug_items):
+        if item.get("close_attempted") or item.get("close_result") == "CLOSED":
+            return item
+    return close_debug_items[-1] if close_debug_items else None
 
 
 def _format_collection_float(value: float | None) -> str:
@@ -5245,6 +5319,12 @@ def build_parser() -> argparse.ArgumentParser:
     collect_closed_cycles_parser.add_argument("--beep", action=argparse.BooleanOptionalAction, default=True)
     collect_closed_cycles_parser.add_argument("--require-binance", action="store_true")
     collect_closed_cycles_parser.add_argument("--print-every", type=int, default=1)
+    collect_closed_cycles_parser.add_argument(
+        "--progress-interval",
+        type=float,
+        default=60.0,
+        help="Minimum seconds between regular compact progress updates. Important events are printed immediately.",
+    )
     collect_closed_cycles_parser.add_argument("--safe-stop", action="store_true")
     collect_closed_cycles_parser.add_argument("--resume-recovery", action="store_true")
     collect_closed_cycles_parser.add_argument("--compact", action="store_true")
