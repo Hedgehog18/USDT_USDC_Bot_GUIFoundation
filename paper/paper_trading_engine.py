@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from collections.abc import Callable
 from datetime import datetime
 from decimal import Decimal
+import time
 from uuid import uuid4
 
 from app.bot_engine import BotEngine
@@ -57,6 +58,8 @@ class PaperTradingEngine:
         session_id: str | None = None,
         safe_stop: bool = False,
         resume_recovery_cycles: bool = False,
+        cycle_tracking_started_at_by_db_id: dict[int, float] | None = None,
+        monotonic_clock: Callable[[], float] | None = None,
     ) -> None:
         self.config = config
         self.database = database
@@ -81,6 +84,8 @@ class PaperTradingEngine:
         self.session_id = session_id or str(uuid4())
         self.safe_stop = safe_stop
         self.resume_recovery_cycles = resume_recovery_cycles
+        self.cycle_tracking_started_at_by_db_id = cycle_tracking_started_at_by_db_id if cycle_tracking_started_at_by_db_id is not None else {}
+        self._monotonic_clock = monotonic_clock or time.monotonic
         self.recovery_required = False
         self.recovery_message: str | None = None
 
@@ -181,6 +186,7 @@ class PaperTradingEngine:
                 )
                 if closed_cycle:
                     self.database.save_paper_cycle(closed_cycle, strategy_profile=self.strategy_profile)
+                    self._stop_cycle_tracking(closed_cycle.id)
                     closed += 1
                 continue
 
@@ -239,6 +245,7 @@ class PaperTradingEngine:
                     strategy_profile=self.strategy_profile,
                     opened_session_id=self.session_id,
                 )
+                self._start_cycle_tracking(row_id)
                 self._save_hf_entry_diagnostics(
                     paper_cycle_id=row_id,
                     market_state=market_state,
@@ -352,7 +359,8 @@ class PaperTradingEngine:
                     "close_condition_met": False,
                     "target_close_condition_met": False,
                     "max_holding_limit": self._max_holding_seconds_for_profile(strategy_profile),
-                    "cycle_age": self._cycle_age_seconds(cycle),
+                    "cycle_age": None,
+                    "active_tracking": "paused",
                     "max_holding_condition_met": False,
                     "close_attempted": False,
                     "close_result": "RECOVERY_REQUIRED",
@@ -379,6 +387,7 @@ class PaperTradingEngine:
                     "target_close_condition_met": False,
                     "max_holding_limit": self._max_holding_seconds_for_profile(strategy_profile),
                     "cycle_age": 0.0,
+                    "active_tracking": 0.0,
                     "max_holding_condition_met": False,
                     "close_attempted": False,
                     "close_result": "RESUMED",
@@ -402,7 +411,7 @@ class PaperTradingEngine:
                 close_epsilon=close_epsilon,
             )
             max_holding_limit = self._max_holding_seconds_for_profile(strategy_profile)
-            cycle_age = self._cycle_age_seconds(cycle)
+            cycle_age = self._cycle_tracking_seconds(cycle)
             max_holding_condition_met = (
                 max_holding_limit is not None
                 and cycle_age >= max_holding_limit
@@ -432,6 +441,7 @@ class PaperTradingEngine:
                     "target_close_condition_met": False,
                     "max_holding_limit": max_holding_limit,
                     "cycle_age": cycle_age,
+                    "active_tracking": cycle_age,
                     "max_holding_condition_met": False,
                     "close_attempted": False,
                     "close_result": "SKIPPED",
@@ -443,6 +453,7 @@ class PaperTradingEngine:
             closed_cycle = self.cycle_manager.close_cycle(cycle, current_price)
             setattr(closed_cycle, "close_reason", close_reason)
             self.database.save_paper_cycle(closed_cycle, strategy_profile=strategy_profile)
+            self._stop_cycle_tracking(closed_cycle.id)
             if closed_cycle.status == PaperCycleStatus.CLOSED:
                 closed_count += 1
                 result = "CLOSED"
@@ -471,6 +482,7 @@ class PaperTradingEngine:
                 "target_close_condition_met": target_close_condition_met,
                 "max_holding_limit": max_holding_limit,
                 "cycle_age": cycle_age,
+                "active_tracking": cycle_age,
                 "max_holding_condition_met": max_holding_condition_met,
                 "close_attempted": True,
                 "close_result": result,
@@ -528,6 +540,19 @@ class PaperTradingEngine:
             current_price=current_price,
         )
 
+    def _start_cycle_tracking(self, db_id: int) -> None:
+        self.cycle_tracking_started_at_by_db_id.setdefault(int(db_id), self._monotonic_clock())
+
+    def _stop_cycle_tracking(self, db_id: int) -> None:
+        self.cycle_tracking_started_at_by_db_id.pop(int(db_id), None)
+
+    def _cycle_tracking_seconds(self, cycle: PaperCycle) -> float:
+        started_at = self.cycle_tracking_started_at_by_db_id.setdefault(
+            int(cycle.id),
+            self._monotonic_clock(),
+        )
+        return max(0.0, self._monotonic_clock() - started_at)
+
     def _requires_recovery(
         self,
         db_id: int,
@@ -571,10 +596,6 @@ class PaperTradingEngine:
         if strategy_profile == "mean_reversion_hf_micro_v1":
             return "max_holding_270s"
         return None
-
-    @staticmethod
-    def _cycle_age_seconds(cycle: PaperCycle) -> float:
-        return max(0.0, (datetime.utcnow() - cycle.opened_at).total_seconds())
 
     @staticmethod
     def _close_debug_price_fields(

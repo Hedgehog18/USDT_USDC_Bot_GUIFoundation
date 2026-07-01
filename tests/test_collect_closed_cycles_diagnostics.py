@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 from manage import (
+    _apply_collection_tracking_age,
     _apply_collection_paper_safety_block,
     _collection_action_taken,
     _collection_close_reason,
@@ -75,6 +76,22 @@ def test_collection_progress_throttle_respects_interval():
     assert _should_print_collection_progress(None, 100.0, 60.0) is True
     assert _should_print_collection_progress(100.0, 159.9, 60.0) is False
     assert _should_print_collection_progress(100.0, 160.0, 60.0) is True
+
+
+def test_collection_tracking_age_uses_runtime_monotonic_mapping():
+    open_cycle = SimpleNamespace(db_id=42, age_seconds=180 * 60)
+
+    updated = _apply_collection_tracking_age(open_cycle, {42: 100.0}, 160.0)
+
+    assert updated.age_seconds == 60.0
+
+
+def test_collection_tracking_age_keeps_cycle_when_not_observed():
+    open_cycle = SimpleNamespace(db_id=42, age_seconds=180 * 60)
+
+    updated = _apply_collection_tracking_age(open_cycle, {}, 160.0)
+
+    assert updated.age_seconds == 180 * 60
 
 
 def test_collection_events_only_prints_open_event(capsys):

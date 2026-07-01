@@ -2,6 +2,7 @@
 
 import sys
 import time
+from dataclasses import replace
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 
@@ -3748,6 +3749,7 @@ def command_collect_closed_cycles(args) -> None:
         return
 
     bot = _apply_profile_to_bot(BotEngine(), profile)
+    cycle_tracking_started_at_by_db_id: dict[int, float] = {}
     iteration = 0
     last_regular_progress_at: float | None = None
     while not _collection_target_reached(stats, new_stats, collection_target, new_mode=use_new_target):
@@ -3794,6 +3796,7 @@ def command_collect_closed_cycles(args) -> None:
             safe_stop=args.safe_stop,
             resume_recovery_cycles=args.resume_recovery,
             session_id=current_session_id,
+            cycle_tracking_started_at_by_db_id=cycle_tracking_started_at_by_db_id,
         ).run(1)
         stats = database.load_paper_cycle_collection_stats(profile)
         new_stats = database.load_new_paper_cycle_collection_stats(profile, baseline_max_id)
@@ -3817,14 +3820,19 @@ def command_collect_closed_cycles(args) -> None:
             if getattr(result, "safety_diagnostics", None):
                 entry_diagnostics["safety_filter_passed"] = "yes"
                 entry_diagnostics["paper_safety_state"] = "passed"
+        now_monotonic = time.monotonic()
         nearest_open_cycle = _nearest_collection_open_cycle(config, database, profile, price_info[0], price_info[1], price_info[2])
+        nearest_open_cycle = _apply_collection_tracking_age(
+            nearest_open_cycle,
+            cycle_tracking_started_at_by_db_id,
+            now_monotonic,
+        )
         important_event = (
             action_taken in {"opened", "closed"}
             or result.safety_stops > 0
             or result.recovery_required
             or _collection_target_reached(stats, new_stats, collection_target, new_mode=use_new_target)
         )
-        now_monotonic = time.monotonic()
         should_print_progress = (
             not args.events_only
             and (
@@ -4146,6 +4154,20 @@ def _nearest_collection_open_cycle(config, database, profile: str, current_price
     if not matching:
         return None
     return min(matching, key=lambda item: abs(item.distance_to_target_percent))
+
+
+def _apply_collection_tracking_age(open_cycle, tracking_started_at_by_db_id: dict[int, float], now_monotonic: float):
+    if open_cycle is None:
+        return None
+    started_at = tracking_started_at_by_db_id.get(int(open_cycle.db_id))
+    if started_at is None:
+        return open_cycle
+    tracking_age = max(0.0, now_monotonic - started_at)
+    try:
+        return replace(open_cycle, age_seconds=tracking_age)
+    except TypeError:
+        setattr(open_cycle, "age_seconds", tracking_age)
+        return open_cycle
 
 
 def _collection_action_taken(before_stats: dict[str, float | int], after_stats: dict[str, float | int], result) -> str:
@@ -4483,15 +4505,9 @@ def _collection_max_holding_condition_met(open_cycle) -> bool:
 
 def _collection_cycle_age_seconds(open_cycle) -> float:
     try:
-        opened_at = datetime.fromisoformat(open_cycle.opened_at)
-        now = (
-            datetime.now(tz=opened_at.tzinfo)
-            if opened_at.tzinfo
-            else datetime.now(timezone.utc).replace(tzinfo=None)
-        )
-        return max(0.0, (now - opened_at).total_seconds())
+        return max(0.0, float(getattr(open_cycle, "age_seconds", 0.0)))
     except (TypeError, ValueError):
-        return open_cycle.age_seconds
+        return 0.0
 
 
 def _beep_success() -> None:

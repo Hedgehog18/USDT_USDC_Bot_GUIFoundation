@@ -120,6 +120,14 @@ class FakeBotWithCache(FakeBot):
         self.market_data_cache = FakeCache()
 
 
+class FakeClock:
+    def __init__(self, now: float = 0.0):
+        self.now = now
+
+    def __call__(self) -> float:
+        return self.now
+
+
 def test_paper_trading_engine_runs(test_config, tmp_path: Path):
     database = DatabaseManager(str(tmp_path / "bot.sqlite"))
     result = PaperTradingEngine(test_config, database, bot=FakeBot()).run(2)
@@ -513,7 +521,7 @@ def test_paper_trading_engine_hf_profile_closes_sell_on_target(test_config, tmp_
 
 
 def test_paper_trading_engine_hf_profile_closes_after_270s_timeout(test_config, tmp_path: Path):
-    from datetime import datetime, timedelta
+    from datetime import datetime
     from paper.models import PaperCycle, PaperCycleStatus, PaperOrderSide
 
     database = DatabaseManager(str(tmp_path / "bot.sqlite"))
@@ -528,7 +536,7 @@ def test_paper_trading_engine_hf_profile_closes_after_270s_timeout(test_config, 
         close_fee=0.0,
         gross_profit=0.0,
         net_profit=0.0,
-        opened_at=datetime.utcnow() - timedelta(seconds=271),
+        opened_at=datetime.utcnow(),
     )
     session_id = "test-session"
     row_id = database.save_paper_cycle(
@@ -537,6 +545,8 @@ def test_paper_trading_engine_hf_profile_closes_after_270s_timeout(test_config, 
         opened_session_id=session_id,
     )
     close_debug_items = []
+    tracking_started = {row_id: 0.0}
+    clock = FakeClock(271.0)
 
     result = PaperTradingEngine(
         test_config,
@@ -545,6 +555,8 @@ def test_paper_trading_engine_hf_profile_closes_after_270s_timeout(test_config, 
         close_debug_callback=close_debug_items.append,
         strategy_profile="mean_reversion_hf_micro_v1",
         session_id=session_id,
+        cycle_tracking_started_at_by_db_id=tracking_started,
+        monotonic_clock=clock,
     ).run(1)
 
     with database.connect() as conn:
@@ -559,6 +571,55 @@ def test_paper_trading_engine_hf_profile_closes_after_270s_timeout(test_config, 
 
 
 def test_paper_trading_engine_hf_profile_does_not_timeout_before_270s(test_config, tmp_path: Path):
+    from datetime import datetime
+    from paper.models import PaperCycle, PaperCycleStatus, PaperOrderSide
+
+    database = DatabaseManager(str(tmp_path / "bot.sqlite"))
+    open_cycle = PaperCycle(
+        id=1,
+        direction=PaperOrderSide.BUY_USDC,
+        status=PaperCycleStatus.OPEN,
+        open_price=1.000005,
+        close_price=1.000500,
+        quantity=10.0,
+        open_fee=0.0,
+        close_fee=0.0,
+        gross_profit=0.0,
+        net_profit=0.0,
+        opened_at=datetime.utcnow(),
+    )
+    session_id = "test-session"
+    row_id = database.save_paper_cycle(
+        open_cycle,
+        strategy_profile="mean_reversion_hf_micro_v1",
+        opened_session_id=session_id,
+    )
+    close_debug_items = []
+    tracking_started = {row_id: 0.0}
+    clock = FakeClock(269.0)
+
+    result = PaperTradingEngine(
+        test_config,
+        database,
+        bot=FakeBot(price=1.000000),
+        close_debug_callback=close_debug_items.append,
+        strategy_profile="mean_reversion_hf_micro_v1",
+        session_id=session_id,
+        cycle_tracking_started_at_by_db_id=tracking_started,
+        monotonic_clock=clock,
+    ).run(1)
+
+    with database.connect() as conn:
+        row = conn.execute("SELECT status, close_reason FROM paper_cycles WHERE id = ?", (row_id,)).fetchone()
+
+    assert result.closed_cycles == 0
+    assert row == ("OPEN", None)
+    assert close_debug_items[0]["target_close_condition_met"] is False
+    assert close_debug_items[0]["max_holding_condition_met"] is False
+    assert close_debug_items[0]["close_reason"] is None
+
+
+def test_paper_trading_engine_newly_observed_cycle_tracking_starts_near_zero(test_config, tmp_path: Path):
     from datetime import datetime, timedelta
     from paper.models import PaperCycle, PaperCycleStatus, PaperOrderSide
 
@@ -574,7 +635,7 @@ def test_paper_trading_engine_hf_profile_does_not_timeout_before_270s(test_confi
         close_fee=0.0,
         gross_profit=0.0,
         net_profit=0.0,
-        opened_at=datetime.utcnow() - timedelta(seconds=269),
+        opened_at=datetime.utcnow() - timedelta(minutes=180),
     )
     session_id = "test-session"
     row_id = database.save_paper_cycle(
@@ -583,6 +644,8 @@ def test_paper_trading_engine_hf_profile_does_not_timeout_before_270s(test_confi
         opened_session_id=session_id,
     )
     close_debug_items = []
+    tracking_started: dict[int, float] = {}
+    clock = FakeClock(1000.0)
 
     result = PaperTradingEngine(
         test_config,
@@ -591,6 +654,8 @@ def test_paper_trading_engine_hf_profile_does_not_timeout_before_270s(test_confi
         close_debug_callback=close_debug_items.append,
         strategy_profile="mean_reversion_hf_micro_v1",
         session_id=session_id,
+        cycle_tracking_started_at_by_db_id=tracking_started,
+        monotonic_clock=clock,
     ).run(1)
 
     with database.connect() as conn:
@@ -598,13 +663,56 @@ def test_paper_trading_engine_hf_profile_does_not_timeout_before_270s(test_confi
 
     assert result.closed_cycles == 0
     assert row == ("OPEN", None)
-    assert close_debug_items[0]["target_close_condition_met"] is False
+    assert tracking_started[row_id] == 1000.0
+    assert close_debug_items[0]["cycle_age"] < 2.0
     assert close_debug_items[0]["max_holding_condition_met"] is False
-    assert close_debug_items[0]["close_reason"] is None
+
+
+def test_paper_trading_engine_runtime_tracking_reaches_one_minute(test_config, tmp_path: Path):
+    from datetime import datetime
+    from paper.models import PaperCycle, PaperCycleStatus, PaperOrderSide
+
+    database = DatabaseManager(str(tmp_path / "bot.sqlite"))
+    open_cycle = PaperCycle(
+        id=1,
+        direction=PaperOrderSide.BUY_USDC,
+        status=PaperCycleStatus.OPEN,
+        open_price=1.000005,
+        close_price=1.000500,
+        quantity=10.0,
+        open_fee=0.0,
+        close_fee=0.0,
+        gross_profit=0.0,
+        net_profit=0.0,
+        opened_at=datetime.utcnow(),
+    )
+    session_id = "test-session"
+    row_id = database.save_paper_cycle(
+        open_cycle,
+        strategy_profile="mean_reversion_hf_micro_v1",
+        opened_session_id=session_id,
+    )
+    close_debug_items = []
+    tracking_started = {row_id: 10.0}
+    clock = FakeClock(70.0)
+
+    PaperTradingEngine(
+        test_config,
+        database,
+        bot=FakeBot(price=1.000000),
+        close_debug_callback=close_debug_items.append,
+        strategy_profile="mean_reversion_hf_micro_v1",
+        session_id=session_id,
+        cycle_tracking_started_at_by_db_id=tracking_started,
+        monotonic_clock=clock,
+    ).run(1)
+
+    assert close_debug_items[0]["cycle_age"] == 60.0
+    assert close_debug_items[0]["max_holding_condition_met"] is False
 
 
 def test_paper_trading_engine_hf_timeout_ignores_missing_short_center(test_config, tmp_path: Path):
-    from datetime import datetime, timedelta
+    from datetime import datetime
     from paper.models import PaperCycle, PaperCycleStatus, PaperOrderSide
 
     database = DatabaseManager(str(tmp_path / "bot.sqlite"))
@@ -619,7 +727,7 @@ def test_paper_trading_engine_hf_timeout_ignores_missing_short_center(test_confi
         close_fee=0.0,
         gross_profit=0.0,
         net_profit=0.0,
-        opened_at=datetime.utcnow() - timedelta(seconds=271),
+        opened_at=datetime.utcnow(),
     )
     session_id = "test-session"
     row_id = database.save_paper_cycle(
@@ -628,6 +736,8 @@ def test_paper_trading_engine_hf_timeout_ignores_missing_short_center(test_confi
         opened_session_id=session_id,
     )
     close_debug_items = []
+    tracking_started = {row_id: 0.0}
+    clock = FakeClock(271.0)
 
     result = PaperTradingEngine(
         test_config,
@@ -636,6 +746,8 @@ def test_paper_trading_engine_hf_timeout_ignores_missing_short_center(test_confi
         close_debug_callback=close_debug_items.append,
         strategy_profile="mean_reversion_hf_micro_v1",
         session_id=session_id,
+        cycle_tracking_started_at_by_db_id=tracking_started,
+        monotonic_clock=clock,
     ).run(1)
 
     with database.connect() as conn:
@@ -648,7 +760,7 @@ def test_paper_trading_engine_hf_timeout_ignores_missing_short_center(test_confi
 
 
 def test_paper_trading_engine_hf_timeout_ignores_no_signal_entry_result(test_config, tmp_path: Path):
-    from datetime import datetime, timedelta
+    from datetime import datetime
     from paper.models import PaperCycle, PaperCycleStatus, PaperOrderSide
 
     database = DatabaseManager(str(tmp_path / "bot.sqlite"))
@@ -663,7 +775,7 @@ def test_paper_trading_engine_hf_timeout_ignores_no_signal_entry_result(test_con
         close_fee=0.0,
         gross_profit=0.0,
         net_profit=0.0,
-        opened_at=datetime.utcnow() - timedelta(seconds=271),
+        opened_at=datetime.utcnow(),
     )
     session_id = "test-session"
     row_id = database.save_paper_cycle(
@@ -672,6 +784,8 @@ def test_paper_trading_engine_hf_timeout_ignores_no_signal_entry_result(test_con
         opened_session_id=session_id,
     )
     entry_debug_items = []
+    tracking_started = {row_id: 0.0}
+    clock = FakeClock(271.0)
 
     result = PaperTradingEngine(
         test_config,
@@ -680,6 +794,8 @@ def test_paper_trading_engine_hf_timeout_ignores_no_signal_entry_result(test_con
         entry_zone_debug_callback=entry_debug_items.append,
         strategy_profile="mean_reversion_hf_micro_v1",
         session_id=session_id,
+        cycle_tracking_started_at_by_db_id=tracking_started,
+        monotonic_clock=clock,
     ).run(1)
 
     with database.connect() as conn:
