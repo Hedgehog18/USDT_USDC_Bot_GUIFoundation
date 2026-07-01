@@ -1351,7 +1351,7 @@ class DatabaseManager:
             return conn.execute(
                 """
                 SELECT timestamp, cycle_id, direction, status, open_price, close_price,
-                       quantity, open_fee, close_fee, gross_profit, net_profit
+                       quantity, open_fee, close_fee, gross_profit, net_profit, close_reason
                 FROM paper_cycles
                 ORDER BY timestamp DESC
                 LIMIT ?
@@ -1364,7 +1364,7 @@ class DatabaseManager:
             return conn.execute(
                 """
                 SELECT timestamp, cycle_id, direction, status, open_price, close_price,
-                       quantity, open_fee, close_fee, gross_profit, net_profit
+                       quantity, open_fee, close_fee, gross_profit, net_profit, close_reason
                 FROM paper_cycles
                 WHERE strategy_profile = ?
                 ORDER BY timestamp DESC
@@ -1620,10 +1620,24 @@ class DatabaseManager:
             row = conn.execute(
                 """
                 SELECT
-                    COALESCE(SUM(CASE WHEN status = 'CLOSED' THEN 1 ELSE 0 END), 0) AS closed_cycles,
+                    COALESCE(SUM(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') THEN 1 ELSE 0 END), 0) AS closed_cycles,
                     COALESCE(SUM(CASE WHEN status = 'OPEN' THEN 1 ELSE 0 END), 0) AS open_cycles,
-                    COALESCE(SUM(CASE WHEN status = 'CLOSED' THEN net_profit ELSE 0 END), 0) AS net_profit,
-                    COALESCE(SUM(CASE WHEN status = 'CLOSED' AND net_profit > 0 THEN 1 ELSE 0 END), 0) AS winning_cycles
+                    COALESCE(SUM(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') THEN net_profit ELSE 0 END), 0) AS net_profit,
+                    COALESCE(SUM(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') AND net_profit > 0 THEN 1 ELSE 0 END), 0) AS winning_cycles,
+                    COALESCE(SUM(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') AND net_profit = 0 THEN 1 ELSE 0 END), 0) AS breakeven_cycles,
+                    COALESCE(SUM(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') AND net_profit < 0 THEN 1 ELSE 0 END), 0) AS losing_cycles,
+                    COALESCE(SUM(CASE WHEN status = 'CLOSED' AND close_reason = 'target' THEN 1 ELSE 0 END), 0) AS target_closed,
+                    COALESCE(SUM(CASE WHEN status = 'CLOSED' AND close_reason = 'target' THEN net_profit ELSE 0 END), 0) AS target_total_profit,
+                    COALESCE(SUM(CASE WHEN status = 'CLOSED' AND (close_reason LIKE 'max_holding_%' OR close_reason LIKE '%timeout%') THEN 1 ELSE 0 END), 0) AS timeout_closed,
+                    COALESCE(SUM(CASE WHEN status = 'CLOSED' AND (close_reason LIKE 'max_holding_%' OR close_reason LIKE '%timeout%') AND net_profit > 0 THEN 1 ELSE 0 END), 0) AS timeout_profit,
+                    COALESCE(SUM(CASE WHEN status = 'CLOSED' AND (close_reason LIKE 'max_holding_%' OR close_reason LIKE '%timeout%') AND net_profit = 0 THEN 1 ELSE 0 END), 0) AS timeout_breakeven,
+                    COALESCE(SUM(CASE WHEN status = 'CLOSED' AND (close_reason LIKE 'max_holding_%' OR close_reason LIKE '%timeout%') AND net_profit < 0 THEN 1 ELSE 0 END), 0) AS timeout_loss,
+                    COALESCE(SUM(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') AND direction = 'BUY_USDC' THEN 1 ELSE 0 END), 0) AS buy_count,
+                    COALESCE(SUM(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') AND direction = 'BUY_USDC' THEN net_profit ELSE 0 END), 0) AS buy_total_pnl,
+                    COALESCE(SUM(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') AND direction = 'BUY_USDC' AND net_profit > 0 THEN 1 ELSE 0 END), 0) AS buy_wins,
+                    COALESCE(SUM(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') AND direction = 'SELL_USDC' THEN 1 ELSE 0 END), 0) AS sell_count,
+                    COALESCE(SUM(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') AND direction = 'SELL_USDC' THEN net_profit ELSE 0 END), 0) AS sell_total_pnl,
+                    COALESCE(SUM(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') AND direction = 'SELL_USDC' AND net_profit > 0 THEN 1 ELSE 0 END), 0) AS sell_wins
                 FROM paper_cycles
                 WHERE strategy_profile = ?
                 """,
@@ -1637,6 +1651,23 @@ class DatabaseManager:
             "open_cycles": int(row[1]),
             "net_profit": float(row[2]),
             "winning_cycles": winning_cycles,
+            "breakeven_cycles": int(row[4]),
+            "losing_cycles": int(row[5]),
+            "target_closed": int(row[6]),
+            "target_total_profit": float(row[7]),
+            "target_average_profit": (float(row[7]) / int(row[6])) if int(row[6]) else 0.0,
+            "timeout_closed": int(row[8]),
+            "timeout_profit": int(row[9]),
+            "timeout_breakeven": int(row[10]),
+            "timeout_loss": int(row[11]),
+            "buy_count": int(row[12]),
+            "buy_total_pnl": float(row[13]),
+            "buy_average_pnl": (float(row[13]) / int(row[12])) if int(row[12]) else 0.0,
+            "buy_win_rate": (int(row[14]) / int(row[12])) if int(row[12]) else 0.0,
+            "sell_count": int(row[15]),
+            "sell_total_pnl": float(row[16]),
+            "sell_average_pnl": (float(row[16]) / int(row[15])) if int(row[15]) else 0.0,
+            "sell_win_rate": (int(row[17]) / int(row[15])) if int(row[15]) else 0.0,
             "win_rate": (winning_cycles / closed_cycles) if closed_cycles else 0.0,
         }
 
@@ -1669,10 +1700,15 @@ class DatabaseManager:
                     COALESCE(SUM(CASE WHEN status = 'CLOSED' THEN 1 ELSE 0 END), 0) AS automatic_closed,
                     COALESCE(SUM(CASE WHEN status = 'CLOSED_MANUAL' THEN 1 ELSE 0 END), 0) AS manual_closed,
                     COALESCE(SUM(CASE WHEN status = 'CLOSED' AND close_reason = 'target' THEN 1 ELSE 0 END), 0) AS target_closed,
-                    COALESCE(SUM(CASE WHEN status = 'CLOSED' AND close_reason LIKE 'max_holding_%' THEN 1 ELSE 0 END), 0) AS timeout_closed,
+                    COALESCE(SUM(CASE WHEN status = 'CLOSED' AND (close_reason LIKE 'max_holding_%' OR close_reason LIKE '%timeout%') THEN 1 ELSE 0 END), 0) AS timeout_closed,
                     COALESCE(SUM(CASE WHEN status = 'OPEN' THEN 1 ELSE 0 END), 0) AS open_cycles,
                     COALESCE(SUM(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') THEN net_profit ELSE 0 END), 0) AS net_profit,
-                    COALESCE(SUM(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') AND net_profit > 0 THEN 1 ELSE 0 END), 0) AS winning_cycles
+                    COALESCE(SUM(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') AND net_profit > 0 THEN 1 ELSE 0 END), 0) AS winning_cycles,
+                    COALESCE(SUM(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') AND net_profit = 0 THEN 1 ELSE 0 END), 0) AS breakeven_cycles,
+                    COALESCE(SUM(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') AND net_profit < 0 THEN 1 ELSE 0 END), 0) AS losing_cycles,
+                    COALESCE(SUM(CASE WHEN status = 'CLOSED' AND (close_reason LIKE 'max_holding_%' OR close_reason LIKE '%timeout%') AND net_profit > 0 THEN 1 ELSE 0 END), 0) AS timeout_profit,
+                    COALESCE(SUM(CASE WHEN status = 'CLOSED' AND (close_reason LIKE 'max_holding_%' OR close_reason LIKE '%timeout%') AND net_profit = 0 THEN 1 ELSE 0 END), 0) AS timeout_breakeven,
+                    COALESCE(SUM(CASE WHEN status = 'CLOSED' AND (close_reason LIKE 'max_holding_%' OR close_reason LIKE '%timeout%') AND net_profit < 0 THEN 1 ELSE 0 END), 0) AS timeout_loss
                 FROM paper_cycles
                 WHERE strategy_profile = ? AND id > ?
                 """,
@@ -1690,6 +1726,11 @@ class DatabaseManager:
             "open_cycles": int(row[5]),
             "net_profit": float(row[6]),
             "winning_cycles": winning_cycles,
+            "breakeven_cycles": int(row[8]),
+            "losing_cycles": int(row[9]),
+            "timeout_profit": int(row[10]),
+            "timeout_breakeven": int(row[11]),
+            "timeout_loss": int(row[12]),
             "win_rate": (winning_cycles / closed_cycles) if closed_cycles else 0.0,
         }
 

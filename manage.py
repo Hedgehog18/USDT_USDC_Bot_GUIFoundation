@@ -18,7 +18,7 @@ from backtest.walk_forward_engine import WalkForwardEngine
 from backtest.walk_forward_exporter import WalkForwardExporter
 from backtest.backtest_report_exporter import BacktestReportExporter
 from market.binance_market_data_provider import BinanceMarketDataProvider
-from paper.paper_analytics_engine import PaperAnalyticsEngine
+from paper.paper_analytics_engine import PaperAnalytics, PaperAnalyticsEngine
 from paper.paper_cycle_manager import PaperCycleManager
 from paper.paper_safety_engine import PaperSafetyEngine
 from paper.paper_exchange import PaperExchange
@@ -3057,8 +3057,26 @@ def command_profile_performance_summary(args) -> None:
     print(f"Total realized net profit including manual closes: {summary.total_realized_net_profit:.8f}")
     print(f"Automatic closed net profit: {summary.automatic_closed_net_profit:.8f}")
     print(f"Manual closed net profit: {summary.manual_closed_net_profit:.8f}")
-    print(f"Target-hit win rate only for automatic closes: {summary.target_hit_win_rate * 100:.2f}%")
+    print(f"Automatic financial win rate: {summary.target_hit_win_rate * 100:.2f}%")
     print(f"Real outcome win rate including manual closes: {summary.real_outcome_win_rate * 100:.2f}%")
+    print(f"Profitable cycles: {summary.profitable_cycles_count}")
+    print(f"Breakeven cycles: {summary.breakeven_cycles_count}")
+    print(f"Losing cycles: {summary.losing_cycles_count}")
+    print(f"Average profit: {summary.average_profit:.8f}")
+    print(f"Average loss: {summary.average_loss:.8f}")
+    print(f"Average cycle PnL: {summary.average_cycle_pnl:.8f}")
+    print(f"Expectancy: {summary.expectancy:.8f}")
+    print(f"Profit factor: {summary.profit_factor:.4f}")
+    print(f"Timeout closed: {summary.timeout_closed_count}")
+    print(f"Timeout profit: {summary.timeout_profit_count}")
+    print(f"Timeout breakeven: {summary.timeout_breakeven_count}")
+    print(f"Timeout loss: {summary.timeout_loss_count}")
+    print(f"Timeout average PnL: {summary.timeout_average_pnl:.8f}")
+    print(f"Timeout max profit: {summary.timeout_max_profit:.8f}")
+    print(f"Timeout max loss: {summary.timeout_max_loss:.8f}")
+    print(f"Target closed: {summary.target_closed_count}")
+    print(f"Target total profit: {summary.target_total_profit:.8f}")
+    print(f"Target average profit: {summary.target_average_profit:.8f}")
     print(f"Average net per cycle: {summary.average_net_per_cycle:.8f}")
     print(f"Average holding time: {_format_optional_duration(summary.average_holding_time_seconds)}")
     print(
@@ -3895,6 +3913,9 @@ def _print_closed_cycle_collection_progress(
             f"new automatic closed: {int(stats['automatic_closed'])}",
             f"target closed: {int(stats['target_closed'])}",
             f"timeout closed: {int(stats['timeout_closed'])}",
+            f"timeout profit: {int(stats.get('timeout_profit', 0))}",
+            f"timeout breakeven: {int(stats.get('timeout_breakeven', 0))}",
+            f"timeout loss: {int(stats.get('timeout_loss', 0))}",
             f"manual closed: {int(stats['manual_closed'])}",
         ])
     if nearest_open_cycle is None:
@@ -3978,6 +3999,9 @@ def _print_closed_cycle_collection_summary(stats: dict[str, float | int]) -> Non
     print(f"New automatic closed: {int(stats['automatic_closed'])}")
     print(f"New target closed: {int(stats['target_closed'])}")
     print(f"New timeout closed: {int(stats['timeout_closed'])}")
+    print(f"New timeout profit: {int(stats.get('timeout_profit', 0))}")
+    print(f"New timeout breakeven: {int(stats.get('timeout_breakeven', 0))}")
+    print(f"New timeout loss: {int(stats.get('timeout_loss', 0))}")
     print(f"New manual closed: {int(stats['manual_closed'])}")
     print(f"New net profit: {float(stats['net_profit']):.8f}")
     print(f"New win rate: {float(stats['win_rate']) * 100:.2f}%")
@@ -4686,15 +4710,49 @@ def command_paper_stats(args) -> None:
     stats = PaperAnalyticsEngine().build_from_rows(rows)
 
     print("=== Paper Stats ===")
+    _print_paper_financial_stats(stats)
+
+
+def _print_paper_financial_stats(stats: PaperAnalytics) -> None:
     print(f"Total cycles: {stats.total_cycles}")
     print(f"Closed cycles: {stats.closed_cycles}")
-    print(f"Winning cycles: {stats.winning_cycles}")
+    print(f"Profitable cycles: {stats.winning_cycles}")
+    print(f"Breakeven cycles: {stats.breakeven_cycles}")
     print(f"Losing cycles: {stats.losing_cycles}")
     print(f"Win rate: {stats.win_rate * 100:.2f}%")
     print(f"Gross profit: {stats.gross_profit:.8f}")
     print(f"Net profit: {stats.net_profit:.8f}")
-    print(f"Average net profit: {stats.average_net_profit:.8f}")
+    print(f"Average profit: {stats.average_profit:.8f}")
+    print(f"Average loss: {stats.average_loss:.8f}")
+    print(f"Average cycle PnL: {stats.average_cycle_pnl:.8f}")
+    print(f"Expectancy: {stats.expectancy:.8f}")
     print(f"Profit factor: {stats.profit_factor:.4f}")
+    print("")
+    print("=== Timeout Stats ===")
+    print(f"Timeout closed: {stats.timeout_closed}")
+    print(f"Timeout profit: {stats.timeout_profit_cycles}")
+    print(f"Timeout breakeven: {stats.timeout_breakeven_cycles}")
+    print(f"Timeout loss: {stats.timeout_loss_cycles}")
+    print(f"Timeout average PnL: {stats.timeout_average_pnl:.8f}")
+    print(f"Timeout max profit: {stats.timeout_max_profit:.8f}")
+    print(f"Timeout max loss: {stats.timeout_max_loss:.8f}")
+    print("")
+    print("=== Target Stats ===")
+    print(f"Target closed: {stats.target_closed}")
+    print(f"Target total profit: {stats.target_total_profit:.8f}")
+    print(f"Target average profit: {stats.target_average_profit:.8f}")
+    print("")
+    print("=== Direction Stats ===")
+    print(
+        "BUY: "
+        f"count={stats.buy_count} total_pnl={stats.buy_total_pnl:.8f} "
+        f"avg_pnl={stats.buy_average_pnl:.8f} win_rate={stats.buy_win_rate * 100:.2f}%"
+    )
+    print(
+        "SELL: "
+        f"count={stats.sell_count} total_pnl={stats.sell_total_pnl:.8f} "
+        f"avg_pnl={stats.sell_average_pnl:.8f} win_rate={stats.sell_win_rate * 100:.2f}%"
+    )
 
 
 def command_paper_safety(args) -> None:
@@ -4727,10 +4785,7 @@ def command_paper_report(args) -> None:
     print(f"Cycles CSV: {cycles_path}")
     print(f"Safety CSV: {safety_path}")
     print(f"Summary CSV: {summary_path}")
-    print(f"Closed cycles: {stats.closed_cycles}")
-    print(f"Win rate: {stats.win_rate * 100:.2f}%")
-    print(f"Net profit: {stats.net_profit:.8f}")
-    print(f"Profit factor: {stats.profit_factor:.4f}")
+    _print_paper_financial_stats(stats)
 
 
 def command_paper_recovery(args) -> None:

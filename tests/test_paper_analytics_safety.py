@@ -1,3 +1,5 @@
+import pytest
+
 from paper.models import PaperPortfolio
 from paper.paper_analytics_engine import PaperAnalyticsEngine
 from paper.paper_safety_engine import PaperSafetyEngine
@@ -5,16 +7,34 @@ from paper.paper_safety_engine import PaperSafetyEngine
 
 def test_paper_analytics_from_rows():
     rows = [
-        ("t", 1, "BUY_USDC", "CLOSED", 1.0, 1.01, 10.0, 0.01, 0.01, 0.1, 0.08),
-        ("t", 2, "BUY_USDC", "CLOSED", 1.0, 0.99, 10.0, 0.01, 0.01, -0.1, -0.12),
+        ("t", 1, "BUY_USDC", "CLOSED", 1.0, 1.01, 10.0, 0.01, 0.01, 0.1, 0.08, "target"),
+        ("t", 2, "BUY_USDC", "CLOSED", 1.0, 0.99, 10.0, 0.01, 0.01, -0.1, -0.12, "max_holding_270s"),
+        ("t", 3, "SELL_USDC", "CLOSED", 1.0, 1.0, 10.0, 0.0, 0.0, 0.0, 0.0, "max_holding_270s"),
     ]
 
     stats = PaperAnalyticsEngine().build_from_rows(rows)
 
-    assert stats.closed_cycles == 2
+    assert stats.closed_cycles == 3
     assert stats.winning_cycles == 1
+    assert stats.breakeven_cycles == 1
     assert stats.losing_cycles == 1
-    assert stats.win_rate == 0.5
+    assert stats.win_rate == pytest.approx(1 / 3)
+    assert stats.average_profit == pytest.approx(0.08)
+    assert stats.average_loss == pytest.approx(-0.12)
+    assert stats.average_cycle_pnl == pytest.approx((0.08 - 0.12) / 3)
+    assert stats.expectancy == pytest.approx((1 / 3 * 0.08) + (1 / 3 * -0.12))
+    assert stats.timeout_closed == 2
+    assert stats.timeout_profit_cycles == 0
+    assert stats.timeout_breakeven_cycles == 1
+    assert stats.timeout_loss_cycles == 1
+    assert stats.timeout_average_pnl == pytest.approx(-0.06)
+    assert stats.timeout_max_loss == pytest.approx(-0.12)
+    assert stats.target_closed == 1
+    assert stats.target_total_profit == pytest.approx(0.08)
+    assert stats.buy_count == 2
+    assert stats.buy_total_pnl == pytest.approx(-0.04)
+    assert stats.sell_count == 1
+    assert stats.sell_win_rate == 0.0
 
 
 def test_paper_safety_blocks_drawdown(test_config):

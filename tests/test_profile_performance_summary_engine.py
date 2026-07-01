@@ -103,6 +103,14 @@ def test_profile_performance_summary_accounts_for_manual_closes(test_config, tmp
     assert summary.total_realized_net_profit == pytest.approx(0.45)
     assert summary.target_hit_win_rate == 1.0
     assert summary.real_outcome_win_rate == pytest.approx(50 / 51)
+    assert summary.profitable_cycles_count == 50
+    assert summary.breakeven_cycles_count == 0
+    assert summary.losing_cycles_count == 1
+    assert summary.average_profit == pytest.approx(0.01)
+    assert summary.average_loss == pytest.approx(-0.05)
+    assert summary.average_cycle_pnl == pytest.approx(0.45 / 51)
+    assert summary.expectancy == pytest.approx(0.45 / 51)
+    assert summary.profit_factor == pytest.approx(10.0)
     assert summary.stale_close_count == 1
     assert summary.manual_close_rate == pytest.approx(1 / 51)
     assert summary.best_cycle is not None
