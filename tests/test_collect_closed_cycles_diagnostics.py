@@ -302,13 +302,11 @@ def test_collection_progress_prints_empty_new_run(capsys):
 
     output = capsys.readouterr().out
     assert "NEW CLOSED 0 / 5" in output
-    assert "new net profit: 0.00000000" in output
-    assert "target closed: 0" in output
-    assert "timeout closed: 0" in output
-    assert "safety_filter_passed: N/A" in output
-    assert "paper_safety_policy: hf_micro" in output
-    assert "safety_consecutive_losses: 3 / 10" in output
-    assert "safety_realized_drawdown: -0.00030000 / -0.00500000" in output
-    assert "safety_timeout_loss_rate: 66.67%" in output
-    assert "cooldown_check_passed: N/A" in output
-    assert "stale_price_check_passed: N/A" in output
+    assert "Net Profit" in output
+    assert "Target" in output
+    assert "Timeout" in output
+    assert "No open cycle" in output
+    assert "Entry Block Reason" in output
+    assert "no_signal" in output
+    assert "cooldown_check_passed" not in output
+    assert "stale_price_check_passed" not in output

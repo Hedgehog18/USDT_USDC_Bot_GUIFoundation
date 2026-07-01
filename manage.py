@@ -18,7 +18,7 @@ from backtest.walk_forward_engine import WalkForwardEngine
 from backtest.walk_forward_exporter import WalkForwardExporter
 from backtest.backtest_report_exporter import BacktestReportExporter
 from market.binance_market_data_provider import BinanceMarketDataProvider
-from paper.paper_analytics_engine import PaperAnalytics, PaperAnalyticsEngine
+from paper.paper_analytics_engine import PaperAnalyticsEngine
 from paper.paper_cycle_manager import PaperCycleManager
 from paper.paper_safety_engine import PaperSafetyEngine
 from paper.paper_exchange import PaperExchange
@@ -28,6 +28,7 @@ from paper.paper_recovery_manager import PaperRecoveryManager
 from paper.paper_insights_engine import PaperInsightsEngine
 from paper.paper_insights_exporter import PaperInsightsExporter
 from paper.paper_report_exporter import PaperReportExporter
+from paper.paper_trading_cli_renderer import PaperTradingCliRenderer
 from paper.paper_trading_engine import PaperTradingEngine
 from paper.hf_short_center_provider import HFShortCenterMarketAnalyzer
 from paper.long_paper_run_workflow import LongPaperRunWorkflow
@@ -3048,58 +3049,14 @@ def command_profile_performance_summary(args) -> None:
     _config, _logger, database = build_context()
     summary = ProfilePerformanceSummaryEngine(database).build_summary(profile=args.profile)
 
-    print("=== Profile Performance Summary ===")
-    print(f"Profile: {summary.profile}")
-    print(f"Total profile cycles: {summary.total_profile_cycles}")
-    print(f"Automatic closed count: {summary.automatic_closed_count}")
-    print(f"Manual closed count: {summary.manual_closed_count}")
-    print(f"Open count: {summary.open_count}")
-    print(f"Total realized net profit including manual closes: {summary.total_realized_net_profit:.8f}")
-    print(f"Automatic closed net profit: {summary.automatic_closed_net_profit:.8f}")
-    print(f"Manual closed net profit: {summary.manual_closed_net_profit:.8f}")
-    print(f"Automatic financial win rate: {summary.target_hit_win_rate * 100:.2f}%")
-    print(f"Real outcome win rate including manual closes: {summary.real_outcome_win_rate * 100:.2f}%")
-    print(f"Profitable cycles: {summary.profitable_cycles_count}")
-    print(f"Breakeven cycles: {summary.breakeven_cycles_count}")
-    print(f"Losing cycles: {summary.losing_cycles_count}")
-    print(f"Average profit: {summary.average_profit:.8f}")
-    print(f"Average loss: {summary.average_loss:.8f}")
-    print(f"Average cycle PnL: {summary.average_cycle_pnl:.8f}")
-    print(f"Expectancy: {summary.expectancy:.8f}")
-    print(f"Profit factor: {summary.profit_factor:.4f}")
-    print(f"Timeout closed: {summary.timeout_closed_count}")
-    print(f"Timeout profit: {summary.timeout_profit_count}")
-    print(f"Timeout breakeven: {summary.timeout_breakeven_count}")
-    print(f"Timeout loss: {summary.timeout_loss_count}")
-    print(f"Timeout average PnL: {summary.timeout_average_pnl:.8f}")
-    print(f"Timeout max profit: {summary.timeout_max_profit:.8f}")
-    print(f"Timeout max loss: {summary.timeout_max_loss:.8f}")
-    print(f"Target closed: {summary.target_closed_count}")
-    print(f"Target total profit: {summary.target_total_profit:.8f}")
-    print(f"Target average profit: {summary.target_average_profit:.8f}")
-    print(f"Average net per cycle: {summary.average_net_per_cycle:.8f}")
-    print(f"Average holding time: {_format_optional_duration(summary.average_holding_time_seconds)}")
-    print(
-        "Average holding time automatic: "
-        f"{_format_optional_duration(summary.average_holding_time_automatic_seconds)}"
-    )
-    print(
-        "Average holding time manual: "
-        f"{_format_optional_duration(summary.average_holding_time_manual_seconds)}"
-    )
-    print(f"Manual close rate: {summary.manual_close_rate * 100:.2f}%")
-    print(f"Stale close count: {summary.stale_close_count}")
+    PaperTradingCliRenderer().render_profile_performance_summary(summary)
     print("Best cycle:")
     _print_profile_cycle_summary(summary.best_cycle)
     print("Worst cycle:")
     _print_profile_cycle_summary(summary.worst_cycle)
-    print("Buy vs sell breakdown:")
-    _print_profile_breakdown(summary.buy_breakdown)
-    _print_profile_breakdown(summary.sell_breakdown)
     print("Session breakdown:")
     for item in summary.session_breakdown:
         _print_profile_breakdown(item)
-    print(f"Recommendation: {summary.recommendation}")
 
 
 def command_paper_profit_concentration(args) -> None:
@@ -3699,16 +3656,6 @@ def command_paper_cycle_sim(args) -> None:
         profile,
     )
 
-    print("=== Paper Cycle Sim ===")
-    print(f"Strategy profile: {profile}")
-    print(f"Iterations: {result.iterations}")
-    print(f"Opened cycles: {result.opened_cycles}")
-    print(f"Closed cycles: {result.closed_cycles}")
-    print(f"Safety stops: {result.safety_stops}")
-    print(f"Final USDT: {result.final_portfolio.usdt:.8f}")
-    print(f"Final USDC: {result.final_portfolio.usdc:.8f}")
-    print(f"Final value: {result.final_portfolio.total_value:.8f}")
-
     cycle_rows = database.load_recent_paper_cycles(limit=500)
     safety_rows = database.load_recent_paper_safety_events(limit=500)
     stats = PaperAnalyticsEngine().build_from_rows(cycle_rows)
@@ -3717,12 +3664,15 @@ def command_paper_cycle_sim(args) -> None:
     insights_path = PaperInsightsExporter().export_txt(paper_run_id, insights)
     summary_path = PaperReportExporter().export_summary_csv(stats, strategy_profile=profile)
 
-    print("--- Paper Insights ---")
-    print(f"Run ID: {paper_run_id}")
-    print(f"Rating: {insights.rating}")
-    print(f"Summary: {insights.summary}")
-    print(f"Summary CSV: {summary_path}")
-    print(f"Insights TXT: {insights_path}")
+    PaperTradingCliRenderer().render_paper_cycle_sim(
+        result,
+        stats,
+        insights,
+        profile=profile,
+        summary_path=summary_path,
+        insights_path=insights_path,
+    )
+    print(f"Paper Run ID: {paper_run_id}")
     if args.debug_entry_zones and entry_zone_debug_builder is not None:
         _print_entry_zone_debug_summary(entry_zone_debug_builder)
     if args.debug_decisions and debug_counter["count"] == 0:
@@ -3894,92 +3844,17 @@ def _print_closed_cycle_collection_progress(
     entry_diagnostics: dict[str, str],
     new_mode: bool = False,
 ) -> None:
-    current_price, data_source, price_timestamp = price_info if price_info else (None, "N/A", "N/A")
-    closed_label = "NEW CLOSED" if new_mode else "CLOSED"
-    net_label = "new net profit" if new_mode else "net profit"
-    win_label = "new win rate" if new_mode else "win rate"
-    parts = [
-        f"[collection {iteration}]",
-        f"{closed_label} {int(stats['closed_cycles'])} / {target}",
-        f"open cycles: {int(stats['open_cycles'])}",
-        f"{net_label}: {float(stats['net_profit']):.8f}",
-        f"{win_label}: {float(stats['win_rate']) * 100:.2f}%",
-        f"current_price: {_format_collection_float(current_price)}",
-        f"price_timestamp: {price_timestamp}",
-        f"data_source: {data_source}",
-    ]
-    if new_mode:
-        parts.extend([
-            f"new automatic closed: {int(stats['automatic_closed'])}",
-            f"target closed: {int(stats['target_closed'])}",
-            f"timeout closed: {int(stats['timeout_closed'])}",
-            f"timeout profit: {int(stats.get('timeout_profit', 0))}",
-            f"timeout breakeven: {int(stats.get('timeout_breakeven', 0))}",
-            f"timeout loss: {int(stats.get('timeout_loss', 0))}",
-            f"manual closed: {int(stats['manual_closed'])}",
-        ])
-    if nearest_open_cycle is None:
-        parts.extend([
-            "nearest_open_cycle_db_id: N/A",
-            "direction: N/A",
-            "target_price: N/A",
-            "distance_to_target: N/A",
-            "unrealized_pnl: N/A",
-            "close_epsilon: N/A",
-            "close_condition_met: N/A",
-            "max_holding_limit: N/A",
-            "cycle_age: N/A",
-            "max_holding_condition_met: N/A",
-        ])
-    else:
-        parts.extend([
-            f"nearest_open_cycle_db_id: {nearest_open_cycle.db_id}",
-            f"direction: {nearest_open_cycle.direction}",
-            f"target_price: {nearest_open_cycle.target_price:.8f}",
-            f"distance_to_target: {nearest_open_cycle.distance_to_target:.8f}",
-            f"unrealized_pnl: {nearest_open_cycle.unrealized_pnl:.8f}",
-            f"close_epsilon: {nearest_open_cycle.close_epsilon:.8f}",
-            f"close_condition_met: {'yes' if nearest_open_cycle.close_condition_met else 'no'}",
-            f"max_holding_limit: {_format_optional_seconds(_collection_max_holding_limit(nearest_open_cycle.profile))}",
-            f"cycle_age: {_format_optional_seconds(_collection_cycle_age_seconds(nearest_open_cycle))}",
-            f"max_holding_condition_met: {'yes' if _collection_max_holding_condition_met(nearest_open_cycle) else 'no'}",
-        ])
-    parts.append(f"action_taken: {action_taken}")
-    parts.append(f"close_reason: {close_reason}")
-    parts.append(f"entry_attempt: {entry_diagnostics['entry_attempt']}")
-    parts.append(f"candidate_detected: {entry_diagnostics['candidate_detected']}")
-    parts.append(f"entry_block_reason: {entry_diagnostics['entry_block_reason']}")
-    parts.append(f"safety_filter_passed: {entry_diagnostics['safety_filter_passed']}")
-    parts.append(f"safety_block_reason: {entry_diagnostics['safety_block_reason']}")
-    parts.append(f"safety_block_details: {entry_diagnostics['safety_block_details']}")
-    parts.append(f"paper_safety_state: {entry_diagnostics['paper_safety_state']}")
-    parts.append(f"paper_safety_policy: {entry_diagnostics['paper_safety_policy']}")
-    parts.append(f"safety_window_scope: {entry_diagnostics['safety_window_scope']}")
-    parts.append(f"safety_window_cycles: {entry_diagnostics['safety_window_cycles']}")
-    parts.append(f"safety_consecutive_losses: {entry_diagnostics['safety_consecutive_losses']}")
-    parts.append(f"safety_realized_drawdown: {entry_diagnostics['safety_realized_drawdown']}")
-    parts.append(f"safety_timeout_loss_rate: {entry_diagnostics['safety_timeout_loss_rate']}")
-    parts.append(f"safety_min_cycles_met: {entry_diagnostics['safety_min_cycles_met']}")
-    parts.append(f"balance_check_passed: {entry_diagnostics['balance_check_passed']}")
-    parts.append(f"spread_check_passed: {entry_diagnostics['spread_check_passed']}")
-    parts.append(f"cooldown_check_passed: {entry_diagnostics['cooldown_check_passed']}")
-    parts.append(f"open_cycle_check_passed: {entry_diagnostics['open_cycle_check_passed']}")
-    parts.append(f"duplicate_entry_check_passed: {entry_diagnostics['duplicate_entry_check_passed']}")
-    parts.append(f"max_open_cycles_check_passed: {entry_diagnostics['max_open_cycles_check_passed']}")
-    parts.append(f"stale_price_check_passed: {entry_diagnostics['stale_price_check_passed']}")
-    parts.append(f"short_center: {entry_diagnostics['short_center']}")
-    parts.append(f"short_center_samples: {entry_diagnostics['short_center_samples']}")
-    parts.append(f"short_center_ready: {entry_diagnostics['short_center_ready']}")
-    parts.append(f"hf_entry_mode: {entry_diagnostics['hf_entry_mode']}")
-    parts.append(f"previous_price: {entry_diagnostics['previous_price']}")
-    parts.append(f"last_different_price: {entry_diagnostics['last_different_price']}")
-    parts.append(f"price_buffer_unique_values: {entry_diagnostics['price_buffer_unique_values']}")
-    parts.append(f"flat_samples_count: {entry_diagnostics['flat_samples_count']}")
-    parts.append(f"flat_price_buffer: {entry_diagnostics['flat_price_buffer']}")
-    parts.append(f"entry_direction: {entry_diagnostics['entry_direction']}")
-    parts.append(f"entry_target_price: {entry_diagnostics['target_price']}")
-    parts.append(f"entry_target_distance: {entry_diagnostics['target_distance']}")
-    print(" | ".join(parts))
+    PaperTradingCliRenderer().render_collection_progress(
+        stats,
+        target,
+        iteration=iteration,
+        price_info=price_info,
+        nearest_open_cycle=nearest_open_cycle,
+        action_taken=action_taken,
+        close_reason=close_reason,
+        entry_diagnostics=entry_diagnostics,
+        new_mode=new_mode,
+    )
 
 
 def _collection_target_reached(
@@ -3994,17 +3869,7 @@ def _collection_target_reached(
 
 
 def _print_closed_cycle_collection_summary(stats: dict[str, float | int]) -> None:
-    print("=== New Collection Summary ===")
-    print(f"New closed cycles: {int(stats['closed_cycles'])}")
-    print(f"New automatic closed: {int(stats['automatic_closed'])}")
-    print(f"New target closed: {int(stats['target_closed'])}")
-    print(f"New timeout closed: {int(stats['timeout_closed'])}")
-    print(f"New timeout profit: {int(stats.get('timeout_profit', 0))}")
-    print(f"New timeout breakeven: {int(stats.get('timeout_breakeven', 0))}")
-    print(f"New timeout loss: {int(stats.get('timeout_loss', 0))}")
-    print(f"New manual closed: {int(stats['manual_closed'])}")
-    print(f"New net profit: {float(stats['net_profit']):.8f}")
-    print(f"New win rate: {float(stats['win_rate']) * 100:.2f}%")
+    PaperTradingCliRenderer().render_collection_summary(stats)
 
 
 def _collection_target_settings(args) -> tuple[bool, int]:
@@ -4709,50 +4574,7 @@ def command_paper_stats(args) -> None:
     rows = database.load_recent_paper_cycles(limit=args.limit)
     stats = PaperAnalyticsEngine().build_from_rows(rows)
 
-    print("=== Paper Stats ===")
-    _print_paper_financial_stats(stats)
-
-
-def _print_paper_financial_stats(stats: PaperAnalytics) -> None:
-    print(f"Total cycles: {stats.total_cycles}")
-    print(f"Closed cycles: {stats.closed_cycles}")
-    print(f"Profitable cycles: {stats.winning_cycles}")
-    print(f"Breakeven cycles: {stats.breakeven_cycles}")
-    print(f"Losing cycles: {stats.losing_cycles}")
-    print(f"Win rate: {stats.win_rate * 100:.2f}%")
-    print(f"Gross profit: {stats.gross_profit:.8f}")
-    print(f"Net profit: {stats.net_profit:.8f}")
-    print(f"Average profit: {stats.average_profit:.8f}")
-    print(f"Average loss: {stats.average_loss:.8f}")
-    print(f"Average cycle PnL: {stats.average_cycle_pnl:.8f}")
-    print(f"Expectancy: {stats.expectancy:.8f}")
-    print(f"Profit factor: {stats.profit_factor:.4f}")
-    print("")
-    print("=== Timeout Stats ===")
-    print(f"Timeout closed: {stats.timeout_closed}")
-    print(f"Timeout profit: {stats.timeout_profit_cycles}")
-    print(f"Timeout breakeven: {stats.timeout_breakeven_cycles}")
-    print(f"Timeout loss: {stats.timeout_loss_cycles}")
-    print(f"Timeout average PnL: {stats.timeout_average_pnl:.8f}")
-    print(f"Timeout max profit: {stats.timeout_max_profit:.8f}")
-    print(f"Timeout max loss: {stats.timeout_max_loss:.8f}")
-    print("")
-    print("=== Target Stats ===")
-    print(f"Target closed: {stats.target_closed}")
-    print(f"Target total profit: {stats.target_total_profit:.8f}")
-    print(f"Target average profit: {stats.target_average_profit:.8f}")
-    print("")
-    print("=== Direction Stats ===")
-    print(
-        "BUY: "
-        f"count={stats.buy_count} total_pnl={stats.buy_total_pnl:.8f} "
-        f"avg_pnl={stats.buy_average_pnl:.8f} win_rate={stats.buy_win_rate * 100:.2f}%"
-    )
-    print(
-        "SELL: "
-        f"count={stats.sell_count} total_pnl={stats.sell_total_pnl:.8f} "
-        f"avg_pnl={stats.sell_average_pnl:.8f} win_rate={stats.sell_win_rate * 100:.2f}%"
-    )
+    PaperTradingCliRenderer().render_paper_stats(stats, title="PAPER STATS")
 
 
 def command_paper_safety(args) -> None:
@@ -4785,7 +4607,7 @@ def command_paper_report(args) -> None:
     print(f"Cycles CSV: {cycles_path}")
     print(f"Safety CSV: {safety_path}")
     print(f"Summary CSV: {summary_path}")
-    _print_paper_financial_stats(stats)
+    PaperTradingCliRenderer().render_paper_stats(stats, title="PAPER REPORT SUMMARY")
 
 
 def command_paper_recovery(args) -> None:
