@@ -3693,6 +3693,7 @@ def command_collect_closed_cycles(args) -> None:
     _ensure_profile_allowed_for_paper(config, profile)
 
     use_new_target, collection_target = _collection_target_settings(args)
+    collection_id = datetime.utcnow().strftime("%Y%m%d%H%M%S")
 
     if args.interval < 0:
         raise ValueError("--interval must be 0 or greater.")
@@ -3711,22 +3712,19 @@ def command_collect_closed_cycles(args) -> None:
 
     print("=== Closed Cycles Collection Watch ===")
     print(f"Profile: {profile}")
-    if use_new_target:
-        baseline = database.load_paper_cycle_collection_baseline(profile)
-        baseline_max_id = int(baseline["max_cycle_id"])
-        print(f"Target new closed cycles: {collection_target}")
-        print(f"Baseline max paper cycle id: {baseline_max_id}")
-    else:
-        baseline_max_id = 0
-        print(f"Target closed cycles: {collection_target}")
+    baseline = database.load_paper_cycle_collection_baseline(profile)
+    baseline_max_id = int(baseline["max_cycle_id"])
+    print(f"Collection ID: {collection_id}")
+    print(f"Target new closed cycles: {collection_target}")
+    print(f"Baseline max paper cycle id: {baseline_max_id}")
     print("Mode: DEMO/PAPER only. Real trading disabled.")
     if args.safe_stop:
         print("Safe stop requested: new paper cycle entries are disabled.")
 
     stats = database.load_paper_cycle_collection_stats(profile)
-    new_stats = database.load_new_paper_cycle_collection_stats(profile, baseline_max_id) if use_new_target else None
+    new_stats = database.load_new_paper_cycle_collection_stats(profile, baseline_max_id)
     _print_closed_cycle_collection_progress(
-        new_stats if new_stats is not None else stats,
+        new_stats,
         collection_target,
         iteration=0,
         price_info=None,
@@ -3735,9 +3733,12 @@ def command_collect_closed_cycles(args) -> None:
         close_reason="N/A",
         entry_diagnostics=_collection_entry_diagnostics([]),
         new_mode=use_new_target,
+        lifetime_stats=stats,
+        collection_id=collection_id,
+        profile=profile,
     )
     if _collection_target_reached(stats, new_stats, collection_target, new_mode=use_new_target):
-        print("SUCCESS: target closed cycles already reached.")
+        print("SUCCESS: target new closed cycles already reached.")
         if args.beep:
             _beep_success()
         return
@@ -3753,19 +3754,19 @@ def command_collect_closed_cycles(args) -> None:
         price_info = _load_collection_price_info(config, database, require_binance=args.require_binance)
         if price_info is None:
             stats = database.load_paper_cycle_collection_stats(profile)
-            new_stats = database.load_new_paper_cycle_collection_stats(profile, baseline_max_id) if use_new_target else None
+            new_stats = database.load_new_paper_cycle_collection_stats(profile, baseline_max_id)
             if _should_print_collection_iteration(iteration, args.print_every):
-                progress_stats = new_stats if new_stats is not None else stats
                 progress_label = (
-                    f"NEW CLOSED {int(progress_stats['closed_cycles'])} / {collection_target}"
+                    f"NEW CLOSED {int(new_stats['closed_cycles'])} / {collection_target}"
                     if use_new_target
-                    else f"CLOSED {int(progress_stats['closed_cycles'])} / {collection_target}"
+                    else f"CLOSED {int(new_stats['closed_cycles'])} / {collection_target}"
                 )
                 print(
                     f"[collection {iteration}] WARNING: Binance price unavailable; "
                     "iteration skipped because --require-binance is enabled. "
                     f"{progress_label} | "
-                    f"open cycles: {int(progress_stats['open_cycles'])} | "
+                    f"lifetime closed: {int(stats['closed_cycles'])} | "
+                    f"open cycles: {int(new_stats['open_cycles'])} | "
                     "action_taken: skipped_no_live_price | "
                     "entry_attempt: no | "
                     "candidate_detected: no | "
@@ -3790,7 +3791,7 @@ def command_collect_closed_cycles(args) -> None:
             resume_recovery_cycles=args.resume_recovery,
         ).run(1)
         stats = database.load_paper_cycle_collection_stats(profile)
-        new_stats = database.load_new_paper_cycle_collection_stats(profile, baseline_max_id) if use_new_target else None
+        new_stats = database.load_new_paper_cycle_collection_stats(profile, baseline_max_id)
         action_taken = _collection_action_taken(before_stats, stats, result)
         entry_diagnostics = _collection_entry_diagnostics(
             entry_debug_items,
@@ -3817,7 +3818,7 @@ def command_collect_closed_cycles(args) -> None:
             or _collection_target_reached(stats, new_stats, collection_target, new_mode=use_new_target)
         ):
             _print_closed_cycle_collection_progress(
-                new_stats if new_stats is not None else stats,
+                new_stats,
                 collection_target,
                 iteration=iteration,
                 price_info=price_info,
@@ -3826,6 +3827,9 @@ def command_collect_closed_cycles(args) -> None:
                 close_reason=_collection_close_reason(close_debug_items, profile),
                 entry_diagnostics=entry_diagnostics,
                 new_mode=use_new_target,
+                lifetime_stats=stats,
+                collection_id=collection_id,
+                profile=profile,
             )
         if result.recovery_required:
             PaperTradingCliRenderer().render_recovery_required(result.recovery_message)
@@ -3836,9 +3840,13 @@ def command_collect_closed_cycles(args) -> None:
             break
 
         if _collection_target_reached(stats, new_stats, collection_target, new_mode=use_new_target):
-            print("SUCCESS: target closed cycles reached.")
-            if use_new_target and new_stats is not None:
-                _print_closed_cycle_collection_summary(new_stats)
+            print("SUCCESS: target new closed cycles reached.")
+            _print_closed_cycle_collection_summary(
+                new_stats,
+                lifetime_stats=stats,
+                collection_id=collection_id,
+                profile=profile,
+            )
             if args.beep:
                 _beep_success()
             return
@@ -3858,6 +3866,9 @@ def _print_closed_cycle_collection_progress(
     close_reason: str,
     entry_diagnostics: dict[str, str],
     new_mode: bool = False,
+    lifetime_stats: dict[str, float | int] | None = None,
+    collection_id: str | int | None = None,
+    profile: str | None = None,
 ) -> None:
     PaperTradingCliRenderer().render_collection_progress(
         stats,
@@ -3869,6 +3880,9 @@ def _print_closed_cycle_collection_progress(
         close_reason=close_reason,
         entry_diagnostics=entry_diagnostics,
         new_mode=new_mode,
+        lifetime_stats=lifetime_stats,
+        collection_id=collection_id,
+        profile=profile,
     )
 
 
@@ -3883,8 +3897,19 @@ def _collection_target_reached(
     return int(progress_stats["closed_cycles"]) >= target
 
 
-def _print_closed_cycle_collection_summary(stats: dict[str, float | int]) -> None:
-    PaperTradingCliRenderer().render_collection_summary(stats)
+def _print_closed_cycle_collection_summary(
+    stats: dict[str, float | int],
+    *,
+    lifetime_stats: dict[str, float | int] | None = None,
+    collection_id: str | int | None = None,
+    profile: str | None = None,
+) -> None:
+    PaperTradingCliRenderer().render_collection_summary(
+        stats,
+        lifetime_stats=lifetime_stats,
+        collection_id=collection_id,
+        profile=profile,
+    )
 
 
 def _collection_target_settings(args) -> tuple[bool, int]:
@@ -3899,7 +3924,7 @@ def _collection_target_settings(args) -> tuple[bool, int]:
     target = 100 if args.target is None else int(args.target)
     if target <= 0:
         raise ValueError("--target must be greater than 0.")
-    return False, target
+    return True, target
 
 
 def _load_collection_price_info(config, database, *, require_binance: bool) -> tuple[float, str, str] | None:

@@ -210,13 +210,33 @@ def test_collection_close_reason_filters_by_profile():
 def test_collection_target_settings_defaults_to_legacy_target():
     args = SimpleNamespace(target=None, target_new=None)
 
-    assert _collection_target_settings(args) == (False, 100)
+    assert _collection_target_settings(args) == (True, 100)
 
 
 def test_collection_target_settings_uses_target_new():
     args = SimpleNamespace(target=None, target_new=50)
 
     assert _collection_target_settings(args) == (True, 50)
+
+
+def test_collection_target_settings_uses_target_as_new_collection_goal():
+    args = SimpleNamespace(target=500, target_new=None)
+
+    assert _collection_target_settings(args) == (True, 500)
+
+
+def test_collection_target_reached_uses_new_stats_not_lifetime():
+    from manage import _collection_target_reached
+
+    lifetime_stats = {"closed_cycles": 1132}
+    current_collection_stats = {"closed_cycles": 0}
+
+    assert _collection_target_reached(
+        lifetime_stats,
+        current_collection_stats,
+        500,
+        new_mode=True,
+    ) is False
 
 
 def test_collection_target_settings_rejects_target_and_target_new():
@@ -301,7 +321,11 @@ def test_collection_progress_prints_empty_new_run(capsys):
     )
 
     output = capsys.readouterr().out
-    assert "NEW CLOSED 0 / 5" in output
+    assert "New Closed" in output
+    assert "0 / 5" in output
+    assert "Lifetime Closed" in output
+    assert "CURRENT COLLECTION PERFORMANCE" in output
+    assert "LIFETIME SUMMARY" in output
     assert "Net Profit" in output
     assert "Target" in output
     assert "Timeout" in output

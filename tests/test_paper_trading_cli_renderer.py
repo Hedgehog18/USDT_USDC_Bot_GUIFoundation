@@ -93,7 +93,8 @@ def test_renderer_hides_na_collection_fields(capsys):
 
     output = capsys.readouterr().out
 
-    assert "NEW CLOSED 0 / 5" in output
+    assert "New Closed: 0 / 5" in output
+    assert "LIFETIME SUMMARY" in output
     assert "No open cycle" in output
     assert "Entry Block Reason: no_signal" in output
     assert "safety_filter_passed" not in output
@@ -139,11 +140,17 @@ def test_renderer_prints_open_cycle(capsys):
         action_taken="waiting",
         close_reason="N/A",
         entry_diagnostics=diagnostics,
+        lifetime_stats={"closed_cycles": 12, "net_profit": 0.02, "win_rate": 0.5},
+        collection_id="test-collection",
+        profile="mean_reversion_hf_micro_v1",
     )
 
     output = capsys.readouterr().out
 
     assert "CURRENT CYCLE" in output
+    assert "Collection: test-collection" in output
+    assert "Profile: mean_reversion_hf_micro_v1" in output
+    assert "Lifetime Closed: 12" in output
     assert "Direction: SELL_USDC" in output
     assert "Unrealized PnL: -0.00020000" in output
     assert "Age: 168s" in output
@@ -163,13 +170,20 @@ def test_renderer_prints_collection_summary(capsys):
         "win_rate": 0.6,
     }
 
-    PaperTradingCliRenderer(force_plain=True).render_collection_summary(stats)
+    PaperTradingCliRenderer(force_plain=True).render_collection_summary(
+        stats,
+        lifetime_stats={"closed_cycles": 100, "net_profit": 0.123, "win_rate": 0.64},
+        collection_id="collection-1",
+        profile="mean_reversion_hf_micro_v1",
+    )
 
     output = capsys.readouterr().out
 
     assert "NEW COLLECTION SUMMARY" in output
-    assert "Timeout Profit: 1" in output
-    assert "Win Rate: 60.00%" in output
+    assert "Collection ID: collection-1" in output
+    assert "New timeout profit: 1" in output
+    assert "New win rate: 60.00%" in output
+    assert "Lifetime closed cycles: 100" in output
 
 
 def test_renderer_prints_recovery_required_warning(capsys):

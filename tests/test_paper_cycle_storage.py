@@ -209,6 +209,11 @@ def test_database_loads_paper_cycle_collection_stats_by_profile(tmp_path: Path):
     assert stats["winning_cycles"] == 1
     assert stats["breakeven_cycles"] == 0
     assert stats["losing_cycles"] == 1
+    assert stats["average_cycle_pnl"] == pytest.approx(-0.005)
+    assert stats["expectancy"] == pytest.approx(-0.005)
+    assert stats["profit_factor"] == pytest.approx(0.5)
+    assert stats["buy_count"] == 1
+    assert stats["sell_count"] == 1
     assert stats["win_rate"] == 0.5
 
 
@@ -270,6 +275,12 @@ def test_database_loads_new_paper_cycle_collection_stats_after_baseline(tmp_path
     assert stats["winning_cycles"] == 1
     assert stats["breakeven_cycles"] == 0
     assert stats["losing_cycles"] == 2
+    assert stats["average_cycle_pnl"] == pytest.approx(-0.02 / 3)
+    assert stats["expectancy"] == pytest.approx(-0.02 / 3)
+    assert stats["profit_factor"] == pytest.approx(0.02 / 0.04)
+    assert stats["buy_count"] == 3
+    assert stats["buy_total_pnl"] == pytest.approx(-0.02)
+    assert stats["buy_win_rate"] == pytest.approx(1 / 3)
     assert stats["win_rate"] == pytest.approx(1 / 3)
 
 

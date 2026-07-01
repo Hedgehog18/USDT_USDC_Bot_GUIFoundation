@@ -108,25 +108,41 @@ class PaperTradingCliRenderer:
         close_reason: str,
         entry_diagnostics: dict[str, str],
         new_mode: bool = False,
+        lifetime_stats: dict[str, float | int] | None = None,
+        collection_id: str | int | None = None,
+        profile: str | None = None,
     ) -> None:
         current_price, data_source, price_timestamp = price_info if price_info else (None, "N/A", "N/A")
         closed_label = "NEW CLOSED" if new_mode else "CLOSED"
+        lifetime = lifetime_stats or {}
         sections = [
             self._section("PAPER TRADING STATUS", [
-                ("Collection", iteration),
-                ("Progress", f"{closed_label} {int(stats['closed_cycles'])} / {target}"),
-                ("Open", int(stats["open_cycles"])),
+                ("Collection", collection_id if collection_id is not None else iteration),
+                ("Profile", profile or "N/A"),
+                ("New Closed", f"{int(stats['closed_cycles'])} / {target}"),
+                ("Lifetime Closed", int(lifetime.get("closed_cycles", 0))),
+                ("Open Cycles", int(stats["open_cycles"])),
                 ("Action", action_taken),
                 ("Close reason", close_reason),
             ]),
-            self._section("PERFORMANCE", [
+            self._section("CURRENT COLLECTION PERFORMANCE", [
                 ("Net Profit", self._format_signed(float(stats["net_profit"]))),
                 ("Win Rate", self._format_percent(float(stats["win_rate"]))),
+                ("Avg Cycle PnL", self._format_signed(float(stats.get("average_cycle_pnl", 0.0)))),
+                ("Expectancy", self._format_signed(float(stats.get("expectancy", 0.0)))),
+                ("Profit Factor", f"{float(stats.get('profit_factor', 0.0)):.4f}"),
                 ("Profitable", int(stats.get("winning_cycles", 0))),
                 ("Breakeven", int(stats.get("breakeven_cycles", 0))),
                 ("Losing", int(stats.get("losing_cycles", 0))),
             ]),
-            self._section("CLOSE BREAKDOWN", [
+            self._section("LIFETIME SUMMARY", [
+                ("Closed", int(lifetime.get("closed_cycles", 0))),
+                ("Net Profit", self._format_signed(float(lifetime.get("net_profit", 0.0)))),
+                ("Win Rate", self._format_percent(float(lifetime.get("win_rate", 0.0)))),
+                ("Expectancy", self._format_signed(float(lifetime.get("expectancy", 0.0)))),
+                ("Profit Factor", f"{float(lifetime.get('profit_factor', 0.0)):.4f}"),
+            ]),
+            self._section("CURRENT COLLECTION CLOSE BREAKDOWN", [
                 ("Automatic", int(stats.get("automatic_closed", 0))),
                 ("Target", int(stats.get("target_closed", 0))),
                 ("Timeout", int(stats.get("timeout_closed", 0))),
@@ -134,6 +150,14 @@ class PaperTradingCliRenderer:
                 ("Timeout Breakeven", int(stats.get("timeout_breakeven", 0))),
                 ("Timeout Loss", int(stats.get("timeout_loss", 0))),
                 ("Manual", int(stats.get("manual_closed", 0))),
+            ]),
+            self._section("CURRENT COLLECTION DIRECTION BREAKDOWN", [
+                ("BUY Count", int(stats.get("buy_count", 0))),
+                ("BUY Net", self._format_signed(float(stats.get("buy_total_pnl", 0.0)))),
+                ("BUY Win Rate", self._format_percent(float(stats.get("buy_win_rate", 0.0)))),
+                ("SELL Count", int(stats.get("sell_count", 0))),
+                ("SELL Net", self._format_signed(float(stats.get("sell_total_pnl", 0.0)))),
+                ("SELL Win Rate", self._format_percent(float(stats.get("sell_win_rate", 0.0)))),
             ]),
             self._current_cycle_section(nearest_open_cycle),
             self._market_signal_section(
@@ -148,20 +172,38 @@ class PaperTradingCliRenderer:
             sections.append(safety)
         self._render_sections(sections)
 
-    def render_collection_summary(self, stats: dict[str, float | int]) -> None:
+    def render_collection_summary(
+        self,
+        stats: dict[str, float | int],
+        *,
+        lifetime_stats: dict[str, float | int] | None = None,
+        collection_id: str | int | None = None,
+        profile: str | None = None,
+    ) -> None:
+        lifetime = lifetime_stats or {}
         self._render_sections([
             self._section("NEW COLLECTION SUMMARY", [
-                ("Closed", int(stats["closed_cycles"])),
-                ("Automatic", int(stats["automatic_closed"])),
-                ("Target", int(stats["target_closed"])),
-                ("Timeout", int(stats["timeout_closed"])),
-                ("Timeout Profit", int(stats.get("timeout_profit", 0))),
-                ("Timeout Breakeven", int(stats.get("timeout_breakeven", 0))),
-                ("Timeout Loss", int(stats.get("timeout_loss", 0))),
-                ("Manual", int(stats["manual_closed"])),
-                ("Net Profit", self._format_signed(float(stats["net_profit"]))),
-                ("Win Rate", self._format_percent(float(stats["win_rate"]))),
-            ])
+                ("Collection ID", collection_id or "N/A"),
+                ("Profile", profile or "N/A"),
+                ("New closed cycles", int(stats["closed_cycles"])),
+                ("New automatic closed", int(stats["automatic_closed"])),
+                ("New target closed", int(stats["target_closed"])),
+                ("New timeout closed", int(stats["timeout_closed"])),
+                ("New timeout profit", int(stats.get("timeout_profit", 0))),
+                ("New timeout breakeven", int(stats.get("timeout_breakeven", 0))),
+                ("New timeout loss", int(stats.get("timeout_loss", 0))),
+                ("New manual closed", int(stats["manual_closed"])),
+                ("New net profit", self._format_signed(float(stats["net_profit"]))),
+                ("New win rate", self._format_percent(float(stats["win_rate"]))),
+                ("New average cycle PnL", self._format_signed(float(stats.get("average_cycle_pnl", 0.0)))),
+                ("New expectancy", self._format_signed(float(stats.get("expectancy", 0.0)))),
+                ("New profit factor", f"{float(stats.get('profit_factor', 0.0)):.4f}"),
+            ]),
+            self._section("LIFETIME SUMMARY", [
+                ("Lifetime closed cycles", int(lifetime.get("closed_cycles", 0))),
+                ("Lifetime net profit", self._format_signed(float(lifetime.get("net_profit", 0.0)))),
+                ("Lifetime win rate", self._format_percent(float(lifetime.get("win_rate", 0.0)))),
+            ]),
         ])
 
     def render_profile_performance_summary(self, summary) -> None:

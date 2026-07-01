@@ -1706,11 +1706,15 @@ class DatabaseManager:
                 """
                 SELECT
                     COALESCE(SUM(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') THEN 1 ELSE 0 END), 0) AS closed_cycles,
+                    COALESCE(SUM(CASE WHEN status = 'CLOSED' THEN 1 ELSE 0 END), 0) AS automatic_closed,
+                    COALESCE(SUM(CASE WHEN status = 'CLOSED_MANUAL' THEN 1 ELSE 0 END), 0) AS manual_closed,
                     COALESCE(SUM(CASE WHEN status = 'OPEN' THEN 1 ELSE 0 END), 0) AS open_cycles,
                     COALESCE(SUM(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') THEN net_profit ELSE 0 END), 0) AS net_profit,
                     COALESCE(SUM(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') AND net_profit > 0 THEN 1 ELSE 0 END), 0) AS winning_cycles,
                     COALESCE(SUM(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') AND net_profit = 0 THEN 1 ELSE 0 END), 0) AS breakeven_cycles,
                     COALESCE(SUM(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') AND net_profit < 0 THEN 1 ELSE 0 END), 0) AS losing_cycles,
+                    COALESCE(SUM(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') AND net_profit > 0 THEN net_profit ELSE 0 END), 0) AS positive_net,
+                    COALESCE(SUM(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') AND net_profit < 0 THEN net_profit ELSE 0 END), 0) AS negative_net,
                     COALESCE(SUM(CASE WHEN status = 'CLOSED' AND close_reason = 'target' THEN 1 ELSE 0 END), 0) AS target_closed,
                     COALESCE(SUM(CASE WHEN status = 'CLOSED' AND close_reason = 'target' THEN net_profit ELSE 0 END), 0) AS target_total_profit,
                     COALESCE(SUM(CASE WHEN status = 'CLOSED' AND (close_reason LIKE 'max_holding_%' OR close_reason LIKE '%timeout%') THEN 1 ELSE 0 END), 0) AS timeout_closed,
@@ -1730,29 +1734,37 @@ class DatabaseManager:
             ).fetchone()
 
         closed_cycles = int(row[0])
-        winning_cycles = int(row[3])
+        winning_cycles = int(row[5])
+        net_profit = float(row[4])
+        positive_net = float(row[8])
+        negative_net = float(row[9])
         return {
             "closed_cycles": closed_cycles,
-            "open_cycles": int(row[1]),
-            "net_profit": float(row[2]),
+            "automatic_closed": int(row[1]),
+            "manual_closed": int(row[2]),
+            "open_cycles": int(row[3]),
+            "net_profit": net_profit,
             "winning_cycles": winning_cycles,
-            "breakeven_cycles": int(row[4]),
-            "losing_cycles": int(row[5]),
-            "target_closed": int(row[6]),
-            "target_total_profit": float(row[7]),
-            "target_average_profit": (float(row[7]) / int(row[6])) if int(row[6]) else 0.0,
-            "timeout_closed": int(row[8]),
-            "timeout_profit": int(row[9]),
-            "timeout_breakeven": int(row[10]),
-            "timeout_loss": int(row[11]),
-            "buy_count": int(row[12]),
-            "buy_total_pnl": float(row[13]),
-            "buy_average_pnl": (float(row[13]) / int(row[12])) if int(row[12]) else 0.0,
-            "buy_win_rate": (int(row[14]) / int(row[12])) if int(row[12]) else 0.0,
-            "sell_count": int(row[15]),
-            "sell_total_pnl": float(row[16]),
-            "sell_average_pnl": (float(row[16]) / int(row[15])) if int(row[15]) else 0.0,
-            "sell_win_rate": (int(row[17]) / int(row[15])) if int(row[15]) else 0.0,
+            "breakeven_cycles": int(row[6]),
+            "losing_cycles": int(row[7]),
+            "average_cycle_pnl": (net_profit / closed_cycles) if closed_cycles else 0.0,
+            "expectancy": (net_profit / closed_cycles) if closed_cycles else 0.0,
+            "profit_factor": (positive_net / abs(negative_net)) if negative_net < 0 else 0.0,
+            "target_closed": int(row[10]),
+            "target_total_profit": float(row[11]),
+            "target_average_profit": (float(row[11]) / int(row[10])) if int(row[10]) else 0.0,
+            "timeout_closed": int(row[12]),
+            "timeout_profit": int(row[13]),
+            "timeout_breakeven": int(row[14]),
+            "timeout_loss": int(row[15]),
+            "buy_count": int(row[16]),
+            "buy_total_pnl": float(row[17]),
+            "buy_average_pnl": (float(row[17]) / int(row[16])) if int(row[16]) else 0.0,
+            "buy_win_rate": (int(row[18]) / int(row[16])) if int(row[16]) else 0.0,
+            "sell_count": int(row[19]),
+            "sell_total_pnl": float(row[20]),
+            "sell_average_pnl": (float(row[20]) / int(row[19])) if int(row[19]) else 0.0,
+            "sell_win_rate": (int(row[21]) / int(row[19])) if int(row[19]) else 0.0,
             "win_rate": (winning_cycles / closed_cycles) if closed_cycles else 0.0,
         }
 
@@ -1791,9 +1803,17 @@ class DatabaseManager:
                     COALESCE(SUM(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') AND net_profit > 0 THEN 1 ELSE 0 END), 0) AS winning_cycles,
                     COALESCE(SUM(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') AND net_profit = 0 THEN 1 ELSE 0 END), 0) AS breakeven_cycles,
                     COALESCE(SUM(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') AND net_profit < 0 THEN 1 ELSE 0 END), 0) AS losing_cycles,
+                    COALESCE(SUM(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') AND net_profit > 0 THEN net_profit ELSE 0 END), 0) AS positive_net,
+                    COALESCE(SUM(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') AND net_profit < 0 THEN net_profit ELSE 0 END), 0) AS negative_net,
                     COALESCE(SUM(CASE WHEN status = 'CLOSED' AND (close_reason LIKE 'max_holding_%' OR close_reason LIKE '%timeout%') AND net_profit > 0 THEN 1 ELSE 0 END), 0) AS timeout_profit,
                     COALESCE(SUM(CASE WHEN status = 'CLOSED' AND (close_reason LIKE 'max_holding_%' OR close_reason LIKE '%timeout%') AND net_profit = 0 THEN 1 ELSE 0 END), 0) AS timeout_breakeven,
-                    COALESCE(SUM(CASE WHEN status = 'CLOSED' AND (close_reason LIKE 'max_holding_%' OR close_reason LIKE '%timeout%') AND net_profit < 0 THEN 1 ELSE 0 END), 0) AS timeout_loss
+                    COALESCE(SUM(CASE WHEN status = 'CLOSED' AND (close_reason LIKE 'max_holding_%' OR close_reason LIKE '%timeout%') AND net_profit < 0 THEN 1 ELSE 0 END), 0) AS timeout_loss,
+                    COALESCE(SUM(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') AND direction = 'BUY_USDC' THEN 1 ELSE 0 END), 0) AS buy_count,
+                    COALESCE(SUM(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') AND direction = 'BUY_USDC' THEN net_profit ELSE 0 END), 0) AS buy_total_pnl,
+                    COALESCE(SUM(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') AND direction = 'BUY_USDC' AND net_profit > 0 THEN 1 ELSE 0 END), 0) AS buy_wins,
+                    COALESCE(SUM(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') AND direction = 'SELL_USDC' THEN 1 ELSE 0 END), 0) AS sell_count,
+                    COALESCE(SUM(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') AND direction = 'SELL_USDC' THEN net_profit ELSE 0 END), 0) AS sell_total_pnl,
+                    COALESCE(SUM(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') AND direction = 'SELL_USDC' AND net_profit > 0 THEN 1 ELSE 0 END), 0) AS sell_wins
                 FROM paper_cycles
                 WHERE strategy_profile = ? AND id > ?
                 """,
@@ -1802,6 +1822,9 @@ class DatabaseManager:
 
         closed_cycles = int(row[0])
         winning_cycles = int(row[7])
+        net_profit = float(row[6])
+        positive_net = float(row[10])
+        negative_net = float(row[11])
         return {
             "closed_cycles": closed_cycles,
             "automatic_closed": int(row[1]),
@@ -1813,9 +1836,20 @@ class DatabaseManager:
             "winning_cycles": winning_cycles,
             "breakeven_cycles": int(row[8]),
             "losing_cycles": int(row[9]),
-            "timeout_profit": int(row[10]),
-            "timeout_breakeven": int(row[11]),
-            "timeout_loss": int(row[12]),
+            "average_cycle_pnl": (net_profit / closed_cycles) if closed_cycles else 0.0,
+            "expectancy": (net_profit / closed_cycles) if closed_cycles else 0.0,
+            "profit_factor": (positive_net / abs(negative_net)) if negative_net < 0 else 0.0,
+            "timeout_profit": int(row[12]),
+            "timeout_breakeven": int(row[13]),
+            "timeout_loss": int(row[14]),
+            "buy_count": int(row[15]),
+            "buy_total_pnl": float(row[16]),
+            "buy_average_pnl": (float(row[16]) / int(row[15])) if int(row[15]) else 0.0,
+            "buy_win_rate": (int(row[17]) / int(row[15])) if int(row[15]) else 0.0,
+            "sell_count": int(row[18]),
+            "sell_total_pnl": float(row[19]),
+            "sell_average_pnl": (float(row[19]) / int(row[18])) if int(row[18]) else 0.0,
+            "sell_win_rate": (int(row[20]) / int(row[18])) if int(row[18]) else 0.0,
             "win_rate": (winning_cycles / closed_cycles) if closed_cycles else 0.0,
         }
 
