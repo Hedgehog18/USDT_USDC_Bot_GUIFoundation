@@ -3723,16 +3723,8 @@ def command_collect_closed_cycles(args) -> None:
 
     stats = database.load_paper_cycle_collection_stats(profile)
     new_stats = database.load_new_paper_cycle_collection_stats(profile, baseline_max_id)
-    _print_closed_cycle_collection_progress(
+    _print_closed_cycle_collection_summary(
         new_stats,
-        collection_target,
-        iteration=0,
-        price_info=None,
-        nearest_open_cycle=None,
-        action_taken="waiting",
-        close_reason="N/A",
-        entry_diagnostics=_collection_entry_diagnostics([]),
-        new_mode=use_new_target,
         lifetime_stats=stats,
         collection_id=collection_id,
         profile=profile,
@@ -3755,7 +3747,7 @@ def command_collect_closed_cycles(args) -> None:
         if price_info is None:
             stats = database.load_paper_cycle_collection_stats(profile)
             new_stats = database.load_new_paper_cycle_collection_stats(profile, baseline_max_id)
-            if _should_print_collection_iteration(iteration, args.print_every):
+            if not args.events_only and _should_print_collection_iteration(iteration, args.print_every):
                 progress_label = (
                     f"NEW CLOSED {int(new_stats['closed_cycles'])} / {collection_target}"
                     if use_new_target
@@ -3813,10 +3805,17 @@ def command_collect_closed_cycles(args) -> None:
                 entry_diagnostics["safety_filter_passed"] = "yes"
                 entry_diagnostics["paper_safety_state"] = "passed"
         nearest_open_cycle = _nearest_collection_open_cycle(config, database, profile, price_info[0], price_info[1], price_info[2])
-        if (
-            _should_print_collection_iteration(iteration, args.print_every)
+        important_event = (
+            action_taken in {"opened", "closed"}
+            or result.safety_stops > 0
+            or result.recovery_required
             or _collection_target_reached(stats, new_stats, collection_target, new_mode=use_new_target)
-        ):
+        )
+        should_print_progress = (
+            important_event
+            or (not args.events_only and _should_print_collection_iteration(iteration, args.print_every))
+        )
+        if should_print_progress:
             _print_closed_cycle_collection_progress(
                 new_stats,
                 collection_target,
@@ -3830,6 +3829,7 @@ def command_collect_closed_cycles(args) -> None:
                 lifetime_stats=stats,
                 collection_id=collection_id,
                 profile=profile,
+                verbose_rich=args.verbose_rich,
             )
         if result.recovery_required:
             PaperTradingCliRenderer().render_recovery_required(result.recovery_message)
@@ -3869,8 +3869,23 @@ def _print_closed_cycle_collection_progress(
     lifetime_stats: dict[str, float | int] | None = None,
     collection_id: str | int | None = None,
     profile: str | None = None,
+    verbose_rich: bool = False,
 ) -> None:
-    PaperTradingCliRenderer().render_collection_progress(
+    renderer = PaperTradingCliRenderer()
+    if not verbose_rich:
+        renderer.render_collection_progress_compact(
+            stats,
+            target,
+            iteration=iteration,
+            price_info=price_info,
+            nearest_open_cycle=nearest_open_cycle,
+            action_taken=action_taken,
+            entry_diagnostics=entry_diagnostics,
+            lifetime_stats=lifetime_stats,
+            collection_id=collection_id,
+        )
+        return
+    renderer.render_collection_progress(
         stats,
         target,
         iteration=iteration,
@@ -5057,6 +5072,9 @@ def build_parser() -> argparse.ArgumentParser:
     collect_closed_cycles_parser.add_argument("--print-every", type=int, default=1)
     collect_closed_cycles_parser.add_argument("--safe-stop", action="store_true")
     collect_closed_cycles_parser.add_argument("--resume-recovery", action="store_true")
+    collect_closed_cycles_parser.add_argument("--compact", action="store_true")
+    collect_closed_cycles_parser.add_argument("--verbose-rich", action="store_true")
+    collect_closed_cycles_parser.add_argument("--events-only", action="store_true")
     collect_closed_cycles_parser.set_defaults(func=command_collect_closed_cycles)
 
     long_paper_run_parser = subparsers.add_parser("long-paper-run", help="Run long paper validation workflow")

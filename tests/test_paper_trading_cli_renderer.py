@@ -79,24 +79,25 @@ def test_renderer_hides_na_collection_fields(capsys):
         "safety_block_reason": "N/A",
     }
 
-    PaperTradingCliRenderer(force_plain=True).render_collection_progress(
+    PaperTradingCliRenderer(force_plain=True).render_collection_progress_compact(
         stats,
         5,
         iteration=0,
         price_info=None,
         nearest_open_cycle=None,
         action_taken="waiting",
-        close_reason="N/A",
         entry_diagnostics=diagnostics,
-        new_mode=True,
     )
 
     output = capsys.readouterr().out
 
-    assert "New Closed: 0 / 5" in output
-    assert "LIFETIME SUMMARY" in output
-    assert "No open cycle" in output
-    assert "Entry Block Reason: no_signal" in output
+    assert "New: 0/5" in output
+    assert "Lifetime: 0" in output
+    assert "Open: 0" in output
+    assert "Block: no_signal" in output
+    assert "CURRENT COLLECTION DIRECTION BREAKDOWN" not in output
+    assert "CURRENT COLLECTION CLOSE BREAKDOWN" not in output
+    assert "No open cycle" not in output
     assert "safety_filter_passed" not in output
     assert "N/A" not in output
 
@@ -131,13 +132,59 @@ def test_renderer_prints_open_cycle(capsys):
         "safety_block_reason": "N/A",
     }
 
-    PaperTradingCliRenderer(force_plain=True).render_collection_progress(
+    PaperTradingCliRenderer(force_plain=True).render_collection_progress_compact(
         stats,
         5,
         iteration=2,
         price_info=(1.0009, "BINANCE", "2026-07-01T10:00:00"),
         nearest_open_cycle=open_cycle,
         action_taken="waiting",
+        entry_diagnostics=diagnostics,
+        lifetime_stats={"closed_cycles": 12, "net_profit": 0.02, "win_rate": 0.5},
+        collection_id="test-collection",
+    )
+
+    output = capsys.readouterr().out
+
+    assert "Cycle: SELL_USDC" in output
+    assert "collection test-collection" in output
+    assert "Lifetime: 12" in output
+    assert "uPnL: -0.00020000" in output
+    assert "Age: 168s" in output
+
+
+def test_renderer_verbose_progress_keeps_full_panels(capsys):
+    stats = {
+        "closed_cycles": 1,
+        "open_cycles": 0,
+        "net_profit": 0.001,
+        "win_rate": 1.0,
+        "target_closed": 1,
+        "timeout_closed": 0,
+        "manual_closed": 0,
+        "buy_count": 1,
+        "buy_total_pnl": 0.001,
+        "buy_win_rate": 1.0,
+        "sell_count": 0,
+    }
+    diagnostics = {
+        "candidate_detected": "yes",
+        "entry_block_reason": "N/A",
+        "short_center": "1.00085000",
+        "short_center_samples": "60",
+        "hf_entry_mode": "short_center",
+        "entry_direction": "BUY_USDC",
+        "target_price": "1.00090000",
+        "target_distance": "0.00005000",
+    }
+
+    PaperTradingCliRenderer(force_plain=True).render_collection_progress(
+        stats,
+        5,
+        iteration=3,
+        price_info=(1.00085, "BINANCE", "2026-07-01T10:00:00"),
+        nearest_open_cycle=None,
+        action_taken="opened",
         close_reason="N/A",
         entry_diagnostics=diagnostics,
         lifetime_stats={"closed_cycles": 12, "net_profit": 0.02, "win_rate": 0.5},
@@ -147,13 +194,11 @@ def test_renderer_prints_open_cycle(capsys):
 
     output = capsys.readouterr().out
 
-    assert "CURRENT CYCLE" in output
-    assert "Collection: test-collection" in output
-    assert "Profile: mean_reversion_hf_micro_v1" in output
-    assert "Lifetime Closed: 12" in output
-    assert "Direction: SELL_USDC" in output
-    assert "Unrealized PnL: -0.00020000" in output
-    assert "Age: 168s" in output
+    assert "PAPER TRADING STATUS" in output
+    assert "CURRENT COLLECTION PERFORMANCE" in output
+    assert "LIFETIME SUMMARY" in output
+    assert "CURRENT COLLECTION CLOSE BREAKDOWN" in output
+    assert "CURRENT COLLECTION DIRECTION BREAKDOWN" in output
 
 
 def test_renderer_prints_collection_summary(capsys):

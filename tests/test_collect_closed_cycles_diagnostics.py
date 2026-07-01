@@ -321,16 +321,14 @@ def test_collection_progress_prints_empty_new_run(capsys):
     )
 
     output = capsys.readouterr().out
-    assert "New Closed" in output
-    assert "0 / 5" in output
-    assert "Lifetime Closed" in output
-    assert "CURRENT COLLECTION PERFORMANCE" in output
-    assert "LIFETIME SUMMARY" in output
-    assert "Net Profit" in output
-    assert "Target" in output
-    assert "Timeout" in output
-    assert "No open cycle" in output
-    assert "Entry Block Reason" in output
+    assert "New: 0/5" in output
+    assert "Lifetime: 0" in output
+    assert "Open: 0" in output
+    assert "Profit: +0.00000000" in output
+    assert "Block: no_signal" in output
+    assert "CURRENT COLLECTION PERFORMANCE" not in output
+    assert "LIFETIME SUMMARY" not in output
+    assert "No open cycle" not in output
     assert "no_signal" in output
     assert "cooldown_check_passed" not in output
     assert "stale_price_check_passed" not in output

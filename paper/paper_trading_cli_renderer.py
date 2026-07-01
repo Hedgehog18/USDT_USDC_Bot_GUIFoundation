@@ -142,7 +142,9 @@ class PaperTradingCliRenderer:
                 ("Expectancy", self._format_signed(float(lifetime.get("expectancy", 0.0)))),
                 ("Profit Factor", f"{float(lifetime.get('profit_factor', 0.0)):.4f}"),
             ]),
-            self._section("CURRENT COLLECTION CLOSE BREAKDOWN", [
+        ]
+        if self._has_close_breakdown(stats):
+            sections.append(self._section("CURRENT COLLECTION CLOSE BREAKDOWN", [
                 ("Automatic", int(stats.get("automatic_closed", 0))),
                 ("Target", int(stats.get("target_closed", 0))),
                 ("Timeout", int(stats.get("timeout_closed", 0))),
@@ -150,27 +152,80 @@ class PaperTradingCliRenderer:
                 ("Timeout Breakeven", int(stats.get("timeout_breakeven", 0))),
                 ("Timeout Loss", int(stats.get("timeout_loss", 0))),
                 ("Manual", int(stats.get("manual_closed", 0))),
-            ]),
-            self._section("CURRENT COLLECTION DIRECTION BREAKDOWN", [
+            ]))
+        if self._has_direction_breakdown(stats):
+            sections.append(self._section("CURRENT COLLECTION DIRECTION BREAKDOWN", [
                 ("BUY Count", int(stats.get("buy_count", 0))),
                 ("BUY Net", self._format_signed(float(stats.get("buy_total_pnl", 0.0)))),
                 ("BUY Win Rate", self._format_percent(float(stats.get("buy_win_rate", 0.0)))),
                 ("SELL Count", int(stats.get("sell_count", 0))),
                 ("SELL Net", self._format_signed(float(stats.get("sell_total_pnl", 0.0)))),
                 ("SELL Win Rate", self._format_percent(float(stats.get("sell_win_rate", 0.0)))),
-            ]),
-            self._current_cycle_section(nearest_open_cycle),
-            self._market_signal_section(
-                current_price=current_price,
-                data_source=data_source,
-                price_timestamp=price_timestamp,
-                entry_diagnostics=entry_diagnostics,
-            ),
-        ]
+            ]))
+        if nearest_open_cycle is not None:
+            sections.append(self._current_cycle_section(nearest_open_cycle))
+        sections.append(self._market_signal_section(
+            current_price=current_price,
+            data_source=data_source,
+            price_timestamp=price_timestamp,
+            entry_diagnostics=entry_diagnostics,
+        ))
         safety = self._safety_section(entry_diagnostics)
         if safety is not None:
             sections.append(safety)
         self._render_sections(sections)
+
+    def render_collection_progress_compact(
+        self,
+        stats: dict[str, float | int],
+        target: int,
+        *,
+        iteration: int,
+        price_info: tuple[float, str, str] | None,
+        nearest_open_cycle,
+        action_taken: str,
+        entry_diagnostics: dict[str, str],
+        lifetime_stats: dict[str, float | int] | None = None,
+        collection_id: str | int | None = None,
+    ) -> None:
+        current_price, _data_source, _price_timestamp = price_info if price_info else (None, "N/A", "N/A")
+        lifetime = lifetime_stats or {}
+        collection_label = collection_id if collection_id is not None else iteration
+        title = (
+            f"collection {collection_label} | "
+            f"new {int(stats['closed_cycles'])}/{target}"
+        )
+        if iteration is not None:
+            title = f"{title} | update {iteration}"
+        self._render_rule(title)
+        print(
+            "New: "
+            f"{int(stats['closed_cycles'])}/{target} | "
+            f"Lifetime: {int(lifetime.get('closed_cycles', 0))} | "
+            f"Open: {int(stats.get('open_cycles', 0))} | "
+            f"Profit: {self._format_signed(float(stats.get('net_profit', 0.0)))} | "
+            f"Win: {self._format_percent(float(stats.get('win_rate', 0.0)))} | "
+            f"Action: {action_taken}"
+        )
+        if nearest_open_cycle is not None:
+            print(
+                "Cycle: "
+                f"{getattr(nearest_open_cycle, 'direction', 'N/A')} | "
+                f"Price: {self._format_float(getattr(nearest_open_cycle, 'current_price', current_price))} | "
+                f"Target: {self._format_float(getattr(nearest_open_cycle, 'target_price', None))} | "
+                f"Distance: {self._format_float(getattr(nearest_open_cycle, 'distance_to_target', None))} | "
+                f"Age: {self._format_seconds(getattr(nearest_open_cycle, 'age_seconds', None))} | "
+                f"uPnL: {self._format_signed(getattr(nearest_open_cycle, 'unrealized_pnl', 0.0))}"
+            )
+            return
+        print(
+            "Price: "
+            f"{self._format_compact_float(current_price)} | "
+            f"Center: {self._compact_text(entry_diagnostics.get('short_center'))} | "
+            f"Mode: {self._compact_text(entry_diagnostics.get('hf_entry_mode'))} | "
+            f"Candidate: {self._compact_text(entry_diagnostics.get('candidate_detected'))} | "
+            f"Block: {self._compact_text(entry_diagnostics.get('entry_block_reason'))}"
+        )
 
     def render_collection_summary(
         self,
@@ -312,6 +367,21 @@ class PaperTradingCliRenderer:
             ("Timeout Loss Rate", entry_diagnostics.get("safety_timeout_loss_rate")),
         ])
 
+    @staticmethod
+    def _has_close_breakdown(stats: dict[str, float | int]) -> bool:
+        return any(int(stats.get(key, 0)) for key in ("target_closed", "timeout_closed", "manual_closed"))
+
+    @staticmethod
+    def _has_direction_breakdown(stats: dict[str, float | int]) -> bool:
+        return int(stats.get("buy_count", 0)) > 0 or int(stats.get("sell_count", 0)) > 0
+
+    def _render_rule(self, title: str) -> None:
+        if self._rich_enabled:
+            self._console.rule(title)
+            return
+        print("-" * 80)
+        print(f"-- {title} --")
+
     def _section(self, title: str, rows: list[tuple[str, Any]]):
         filtered = [(label, value) for label, value in rows if self._is_useful(value)]
         if self._rich_enabled:
@@ -355,6 +425,18 @@ class PaperTradingCliRenderer:
         if value is None or str(value) == "N/A":
             return "N/A"
         return f"{float(value):.8f}"
+
+    @staticmethod
+    def _format_compact_float(value: Any) -> str:
+        if value is None or str(value) == "N/A":
+            return "unavailable"
+        return f"{float(value):.8f}"
+
+    @staticmethod
+    def _compact_text(value: Any) -> str:
+        if value is None or str(value) in {"", "N/A", "None"}:
+            return "unavailable"
+        return str(value)
 
     @staticmethod
     def _format_signed(value: Any) -> str:

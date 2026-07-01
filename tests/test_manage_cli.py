@@ -316,6 +316,9 @@ def test_manage_cli_has_collect_closed_cycles_command():
         "--no-beep",
         "--safe-stop",
         "--resume-recovery",
+        "--compact",
+        "--verbose-rich",
+        "--events-only",
     ])
 
     assert args.command == "collect-closed-cycles"
@@ -329,6 +332,9 @@ def test_manage_cli_has_collect_closed_cycles_command():
     assert args.beep is False
     assert args.safe_stop is True
     assert args.resume_recovery is True
+    assert args.compact is True
+    assert args.verbose_rich is True
+    assert args.events_only is True
 
 
 def test_manage_cli_has_collect_closed_cycles_target_new():
