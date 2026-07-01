@@ -148,6 +148,8 @@ def test_migration_backfills_legacy_paper_cycle_ids(tmp_path: Path):
 
     assert "paper_cycles.strategy_profile" in first
     assert "paper_cycles.close_reason" in first
+    assert "paper_cycles.opened_session_id" in first
+    assert "paper_cycles.recovery_status" in first
     assert "paper_cycles.cycle_id_backfill" in first
     assert second == []
     with sqlite3.connect(db_path) as conn:
@@ -157,4 +159,6 @@ def test_migration_backfills_legacy_paper_cycle_ids(tmp_path: Path):
         ).fetchall()
 
     assert "close_reason" in columns
+    assert "opened_session_id" in columns
+    assert "recovery_status" in columns
     assert rows == [(1, 1), (2, 2), (3, 3)]

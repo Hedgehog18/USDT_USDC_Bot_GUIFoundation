@@ -204,6 +204,19 @@ class PaperTradingCliRenderer:
         ]
         self._render_sections(sections)
 
+    def render_recovery_required(self, message: str | None = None) -> None:
+        text = message or (
+            "Open cycle detected from previous session. "
+            "Automatic close is disabled. Choose recovery action before continuing."
+        )
+        self._render_sections([
+            self._section("RECOVERY REQUIRED", [
+                ("Warning", text),
+                ("Automatic close", "disabled"),
+                ("Required action", "resume / close manually / abandon"),
+            ])
+        ])
+
     def _current_cycle_section(self, nearest_open_cycle):
         if nearest_open_cycle is None:
             return self._section("CURRENT CYCLE", [("Status", "No open cycle")])

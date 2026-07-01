@@ -3644,6 +3644,8 @@ def command_paper_cycle_sim(args) -> None:
         close_debug_callback=close_debug_callback,
         force_refresh_market_data=args.force_refresh_market_data,
         strategy_profile=profile,
+        safe_stop=args.safe_stop,
+        resume_recovery_cycles=args.resume_recovery,
     ).run(args.iterations)
 
     logger.info(
@@ -3672,6 +3674,8 @@ def command_paper_cycle_sim(args) -> None:
         summary_path=summary_path,
         insights_path=insights_path,
     )
+    if result.recovery_required:
+        PaperTradingCliRenderer().render_recovery_required(result.recovery_message)
     print(f"Paper Run ID: {paper_run_id}")
     if args.debug_entry_zones and entry_zone_debug_builder is not None:
         _print_entry_zone_debug_summary(entry_zone_debug_builder)
@@ -3716,6 +3720,8 @@ def command_collect_closed_cycles(args) -> None:
         baseline_max_id = 0
         print(f"Target closed cycles: {collection_target}")
     print("Mode: DEMO/PAPER only. Real trading disabled.")
+    if args.safe_stop:
+        print("Safe stop requested: new paper cycle entries are disabled.")
 
     stats = database.load_paper_cycle_collection_stats(profile)
     new_stats = database.load_new_paper_cycle_collection_stats(profile, baseline_max_id) if use_new_target else None
@@ -3780,6 +3786,8 @@ def command_collect_closed_cycles(args) -> None:
             close_debug_callback=close_debug_items.append,
             strategy_profile=profile,
             safety_baseline_max_id=baseline_max_id if use_new_target else 0,
+            safe_stop=args.safe_stop,
+            resume_recovery_cycles=args.resume_recovery,
         ).run(1)
         stats = database.load_paper_cycle_collection_stats(profile)
         new_stats = database.load_new_paper_cycle_collection_stats(profile, baseline_max_id) if use_new_target else None
@@ -3819,6 +3827,13 @@ def command_collect_closed_cycles(args) -> None:
                 entry_diagnostics=entry_diagnostics,
                 new_mode=use_new_target,
             )
+        if result.recovery_required:
+            PaperTradingCliRenderer().render_recovery_required(result.recovery_message)
+            break
+
+        if args.safe_stop and int(stats["open_cycles"]) == 0:
+            print("SAFE STOP: no open paper cycles remain. Collection stopped.")
+            break
 
         if _collection_target_reached(stats, new_stats, collection_target, new_mode=use_new_target):
             print("SUCCESS: target closed cycles reached.")
@@ -4477,6 +4492,35 @@ def command_paper_close_cycle(args) -> None:
     print(f"net_profit: {profit.net_profit:.8f}")
 
 
+def command_paper_recovery_action(args) -> None:
+    _config, _logger, database = build_context()
+    if args.action == "resume":
+        updated = database.request_paper_cycle_resume(args.db_id)
+        status = "RESUME_REQUESTED"
+        message = "Cycle tracking will resume on the next paper processing run without immediate close."
+    elif args.action == "abandon":
+        updated = database.abandon_paper_cycle(
+            args.db_id,
+            args.reason,
+            datetime.utcnow().isoformat(),
+        )
+        status = "ABANDONED"
+        message = "Cycle marked as abandoned and excluded from normal OPEN-cycle handling."
+    else:
+        raise ValueError(f"Unsupported recovery action: {args.action}")
+
+    if not updated:
+        raise ValueError(f"OPEN paper cycle not found for db_id={args.db_id}.")
+
+    print("=== Paper Recovery Action ===")
+    print(f"db_id: {args.db_id}")
+    print(f"action: {args.action}")
+    print(f"status: {status}")
+    print(f"reason: {args.reason}")
+    print(message)
+    print("Manual close remains available via: python manage.py paper-close-cycle --db-id <id> --reason manual")
+
+
 def command_paper_close_watch(args) -> None:
     config, _logger, database = build_context()
     interval = int(args.interval)
@@ -4966,6 +5010,8 @@ def build_parser() -> argparse.ArgumentParser:
     paper_cycle_sim_parser.add_argument("--debug-entry-zones", action="store_true")
     paper_cycle_sim_parser.add_argument("--debug-close", action="store_true")
     paper_cycle_sim_parser.add_argument("--force-refresh-market-data", action="store_true")
+    paper_cycle_sim_parser.add_argument("--safe-stop", action="store_true")
+    paper_cycle_sim_parser.add_argument("--resume-recovery", action="store_true")
     paper_cycle_sim_parser.set_defaults(func=command_paper_cycle_sim)
 
     collect_closed_cycles_parser = subparsers.add_parser(
@@ -4984,6 +5030,8 @@ def build_parser() -> argparse.ArgumentParser:
     collect_closed_cycles_parser.add_argument("--beep", action=argparse.BooleanOptionalAction, default=True)
     collect_closed_cycles_parser.add_argument("--require-binance", action="store_true")
     collect_closed_cycles_parser.add_argument("--print-every", type=int, default=1)
+    collect_closed_cycles_parser.add_argument("--safe-stop", action="store_true")
+    collect_closed_cycles_parser.add_argument("--resume-recovery", action="store_true")
     collect_closed_cycles_parser.set_defaults(func=command_collect_closed_cycles)
 
     long_paper_run_parser = subparsers.add_parser("long-paper-run", help="Run long paper validation workflow")
@@ -5020,6 +5068,19 @@ def build_parser() -> argparse.ArgumentParser:
         default="manual",
     )
     paper_close_cycle_parser.set_defaults(func=command_paper_close_cycle)
+
+    paper_recovery_action_parser = subparsers.add_parser(
+        "paper-recovery-action",
+        help="Resolve an OPEN paper cycle that requires operator recovery",
+    )
+    paper_recovery_action_parser.add_argument("--db-id", type=int, required=True)
+    paper_recovery_action_parser.add_argument(
+        "--action",
+        choices=("resume", "abandon"),
+        required=True,
+    )
+    paper_recovery_action_parser.add_argument("--reason", default="operator_recovery")
+    paper_recovery_action_parser.set_defaults(func=command_paper_recovery_action)
 
     paper_close_watch_parser = subparsers.add_parser(
         "paper-close-watch",

@@ -44,6 +44,8 @@ class DatabaseMigrationManager:
         "paper_cycles": [
             ColumnDefinition("strategy_profile", "TEXT DEFAULT 'UNKNOWN'"),
             ColumnDefinition("close_reason", "TEXT"),
+            ColumnDefinition("opened_session_id", "TEXT"),
+            ColumnDefinition("recovery_status", "TEXT DEFAULT 'ACTIVE'"),
         ],
     }
 

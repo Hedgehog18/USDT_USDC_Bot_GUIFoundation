@@ -42,6 +42,26 @@ def test_database_loads_open_paper_cycle_with_strategy_profile(test_config, tmp_
     assert rows[0][4] == "BUY_USDC"
 
 
+def test_database_loads_open_paper_cycle_recovery_fields(test_config, tmp_path: Path):
+    database = DatabaseManager(str(tmp_path / "bot.sqlite"))
+    portfolio = PaperPortfolioManager(initial_usdt=100.0, initial_usdc=100.0)
+    exchange = PaperExchange(test_config, portfolio)
+    manager = PaperCycleManager(test_config, exchange)
+
+    cycle = manager.open_cycle("BUY_USDC", 1.0)
+    row_id = database.save_paper_cycle(
+        cycle,
+        strategy_profile="mean_reversion_v2",
+        opened_session_id="session-1",
+    )
+
+    rows = database.load_open_paper_cycles_with_recovery(limit=10)
+
+    assert rows[0][0] == row_id
+    assert rows[0][15] == "session-1"
+    assert rows[0][16] == "ACTIVE"
+
+
 def test_database_updates_only_matching_open_paper_cycle(test_config, tmp_path: Path):
     database = DatabaseManager(str(tmp_path / "bot.sqlite"))
     portfolio = PaperPortfolioManager(initial_usdt=100.0, initial_usdc=100.0)

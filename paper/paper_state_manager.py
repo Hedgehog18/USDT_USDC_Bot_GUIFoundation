@@ -9,6 +9,7 @@ class PaperState(str, Enum):
     READY = "READY"
     RUNNING = "RUNNING"
     SAFE_STOP = "SAFE_STOP"
+    RECOVERY_REQUIRED = "RECOVERY_REQUIRED"
     STOPPED = "STOPPED"
     ERROR = "ERROR"
 
@@ -25,8 +26,15 @@ class PaperStateManager:
     ALLOWED = {
         PaperState.INIT: {PaperState.READY, PaperState.ERROR},
         PaperState.READY: {PaperState.RUNNING, PaperState.STOPPED, PaperState.ERROR},
-        PaperState.RUNNING: {PaperState.READY, PaperState.SAFE_STOP, PaperState.STOPPED, PaperState.ERROR},
+        PaperState.RUNNING: {
+            PaperState.READY,
+            PaperState.SAFE_STOP,
+            PaperState.RECOVERY_REQUIRED,
+            PaperState.STOPPED,
+            PaperState.ERROR,
+        },
         PaperState.SAFE_STOP: {PaperState.READY, PaperState.STOPPED, PaperState.ERROR},
+        PaperState.RECOVERY_REQUIRED: {PaperState.READY, PaperState.STOPPED, PaperState.ERROR},
         PaperState.STOPPED: {PaperState.READY, PaperState.ERROR},
         PaperState.ERROR: {PaperState.READY, PaperState.STOPPED},
     }

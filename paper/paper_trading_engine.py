@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from collections.abc import Callable
 from datetime import datetime
 from decimal import Decimal
+from uuid import uuid4
 
 from app.bot_engine import BotEngine
 from config.config_manager import BotConfig
@@ -28,6 +29,10 @@ class PaperTradingRunResult:
     data_source: str = "UNKNOWN"
     safety_stop_reason: str | None = None
     safety_diagnostics: dict[str, str] | None = None
+    session_id: str | None = None
+    recovery_required: bool = False
+    recovery_message: str | None = None
+    shutdown_requested: bool = False
 
 
 class PaperTradingEngine:
@@ -49,6 +54,9 @@ class PaperTradingEngine:
         force_refresh_market_data: bool = False,
         strategy_profile: str = "strict_current",
         safety_baseline_max_id: int = 0,
+        session_id: str | None = None,
+        safe_stop: bool = False,
+        resume_recovery_cycles: bool = False,
     ) -> None:
         self.config = config
         self.database = database
@@ -70,6 +78,11 @@ class PaperTradingEngine:
         self.force_refresh_market_data = force_refresh_market_data
         self.strategy_profile = strategy_profile
         self.safety_baseline_max_id = safety_baseline_max_id
+        self.session_id = session_id or str(uuid4())
+        self.safe_stop = safe_stop
+        self.resume_recovery_cycles = resume_recovery_cycles
+        self.recovery_required = False
+        self.recovery_message: str | None = None
 
     def run(self, iterations: int) -> PaperTradingRunResult:
         if iterations <= 0:
@@ -97,15 +110,28 @@ class PaperTradingEngine:
                 index=index,
             )
             closed += closed_from_database
+            if self.recovery_required:
+                if self.state_manager.current_state == PaperState.RUNNING:
+                    self.state_manager.transition_to(
+                        PaperState.RECOVERY_REQUIRED,
+                        self.recovery_message or "Open cycle detected from previous session.",
+                    )
+                break
+            if self.safe_stop and self.database.count_open_paper_cycles() == 0:
+                break
             if closed_from_database > 0:
                 continue
-            if has_database_open_cycles:
+            if has_database_open_cycles or self.safe_stop:
                 if self.entry_zone_debug_callback:
                     self.entry_zone_debug_callback({
                         "index": index,
                         "market_state": market_state,
                         "action": "WAIT",
-                        "reason": "database paper cycle is already open",
+                        "reason": (
+                            "safe-stop requested; no new paper cycle entries"
+                            if self.safe_stop
+                            else "database paper cycle is already open"
+                        ),
                         "risk_allowed": False,
                         "risk_reason": "Risk check skipped while database cycle is open",
                         "risk_check_evaluated": False,
@@ -206,7 +232,11 @@ class PaperTradingEngine:
                 target_profit=decision.target_profit,
             )
             if opened_cycle:
-                row_id = self.database.save_paper_cycle(opened_cycle, strategy_profile=self.strategy_profile)
+                row_id = self.database.save_paper_cycle(
+                    opened_cycle,
+                    strategy_profile=self.strategy_profile,
+                    opened_session_id=self.session_id,
+                )
                 self._save_hf_entry_diagnostics(
                     paper_cycle_id=row_id,
                     market_state=market_state,
@@ -226,6 +256,10 @@ class PaperTradingEngine:
             data_source=getattr(self.bot.market_analyzer, "last_data_source", "UNKNOWN"),
             safety_stop_reason=safety_stop_reason,
             safety_diagnostics=safety_diagnostics,
+            session_id=self.session_id,
+            recovery_required=self.recovery_required,
+            recovery_message=self.recovery_message,
+            shutdown_requested=self.safe_stop,
         )
 
     def _save_hf_entry_diagnostics(self, *, paper_cycle_id: int, market_state, decision) -> None:
@@ -285,14 +319,74 @@ class PaperTradingEngine:
         )
 
     def _process_database_open_cycles(self, current_price: float, index: int) -> tuple[int, bool]:
-        rows = self.database.load_open_paper_cycles(limit=1000)
+        load_with_recovery = getattr(self.database, "load_open_paper_cycles_with_recovery", None)
+        rows = (
+            load_with_recovery(limit=1000)
+            if callable(load_with_recovery)
+            else self.database.load_open_paper_cycles(limit=1000)
+        )
         if not rows:
             return 0, False
 
         closed_count = 0
         open_cycles_remaining = False
         for row in rows:
-            cycle, strategy_profile, cycle_id = self._paper_cycle_from_open_row(row)
+            cycle, strategy_profile, cycle_id, opened_session_id, recovery_status = self._paper_cycle_from_open_row(row)
+            if self._requires_recovery(cycle.id, opened_session_id, recovery_status):
+                open_cycles_remaining = True
+                self.recovery_required = True
+                self.recovery_message = (
+                    "Open cycle detected from previous session. "
+                    "Automatic close is disabled. Manual recovery action required."
+                )
+                self._emit_close_debug({
+                    "index": index,
+                    "db_id": cycle.id,
+                    "cycle_id": cycle_id,
+                    "strategy_profile": strategy_profile,
+                    "direction": cycle.direction.value,
+                    "current_price": current_price,
+                    "target_price": cycle.close_price,
+                    "close_condition_met": False,
+                    "target_close_condition_met": False,
+                    "max_holding_limit": self._max_holding_seconds_for_profile(strategy_profile),
+                    "cycle_age": self._cycle_age_seconds(cycle),
+                    "max_holding_condition_met": False,
+                    "close_attempted": False,
+                    "close_result": "RECOVERY_REQUIRED",
+                    "close_reason": None,
+                    "reason": self.recovery_message,
+                    "opened_session_id": opened_session_id,
+                    "current_session_id": self.session_id,
+                    "recovery_status": recovery_status,
+                })
+                continue
+            if self._should_resume_cycle(cycle.id, opened_session_id, recovery_status):
+                open_cycles_remaining = True
+                resumed_at = datetime.utcnow().isoformat()
+                self.database.resume_paper_cycle_tracking(cycle.id, self.session_id, resumed_at)
+                self._emit_close_debug({
+                    "index": index,
+                    "db_id": cycle.id,
+                    "cycle_id": cycle_id,
+                    "strategy_profile": strategy_profile,
+                    "direction": cycle.direction.value,
+                    "current_price": current_price,
+                    "target_price": cycle.close_price,
+                    "close_condition_met": False,
+                    "target_close_condition_met": False,
+                    "max_holding_limit": self._max_holding_seconds_for_profile(strategy_profile),
+                    "cycle_age": 0.0,
+                    "max_holding_condition_met": False,
+                    "close_attempted": False,
+                    "close_result": "RESUMED",
+                    "close_reason": None,
+                    "reason": "Recovery resume requested; tracking resumed without immediate close.",
+                    "opened_session_id": opened_session_id,
+                    "current_session_id": self.session_id,
+                    "recovery_status": recovery_status,
+                })
+                continue
             target_price = cycle.close_price
             close_tolerance = self._close_tolerance_for_profile(strategy_profile)
             close_rounding_digits = self._close_rounding_digits_for_profile(strategy_profile)
@@ -383,7 +477,7 @@ class PaperTradingEngine:
 
         return closed_count, open_cycles_remaining
 
-    def _paper_cycle_from_open_row(self, row: tuple) -> tuple[PaperCycle, str, int]:
+    def _paper_cycle_from_open_row(self, row: tuple) -> tuple[PaperCycle, str, int, str | None, str]:
         (
             db_id,
             _timestamp,
@@ -400,7 +494,10 @@ class PaperTradingEngine:
             net_profit,
             opened_at,
             closed_at,
+            *recovery_fields,
         ) = row
+        opened_session_id = recovery_fields[0] if len(recovery_fields) > 0 else None
+        recovery_status = recovery_fields[1] if len(recovery_fields) > 1 else "ACTIVE"
 
         cycle = PaperCycle(
             id=int(db_id),
@@ -416,7 +513,30 @@ class PaperTradingEngine:
             opened_at=datetime.fromisoformat(opened_at),
             closed_at=datetime.fromisoformat(closed_at) if closed_at else None,
         )
-        return cycle, str(strategy_profile), int(cycle_id)
+        return cycle, str(strategy_profile), int(cycle_id), opened_session_id, str(recovery_status or "ACTIVE")
+
+    def _requires_recovery(
+        self,
+        db_id: int,
+        opened_session_id: str | None,
+        recovery_status: str,
+    ) -> bool:
+        if recovery_status == "RESUME_REQUESTED" or self.resume_recovery_cycles:
+            return False
+        if opened_session_id == self.session_id:
+            return False
+        self.database.mark_paper_cycle_recovery_required(db_id)
+        return True
+
+    def _should_resume_cycle(
+        self,
+        _db_id: int,
+        opened_session_id: str | None,
+        recovery_status: str,
+    ) -> bool:
+        if opened_session_id == self.session_id:
+            return False
+        return recovery_status == "RESUME_REQUESTED" or self.resume_recovery_cycles
 
     def _close_tolerance_for_profile(self, strategy_profile: str) -> float:
         return 0.0

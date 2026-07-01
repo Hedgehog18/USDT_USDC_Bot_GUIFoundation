@@ -172,6 +172,7 @@ def test_manage_cli_has_paper_cycle_commands():
     cycles_args = parser.parse_args(["paper-cycles", "--limit", "5"])
     open_cycles_args = parser.parse_args(["paper-open-cycles", "--limit", "7"])
     close_cycle_args = parser.parse_args(["paper-close-cycle", "--db-id", "9", "--reason", "stale"])
+    recovery_args = parser.parse_args(["paper-recovery-action", "--db-id", "9", "--action", "resume"])
     close_watch_args = parser.parse_args([
         "paper-close-watch",
         "--profile",
@@ -194,6 +195,9 @@ def test_manage_cli_has_paper_cycle_commands():
     assert close_cycle_args.command == "paper-close-cycle"
     assert close_cycle_args.db_id == 9
     assert close_cycle_args.reason == "stale"
+    assert recovery_args.command == "paper-recovery-action"
+    assert recovery_args.db_id == 9
+    assert recovery_args.action == "resume"
     assert close_watch_args.command == "paper-close-watch"
     assert close_watch_args.profile == "mean_reversion_v2_small_target"
     assert close_watch_args.interval == 10
@@ -215,6 +219,8 @@ def test_manage_cli_paper_cycle_accepts_strategy_profile():
         "--debug-entry-zones",
         "--debug-close",
         "--force-refresh-market-data",
+        "--safe-stop",
+        "--resume-recovery",
     ])
 
     assert args.profile == "mean_reversion_v1"
@@ -223,6 +229,8 @@ def test_manage_cli_paper_cycle_accepts_strategy_profile():
     assert args.debug_entry_zones is True
     assert args.debug_close is True
     assert args.force_refresh_market_data is True
+    assert args.safe_stop is True
+    assert args.resume_recovery is True
 
 
 def test_manage_cli_paper_cycle_accepts_mean_reversion_v2_profile():
@@ -306,6 +314,8 @@ def test_manage_cli_has_collect_closed_cycles_command():
         "--print-every",
         "2",
         "--no-beep",
+        "--safe-stop",
+        "--resume-recovery",
     ])
 
     assert args.command == "collect-closed-cycles"
@@ -317,6 +327,8 @@ def test_manage_cli_has_collect_closed_cycles_command():
     assert args.require_binance is True
     assert args.print_every == 2
     assert args.beep is False
+    assert args.safe_stop is True
+    assert args.resume_recovery is True
 
 
 def test_manage_cli_has_collect_closed_cycles_target_new():

@@ -170,3 +170,15 @@ def test_renderer_prints_collection_summary(capsys):
     assert "NEW COLLECTION SUMMARY" in output
     assert "Timeout Profit: 1" in output
     assert "Win Rate: 60.00%" in output
+
+
+def test_renderer_prints_recovery_required_warning(capsys):
+    PaperTradingCliRenderer(force_plain=True).render_recovery_required(
+        "Open cycle detected from previous session. Automatic close is disabled."
+    )
+
+    output = capsys.readouterr().out
+
+    assert "RECOVERY REQUIRED" in output
+    assert "Open cycle detected from previous session" in output
+    assert "Automatic close: disabled" in output

@@ -162,7 +162,12 @@ def test_paper_trading_engine_closes_database_open_cycle(test_config, tmp_path: 
         net_profit=0.0,
         opened_at=datetime.utcnow(),
     )
-    row_id = database.save_paper_cycle(open_cycle, strategy_profile="mean_reversion_v2_small_target")
+    session_id = "test-session"
+    row_id = database.save_paper_cycle(
+        open_cycle,
+        strategy_profile="mean_reversion_v2_small_target",
+        opened_session_id=session_id,
+    )
     close_debug_items = []
 
     result = PaperTradingEngine(
@@ -170,6 +175,7 @@ def test_paper_trading_engine_closes_database_open_cycle(test_config, tmp_path: 
         database,
         bot=FakeBot(price=1.0007),
         close_debug_callback=close_debug_items.append,
+        session_id=session_id,
     ).run(1)
 
     with database.connect() as conn:
@@ -216,9 +222,14 @@ def test_paper_trading_engine_applies_epsilon_to_small_target_profile_only(test_
             opened_at=datetime.utcnow(),
         )
 
-    strict_id = database.save_paper_cycle(open_cycle(1), strategy_profile="strict_current")
-    v2_id = database.save_paper_cycle(open_cycle(2), strategy_profile="mean_reversion_v2")
-    small_id = database.save_paper_cycle(open_cycle(3), strategy_profile="mean_reversion_v2_small_target")
+    session_id = "test-session"
+    strict_id = database.save_paper_cycle(open_cycle(1), strategy_profile="strict_current", opened_session_id=session_id)
+    v2_id = database.save_paper_cycle(open_cycle(2), strategy_profile="mean_reversion_v2", opened_session_id=session_id)
+    small_id = database.save_paper_cycle(
+        open_cycle(3),
+        strategy_profile="mean_reversion_v2_small_target",
+        opened_session_id=session_id,
+    )
     close_debug_items = []
 
     result = PaperTradingEngine(
@@ -227,6 +238,7 @@ def test_paper_trading_engine_applies_epsilon_to_small_target_profile_only(test_
         bot=FakeBot(price=current_price),
         close_debug_callback=close_debug_items.append,
         strategy_profile="mean_reversion_v2_small_target",
+        session_id=session_id,
     ).run(1)
 
     with database.connect() as conn:
@@ -434,7 +446,12 @@ def test_paper_trading_engine_hf_profile_closes_buy_on_target(test_config, tmp_p
         net_profit=0.0,
         opened_at=datetime.utcnow(),
     )
-    row_id = database.save_paper_cycle(open_cycle, strategy_profile="mean_reversion_hf_micro_v1")
+    session_id = "test-session"
+    row_id = database.save_paper_cycle(
+        open_cycle,
+        strategy_profile="mean_reversion_hf_micro_v1",
+        opened_session_id=session_id,
+    )
     close_debug_items = []
 
     result = PaperTradingEngine(
@@ -443,6 +460,7 @@ def test_paper_trading_engine_hf_profile_closes_buy_on_target(test_config, tmp_p
         bot=FakeBot(price=1.00002),
         close_debug_callback=close_debug_items.append,
         strategy_profile="mean_reversion_hf_micro_v1",
+        session_id=session_id,
     ).run(1)
 
     with database.connect() as conn:
@@ -472,13 +490,19 @@ def test_paper_trading_engine_hf_profile_closes_sell_on_target(test_config, tmp_
         net_profit=0.0,
         opened_at=datetime.utcnow(),
     )
-    row_id = database.save_paper_cycle(open_cycle, strategy_profile="mean_reversion_hf_micro_v1")
+    session_id = "test-session"
+    row_id = database.save_paper_cycle(
+        open_cycle,
+        strategy_profile="mean_reversion_hf_micro_v1",
+        opened_session_id=session_id,
+    )
 
     result = PaperTradingEngine(
         test_config,
         database,
         bot=FakeBot(price=0.99999),
         strategy_profile="mean_reversion_hf_micro_v1",
+        session_id=session_id,
     ).run(1)
 
     with database.connect() as conn:
@@ -506,7 +530,12 @@ def test_paper_trading_engine_hf_profile_closes_after_270s_timeout(test_config, 
         net_profit=0.0,
         opened_at=datetime.utcnow() - timedelta(seconds=271),
     )
-    row_id = database.save_paper_cycle(open_cycle, strategy_profile="mean_reversion_hf_micro_v1")
+    session_id = "test-session"
+    row_id = database.save_paper_cycle(
+        open_cycle,
+        strategy_profile="mean_reversion_hf_micro_v1",
+        opened_session_id=session_id,
+    )
     close_debug_items = []
 
     result = PaperTradingEngine(
@@ -515,6 +544,7 @@ def test_paper_trading_engine_hf_profile_closes_after_270s_timeout(test_config, 
         bot=FakeBot(price=1.000000),
         close_debug_callback=close_debug_items.append,
         strategy_profile="mean_reversion_hf_micro_v1",
+        session_id=session_id,
     ).run(1)
 
     with database.connect() as conn:
@@ -546,7 +576,12 @@ def test_paper_trading_engine_hf_profile_does_not_timeout_before_270s(test_confi
         net_profit=0.0,
         opened_at=datetime.utcnow() - timedelta(seconds=269),
     )
-    row_id = database.save_paper_cycle(open_cycle, strategy_profile="mean_reversion_hf_micro_v1")
+    session_id = "test-session"
+    row_id = database.save_paper_cycle(
+        open_cycle,
+        strategy_profile="mean_reversion_hf_micro_v1",
+        opened_session_id=session_id,
+    )
     close_debug_items = []
 
     result = PaperTradingEngine(
@@ -555,6 +590,7 @@ def test_paper_trading_engine_hf_profile_does_not_timeout_before_270s(test_confi
         bot=FakeBot(price=1.000000),
         close_debug_callback=close_debug_items.append,
         strategy_profile="mean_reversion_hf_micro_v1",
+        session_id=session_id,
     ).run(1)
 
     with database.connect() as conn:
@@ -585,7 +621,12 @@ def test_paper_trading_engine_hf_timeout_ignores_missing_short_center(test_confi
         net_profit=0.0,
         opened_at=datetime.utcnow() - timedelta(seconds=271),
     )
-    row_id = database.save_paper_cycle(open_cycle, strategy_profile="mean_reversion_hf_micro_v1")
+    session_id = "test-session"
+    row_id = database.save_paper_cycle(
+        open_cycle,
+        strategy_profile="mean_reversion_hf_micro_v1",
+        opened_session_id=session_id,
+    )
     close_debug_items = []
 
     result = PaperTradingEngine(
@@ -594,6 +635,7 @@ def test_paper_trading_engine_hf_timeout_ignores_missing_short_center(test_confi
         bot=FakeProfileBot(test_config, price=1.000000, short_center=0.0),
         close_debug_callback=close_debug_items.append,
         strategy_profile="mean_reversion_hf_micro_v1",
+        session_id=session_id,
     ).run(1)
 
     with database.connect() as conn:
@@ -623,7 +665,12 @@ def test_paper_trading_engine_hf_timeout_ignores_no_signal_entry_result(test_con
         net_profit=0.0,
         opened_at=datetime.utcnow() - timedelta(seconds=271),
     )
-    row_id = database.save_paper_cycle(open_cycle, strategy_profile="mean_reversion_hf_micro_v1")
+    session_id = "test-session"
+    row_id = database.save_paper_cycle(
+        open_cycle,
+        strategy_profile="mean_reversion_hf_micro_v1",
+        opened_session_id=session_id,
+    )
     entry_debug_items = []
 
     result = PaperTradingEngine(
@@ -632,6 +679,7 @@ def test_paper_trading_engine_hf_timeout_ignores_no_signal_entry_result(test_con
         bot=FakeBot(price=1.000000),
         entry_zone_debug_callback=entry_debug_items.append,
         strategy_profile="mean_reversion_hf_micro_v1",
+        session_id=session_id,
     ).run(1)
 
     with database.connect() as conn:
@@ -640,3 +688,192 @@ def test_paper_trading_engine_hf_timeout_ignores_no_signal_entry_result(test_con
     assert result.closed_cycles == 1
     assert row == ("CLOSED", "max_holding_270s")
     assert entry_debug_items == []
+
+
+def test_paper_trading_engine_requires_recovery_for_previous_session_open_cycle(test_config, tmp_path: Path):
+    from datetime import datetime
+    from paper.models import PaperCycle, PaperCycleStatus, PaperOrderSide
+
+    database = DatabaseManager(str(tmp_path / "bot.sqlite"))
+    open_cycle = PaperCycle(
+        id=1,
+        direction=PaperOrderSide.BUY_USDC,
+        status=PaperCycleStatus.OPEN,
+        open_price=1.0000,
+        close_price=1.0001,
+        quantity=10.0,
+        open_fee=0.0,
+        close_fee=0.0,
+        gross_profit=0.0,
+        net_profit=0.0,
+        opened_at=datetime.utcnow(),
+    )
+    row_id = database.save_paper_cycle(
+        open_cycle,
+        strategy_profile="mean_reversion_v2_small_target",
+        opened_session_id="old-session",
+    )
+    close_debug_items = []
+
+    result = PaperTradingEngine(
+        test_config,
+        database,
+        bot=FakeBot(price=1.0002),
+        close_debug_callback=close_debug_items.append,
+        session_id="new-session",
+    ).run(1)
+
+    with database.connect() as conn:
+        row = conn.execute(
+            "SELECT status, recovery_status, close_price FROM paper_cycles WHERE id = ?",
+            (row_id,),
+        ).fetchone()
+
+    assert result.recovery_required is True
+    assert result.closed_cycles == 0
+    assert row == ("OPEN", "RECOVERY_REQUIRED", 1.0001)
+    assert close_debug_items[0]["close_result"] == "RECOVERY_REQUIRED"
+    assert close_debug_items[0]["close_attempted"] is False
+
+
+def test_paper_trading_engine_does_not_timeout_previous_session_open_cycle(test_config, tmp_path: Path):
+    from datetime import datetime, timedelta
+    from paper.models import PaperCycle, PaperCycleStatus, PaperOrderSide
+
+    database = DatabaseManager(str(tmp_path / "bot.sqlite"))
+    open_cycle = PaperCycle(
+        id=1,
+        direction=PaperOrderSide.BUY_USDC,
+        status=PaperCycleStatus.OPEN,
+        open_price=1.000005,
+        close_price=1.000500,
+        quantity=10.0,
+        open_fee=0.0,
+        close_fee=0.0,
+        gross_profit=0.0,
+        net_profit=0.0,
+        opened_at=datetime.utcnow() - timedelta(hours=2),
+    )
+    row_id = database.save_paper_cycle(
+        open_cycle,
+        strategy_profile="mean_reversion_hf_micro_v1",
+        opened_session_id="old-session",
+    )
+    close_debug_items = []
+
+    result = PaperTradingEngine(
+        test_config,
+        database,
+        bot=FakeBot(price=1.000000),
+        close_debug_callback=close_debug_items.append,
+        strategy_profile="mean_reversion_hf_micro_v1",
+        session_id="new-session",
+    ).run(1)
+
+    with database.connect() as conn:
+        row = conn.execute(
+            "SELECT status, close_reason, recovery_status FROM paper_cycles WHERE id = ?",
+            (row_id,),
+        ).fetchone()
+
+    assert result.recovery_required is True
+    assert result.closed_cycles == 0
+    assert row == ("OPEN", None, "RECOVERY_REQUIRED")
+    assert close_debug_items[0]["max_holding_condition_met"] is False
+
+
+def test_paper_trading_engine_recovery_blocks_new_entries(test_config, tmp_path: Path):
+    from datetime import datetime
+    from paper.models import PaperCycle, PaperCycleStatus, PaperOrderSide
+
+    database = DatabaseManager(str(tmp_path / "bot.sqlite"))
+    open_cycle = PaperCycle(
+        id=1,
+        direction=PaperOrderSide.SELL_USDC,
+        status=PaperCycleStatus.OPEN,
+        open_price=1.0002,
+        close_price=1.0001,
+        quantity=10.0,
+        open_fee=0.0,
+        close_fee=0.0,
+        gross_profit=0.0,
+        net_profit=0.0,
+        opened_at=datetime.utcnow(),
+    )
+    database.save_paper_cycle(
+        open_cycle,
+        strategy_profile="mean_reversion_hf_micro_v1",
+        opened_session_id="old-session",
+    )
+
+    result = PaperTradingEngine(
+        test_config,
+        database,
+        bot=FakeProfileBot(test_config, price=1.000005, short_center=1.0001),
+        strategy_profile="mean_reversion_hf_micro_v1",
+        session_id="new-session",
+    ).run(2)
+
+    rows = database.load_open_paper_cycles(limit=10)
+    assert result.recovery_required is True
+    assert result.opened_cycles == 0
+    assert len(rows) == 1
+
+
+def test_paper_trading_engine_safe_stop_blocks_new_entries(test_config, tmp_path: Path):
+    database = DatabaseManager(str(tmp_path / "bot.sqlite"))
+
+    result = PaperTradingEngine(
+        test_config,
+        database,
+        bot=FakeProfileBot(test_config, price=1.000005, short_center=1.0001),
+        strategy_profile="mean_reversion_hf_micro_v1",
+        safe_stop=True,
+    ).run(1)
+
+    assert result.shutdown_requested is True
+    assert result.opened_cycles == 0
+    assert database.load_open_paper_cycles(limit=10) == []
+
+
+def test_paper_trading_engine_safe_stop_closes_current_session_cycle_then_exits(test_config, tmp_path: Path):
+    from datetime import datetime
+    from paper.models import PaperCycle, PaperCycleStatus, PaperOrderSide
+
+    database = DatabaseManager(str(tmp_path / "bot.sqlite"))
+    session_id = "test-session"
+    open_cycle = PaperCycle(
+        id=1,
+        direction=PaperOrderSide.BUY_USDC,
+        status=PaperCycleStatus.OPEN,
+        open_price=1.0000,
+        close_price=1.0001,
+        quantity=10.0,
+        open_fee=0.0,
+        close_fee=0.0,
+        gross_profit=0.0,
+        net_profit=0.0,
+        opened_at=datetime.utcnow(),
+    )
+    row_id = database.save_paper_cycle(
+        open_cycle,
+        strategy_profile="mean_reversion_v2_small_target",
+        opened_session_id=session_id,
+    )
+
+    result = PaperTradingEngine(
+        test_config,
+        database,
+        bot=FakeProfileBot(test_config, price=1.0002, short_center=1.0001),
+        strategy_profile="mean_reversion_v2_small_target",
+        session_id=session_id,
+        safe_stop=True,
+    ).run(3)
+
+    with database.connect() as conn:
+        status = conn.execute("SELECT status FROM paper_cycles WHERE id = ?", (row_id,)).fetchone()[0]
+
+    assert result.shutdown_requested is True
+    assert result.closed_cycles == 1
+    assert result.opened_cycles == 0
+    assert status == "CLOSED"

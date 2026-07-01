@@ -323,7 +323,9 @@ class DatabaseManager:
                     net_profit REAL NOT NULL,
                     opened_at TEXT NOT NULL,
                     closed_at TEXT,
-                    close_reason TEXT
+                    close_reason TEXT,
+                    opened_session_id TEXT,
+                    recovery_status TEXT DEFAULT 'ACTIVE'
                 )
             """)
             conn.execute("""
@@ -1232,7 +1234,12 @@ class DatabaseManager:
             ).fetchall()
 
 
-    def save_paper_cycle(self, cycle, strategy_profile: str = "UNKNOWN") -> int:
+    def save_paper_cycle(
+        self,
+        cycle,
+        strategy_profile: str = "UNKNOWN",
+        opened_session_id: str | None = None,
+    ) -> int:
         from datetime import datetime
 
         close_reason = getattr(cycle, "close_reason", None)
@@ -1243,7 +1250,8 @@ class DatabaseManager:
                     UPDATE paper_cycles
                     SET timestamp = ?, strategy_profile = ?, status = ?,
                         close_price = ?, close_fee = ?, gross_profit = ?,
-                        net_profit = ?, closed_at = ?, close_reason = ?
+                        net_profit = ?, closed_at = ?, close_reason = ?,
+                        recovery_status = 'RESOLVED'
                     WHERE id = ? AND status = 'OPEN'
                     """,
                     (
@@ -1268,8 +1276,8 @@ class DatabaseManager:
                 INSERT INTO paper_cycles (
                     timestamp, cycle_id, strategy_profile, direction, status, open_price, close_price,
                     quantity, open_fee, close_fee, gross_profit, net_profit,
-                    opened_at, closed_at, close_reason
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    opened_at, closed_at, close_reason, opened_session_id, recovery_status
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     datetime.utcnow().isoformat(),
@@ -1287,6 +1295,8 @@ class DatabaseManager:
                     cycle.opened_at.isoformat(),
                     cycle.closed_at.isoformat() if cycle.closed_at else None,
                     close_reason,
+                    opened_session_id,
+                    "ACTIVE",
                 ),
             )
             row_id = int(cursor.lastrowid)
@@ -1563,6 +1573,22 @@ class DatabaseManager:
                 (limit,),
             ).fetchall()
 
+    def load_open_paper_cycles_with_recovery(self, limit: int = 100) -> list[tuple]:
+        with self.connect() as conn:
+            return conn.execute(
+                """
+                SELECT id, timestamp, cycle_id, strategy_profile, direction, status,
+                       open_price, close_price, quantity, open_fee, close_fee,
+                       gross_profit, net_profit, opened_at, closed_at,
+                       opened_session_id, recovery_status
+                FROM paper_cycles
+                WHERE status = 'OPEN'
+                ORDER BY opened_at ASC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+
     def load_open_paper_cycle_by_id(self, db_id: int) -> tuple | None:
         with self.connect() as conn:
             return conn.execute(
@@ -1598,7 +1624,8 @@ class DatabaseManager:
                     gross_profit = ?,
                     net_profit = ?,
                     close_reason = ?,
-                    closed_at = ?
+                    closed_at = ?,
+                    recovery_status = 'RESOLVED'
                 WHERE id = ? AND status = 'OPEN'
                 """,
                 (
@@ -1611,6 +1638,64 @@ class DatabaseManager:
                     closed_at,
                     db_id,
                 ),
+            )
+            conn.commit()
+            return bool(cursor.rowcount)
+
+    def mark_paper_cycle_recovery_required(self, db_id: int) -> bool:
+        with self.connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE paper_cycles
+                SET recovery_status = 'RECOVERY_REQUIRED'
+                WHERE id = ? AND status = 'OPEN'
+                """,
+                (db_id,),
+            )
+            conn.commit()
+            return bool(cursor.rowcount)
+
+    def resume_paper_cycle_tracking(self, db_id: int, session_id: str, resumed_at: str) -> bool:
+        with self.connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE paper_cycles
+                SET opened_session_id = ?,
+                    opened_at = ?,
+                    recovery_status = 'RESUMED'
+                WHERE id = ? AND status = 'OPEN'
+                """,
+                (session_id, resumed_at, db_id),
+            )
+            conn.commit()
+            return bool(cursor.rowcount)
+
+    def request_paper_cycle_resume(self, db_id: int) -> bool:
+        with self.connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE paper_cycles
+                SET recovery_status = 'RESUME_REQUESTED'
+                WHERE id = ? AND status = 'OPEN'
+                """,
+                (db_id,),
+            )
+            conn.commit()
+            return bool(cursor.rowcount)
+
+    def abandon_paper_cycle(self, db_id: int, reason: str, closed_at: str) -> bool:
+        with self.connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE paper_cycles
+                SET timestamp = ?,
+                    status = 'ABANDONED',
+                    close_reason = ?,
+                    closed_at = ?,
+                    recovery_status = 'ABANDONED'
+                WHERE id = ? AND status = 'OPEN'
+                """,
+                (closed_at, reason, closed_at, db_id),
             )
             conn.commit()
             return bool(cursor.rowcount)
