@@ -46,6 +46,18 @@ class DatabaseMigrationManager:
             ColumnDefinition("close_reason", "TEXT"),
             ColumnDefinition("opened_session_id", "TEXT"),
             ColumnDefinition("recovery_status", "TEXT DEFAULT 'ACTIVE'"),
+            ColumnDefinition("best_price_after_entry", "REAL"),
+            ColumnDefinition("worst_price_after_entry", "REAL"),
+            ColumnDefinition("max_favorable_pnl", "REAL DEFAULT 0"),
+            ColumnDefinition("max_adverse_pnl", "REAL DEFAULT 0"),
+            ColumnDefinition("min_distance_to_target", "REAL"),
+            ColumnDefinition("was_target_touched", "INTEGER DEFAULT 0"),
+            ColumnDefinition("was_near_target", "INTEGER DEFAULT 0"),
+            ColumnDefinition("near_target_threshold", "REAL DEFAULT 0.000005"),
+            ColumnDefinition("close_gap_to_target", "REAL"),
+            ColumnDefinition("best_possible_pnl", "REAL DEFAULT 0"),
+            ColumnDefinition("missed_pnl", "REAL DEFAULT 0"),
+            ColumnDefinition("execution_quality_ratio", "REAL DEFAULT 0"),
         ],
     }
 

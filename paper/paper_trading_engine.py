@@ -171,6 +171,8 @@ class PaperTradingEngine:
                         "order_attempted": False,
                         "data_source": getattr(self.bot.market_analyzer, "last_data_source", "UNKNOWN"),
                     })
+                active_cycle = self.cycle_manager.active_cycles[0]
+                self._update_execution_path(active_cycle, market_state.price)
                 closed_cycle = self.cycle_manager.try_close_cycle(
                     market_state.price,
                     tolerance=self._close_tolerance_for_profile(self.strategy_profile),
@@ -387,6 +389,7 @@ class PaperTradingEngine:
                     "recovery_status": recovery_status,
                 })
                 continue
+            self._update_execution_path(cycle, current_price)
             target_price = cycle.close_price
             close_tolerance = self._close_tolerance_for_profile(strategy_profile)
             close_rounding_digits = self._close_rounding_digits_for_profile(strategy_profile)
@@ -514,6 +517,16 @@ class PaperTradingEngine:
             closed_at=datetime.fromisoformat(closed_at) if closed_at else None,
         )
         return cycle, str(strategy_profile), int(cycle_id), opened_session_id, str(recovery_status or "ACTIVE")
+
+    def _update_execution_path(self, cycle: PaperCycle, current_price: float) -> None:
+        self.database.update_paper_cycle_execution_path(
+            db_id=cycle.id,
+            direction=cycle.direction.value,
+            open_price=cycle.open_price,
+            target_price=cycle.close_price,
+            quantity=cycle.quantity,
+            current_price=current_price,
+        )
 
     def _requires_recovery(
         self,

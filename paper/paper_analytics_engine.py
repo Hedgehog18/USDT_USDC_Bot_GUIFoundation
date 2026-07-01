@@ -35,6 +35,15 @@ class PaperAnalytics:
     sell_total_pnl: float = 0.0
     sell_average_pnl: float = 0.0
     sell_win_rate: float = 0.0
+    missed_target_count: int = 0
+    missed_target_timeout_count: int = 0
+    missed_target_then_loss_count: int = 0
+    average_missed_target_distance: float = 0.0
+    average_missed_pnl: float = 0.0
+    max_adverse_pnl: float = 0.0
+    average_adverse_pnl: float = 0.0
+    average_favorable_pnl: float = 0.0
+    worst_close_gap_to_target: float = 0.0
 
 
 class PaperAnalyticsEngine:
@@ -65,6 +74,23 @@ class PaperAnalyticsEngine:
 
         buy_rows = [row for row in closed_rows if row[2] == "BUY_USDC"]
         sell_rows = [row for row in closed_rows if row[2] == "SELL_USDC"]
+        missed_target_rows = [
+            row for row in closed_rows
+            if self._optional_bool(row, 18) and self._close_reason(row) != "target"
+        ]
+        missed_target_timeout_rows = [
+            row for row in missed_target_rows
+            if self._is_timeout_reason(self._close_reason(row))
+        ]
+        missed_target_then_loss_rows = [
+            row for row in missed_target_rows
+            if float(row[10]) < 0
+        ]
+        missed_distances = [self._optional_float(row, 16) for row in missed_target_rows if self._optional_float(row, 16) is not None]
+        missed_pnls = [self._optional_float(row, 22) or 0.0 for row in closed_rows]
+        adverse_values = [self._optional_float(row, 15) or 0.0 for row in closed_rows]
+        favorable_values = [self._optional_float(row, 14) or 0.0 for row in closed_rows]
+        close_gaps = [self._optional_float(row, 20) for row in closed_rows if self._optional_float(row, 20) is not None]
 
         return PaperAnalytics(
             total_cycles=len(rows),
@@ -99,6 +125,15 @@ class PaperAnalyticsEngine:
             sell_total_pnl=sum(float(row[10]) for row in sell_rows),
             sell_average_pnl=self._average_pnl(sell_rows),
             sell_win_rate=self._win_rate(sell_rows),
+            missed_target_count=len(missed_target_rows),
+            missed_target_timeout_count=len(missed_target_timeout_rows),
+            missed_target_then_loss_count=len(missed_target_then_loss_rows),
+            average_missed_target_distance=(sum(missed_distances) / len(missed_distances)) if missed_distances else 0.0,
+            average_missed_pnl=(sum(missed_pnls) / len(missed_pnls)) if missed_pnls else 0.0,
+            max_adverse_pnl=min(adverse_values) if adverse_values else 0.0,
+            average_adverse_pnl=(sum(adverse_values) / len(adverse_values)) if adverse_values else 0.0,
+            average_favorable_pnl=(sum(favorable_values) / len(favorable_values)) if favorable_values else 0.0,
+            worst_close_gap_to_target=max(close_gaps) if close_gaps else 0.0,
         )
 
     @staticmethod
@@ -131,3 +166,15 @@ class PaperAnalyticsEngine:
         win_rate = winning / closed
         loss_rate = losing / closed
         return (win_rate * average_profit) + (loss_rate * average_loss)
+
+    @staticmethod
+    def _optional_float(row: tuple, index: int) -> float | None:
+        if len(row) <= index or row[index] is None:
+            return None
+        return float(row[index])
+
+    @staticmethod
+    def _optional_bool(row: tuple, index: int) -> bool:
+        if len(row) <= index or row[index] is None:
+            return False
+        return bool(row[index])

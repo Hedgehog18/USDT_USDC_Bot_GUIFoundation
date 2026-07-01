@@ -23,6 +23,125 @@ def test_database_saves_paper_cycle(test_config, tmp_path: Path):
     assert database.count_rows("paper_cycles") == 1
 
 
+def test_database_tracks_buy_execution_quality(test_config, tmp_path: Path):
+    database = DatabaseManager(str(tmp_path / "bot.sqlite"))
+    portfolio = PaperPortfolioManager(initial_usdt=100.0, initial_usdc=100.0)
+    exchange = PaperExchange(test_config, portfolio)
+    manager = PaperCycleManager(test_config, exchange)
+
+    cycle = manager.open_cycle("BUY_USDC", 1.0, target_profit=0.0002)
+    row_id = database.save_paper_cycle(cycle)
+
+    database.update_paper_cycle_execution_path(
+        db_id=row_id,
+        direction="BUY_USDC",
+        open_price=1.0,
+        target_price=1.0002,
+        quantity=10.0,
+        current_price=1.00015,
+    )
+    database.update_paper_cycle_execution_path(
+        db_id=row_id,
+        direction="BUY_USDC",
+        open_price=1.0,
+        target_price=1.0002,
+        quantity=10.0,
+        current_price=0.9998,
+    )
+
+    row = database.load_recent_paper_cycles(limit=1)[0]
+
+    assert row[12] == 1.00015
+    assert row[13] == 0.9998
+    assert round(row[14], 8) == 0.0015
+    assert round(row[15], 8) == -0.002
+    assert round(row[16], 8) == 0.00005
+    assert row[17] == 0
+    assert row[18] == 0
+
+
+def test_database_tracks_sell_execution_quality_and_near_target(test_config, tmp_path: Path):
+    database = DatabaseManager(str(tmp_path / "bot.sqlite"))
+    portfolio = PaperPortfolioManager(initial_usdt=100.0, initial_usdc=100.0)
+    exchange = PaperExchange(test_config, portfolio)
+    manager = PaperCycleManager(test_config, exchange)
+
+    cycle = manager.open_cycle("SELL_USDC", 1.0, target_profit=0.0002)
+    row_id = database.save_paper_cycle(cycle)
+
+    database.update_paper_cycle_execution_path(
+        db_id=row_id,
+        direction="SELL_USDC",
+        open_price=1.0,
+        target_price=0.9998,
+        quantity=10.0,
+        current_price=0.999804,
+    )
+    database.update_paper_cycle_execution_path(
+        db_id=row_id,
+        direction="SELL_USDC",
+        open_price=1.0,
+        target_price=0.9998,
+        quantity=10.0,
+        current_price=1.0001,
+    )
+
+    row = database.load_recent_paper_cycles(limit=1)[0]
+
+    assert row[12] == 0.999804
+    assert row[13] == 1.0001
+    assert round(row[14], 8) == 0.00196
+    assert round(row[15], 8) == -0.001
+    assert round(row[16], 8) == 0.000004
+    assert row[17] == 0
+    assert row[18] == 1
+
+
+def test_database_finalizes_missed_target_then_loss_without_changing_actual_pnl(test_config, tmp_path: Path):
+    database = DatabaseManager(str(tmp_path / "bot.sqlite"))
+    portfolio = PaperPortfolioManager(initial_usdt=100.0, initial_usdc=100.0)
+    exchange = PaperExchange(test_config, portfolio)
+    manager = PaperCycleManager(test_config, exchange)
+
+    cycle = manager.open_cycle("BUY_USDC", 1.0, target_profit=0.0002)
+    row_id = database.save_paper_cycle(cycle, strategy_profile="mean_reversion_hf_micro_v1")
+    database.update_paper_cycle_execution_path(
+        db_id=row_id,
+        direction="BUY_USDC",
+        open_price=1.0,
+        target_price=1.0002,
+        quantity=10.0,
+        current_price=1.000196,
+    )
+    closed = PaperCycle(
+        id=row_id,
+        direction=PaperOrderSide.BUY_USDC,
+        status=PaperCycleStatus.CLOSED,
+        open_price=1.0,
+        close_price=0.9999,
+        quantity=10.0,
+        open_fee=0.0,
+        close_fee=0.0,
+        gross_profit=-0.001,
+        net_profit=-0.001,
+        opened_at=cycle.opened_at,
+        closed_at=datetime.utcnow(),
+    )
+    closed.close_reason = "max_holding_270s"
+
+    database.save_paper_cycle(closed, strategy_profile="mean_reversion_hf_micro_v1")
+    row = database.load_recent_paper_cycles(limit=1)[0]
+    stats = database.load_paper_cycle_collection_stats("mean_reversion_hf_micro_v1")
+
+    assert row[10] == -0.001
+    assert row[18] == 1
+    assert round(row[20], 8) == 0.0003
+    assert round(row[21], 8) == 0.00196
+    assert round(row[22], 8) == 0.00296
+    assert stats["missed_target_count"] == 1
+    assert stats["missed_target_then_loss_count"] == 1
+
+
 def test_database_loads_open_paper_cycle_with_strategy_profile(test_config, tmp_path: Path):
     database = DatabaseManager(str(tmp_path / "bot.sqlite"))
     portfolio = PaperPortfolioManager(initial_usdt=100.0, initial_usdc=100.0)

@@ -58,6 +58,15 @@ class PaperTradingCliRenderer:
                 ("SELL Avg", self._format_float(stats.sell_average_pnl)),
                 ("SELL Win Rate", self._format_percent(stats.sell_win_rate)),
             ]),
+            self._section("EXECUTION QUALITY", [
+                ("Missed Target Count", stats.missed_target_count),
+                ("Missed Target Then Loss", stats.missed_target_then_loss_count),
+                ("Avg Missed PnL", self._format_float(stats.average_missed_pnl)),
+                ("Max Adverse PnL", self._format_float(stats.max_adverse_pnl)),
+                ("Avg Adverse PnL", self._format_float(stats.average_adverse_pnl)),
+                ("Avg Favorable PnL", self._format_float(stats.average_favorable_pnl)),
+                ("Worst Close Gap", self._format_float(stats.worst_close_gap_to_target)),
+            ]),
         ]
         self._render_sections(sections)
 
@@ -261,6 +270,14 @@ class PaperTradingCliRenderer:
                 ("Lifetime closed cycles", int(lifetime.get("closed_cycles", 0))),
                 ("Lifetime net profit", self._format_signed(float(lifetime.get("net_profit", 0.0)))),
                 ("Lifetime win rate", self._format_percent(float(lifetime.get("win_rate", 0.0)))),
+            ]),
+            self._section("EXECUTION QUALITY", [
+                ("Missed target cycles", int(stats.get("missed_target_count", 0))),
+                ("Missed target then loss", int(stats.get("missed_target_then_loss_count", 0))),
+                ("Average MFE", self._format_float(float(stats.get("average_mfe", 0.0)))),
+                ("Average MAE", self._format_float(float(stats.get("average_mae", 0.0)))),
+                ("Average missed PnL", self._format_float(float(stats.get("average_missed_pnl", 0.0)))),
+                ("Worst adverse move", self._format_float(float(stats.get("worst_adverse_move", 0.0)))),
             ]),
         ])
 

@@ -325,7 +325,19 @@ class DatabaseManager:
                     closed_at TEXT,
                     close_reason TEXT,
                     opened_session_id TEXT,
-                    recovery_status TEXT DEFAULT 'ACTIVE'
+                    recovery_status TEXT DEFAULT 'ACTIVE',
+                    best_price_after_entry REAL,
+                    worst_price_after_entry REAL,
+                    max_favorable_pnl REAL DEFAULT 0,
+                    max_adverse_pnl REAL DEFAULT 0,
+                    min_distance_to_target REAL,
+                    was_target_touched INTEGER DEFAULT 0,
+                    was_near_target INTEGER DEFAULT 0,
+                    near_target_threshold REAL DEFAULT 0.000005,
+                    close_gap_to_target REAL,
+                    best_possible_pnl REAL DEFAULT 0,
+                    missed_pnl REAL DEFAULT 0,
+                    execution_quality_ratio REAL DEFAULT 0
                 )
             """)
             conn.execute("""
@@ -1251,6 +1263,13 @@ class DatabaseManager:
                     SET timestamp = ?, strategy_profile = ?, status = ?,
                         close_price = ?, close_fee = ?, gross_profit = ?,
                         net_profit = ?, closed_at = ?, close_reason = ?,
+                        close_gap_to_target = ABS(? - close_price),
+                        best_possible_pnl = COALESCE(max_favorable_pnl, 0),
+                        missed_pnl = COALESCE(max_favorable_pnl, 0) - ?,
+                        execution_quality_ratio = CASE
+                            WHEN COALESCE(max_favorable_pnl, 0) > 0 THEN ? / COALESCE(max_favorable_pnl, 0)
+                            ELSE 0
+                        END,
                         recovery_status = 'RESOLVED'
                     WHERE id = ? AND status = 'OPEN'
                     """,
@@ -1264,6 +1283,9 @@ class DatabaseManager:
                         cycle.net_profit,
                         cycle.closed_at.isoformat() if cycle.closed_at else None,
                         close_reason,
+                        cycle.close_price,
+                        cycle.net_profit,
+                        cycle.net_profit,
                         cycle.id,
                     ),
                 )
@@ -1276,8 +1298,12 @@ class DatabaseManager:
                 INSERT INTO paper_cycles (
                     timestamp, cycle_id, strategy_profile, direction, status, open_price, close_price,
                     quantity, open_fee, close_fee, gross_profit, net_profit,
-                    opened_at, closed_at, close_reason, opened_session_id, recovery_status
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    opened_at, closed_at, close_reason, opened_session_id, recovery_status,
+                    best_price_after_entry, worst_price_after_entry, max_favorable_pnl,
+                    max_adverse_pnl, min_distance_to_target, was_target_touched,
+                    was_near_target, near_target_threshold, close_gap_to_target,
+                    best_possible_pnl, missed_pnl, execution_quality_ratio
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     datetime.utcnow().isoformat(),
@@ -1297,6 +1323,18 @@ class DatabaseManager:
                     close_reason,
                     opened_session_id,
                     "ACTIVE",
+                    cycle.open_price,
+                    cycle.open_price,
+                    0.0,
+                    0.0,
+                    abs(cycle.close_price - cycle.open_price),
+                    0,
+                    0,
+                    0.000005,
+                    None,
+                    0.0,
+                    0.0,
+                    0.0,
                 ),
             )
             row_id = int(cursor.lastrowid)
@@ -1308,6 +1346,103 @@ class DatabaseManager:
                 cycle.id = row_id
             conn.commit()
             return row_id
+
+    def update_paper_cycle_execution_path(
+        self,
+        *,
+        db_id: int,
+        direction: str,
+        open_price: float,
+        target_price: float,
+        quantity: float,
+        current_price: float,
+        near_target_threshold: float = 0.000005,
+    ) -> None:
+        favorable_move, adverse_move = self._paper_cycle_excursions(
+            direction,
+            open_price,
+            current_price,
+        )
+        favorable_pnl = favorable_move * quantity
+        adverse_pnl = adverse_move * quantity
+        distance = abs(target_price - current_price)
+        target_touched = distance <= 0.0
+        if direction == "BUY_USDC":
+            target_touched = current_price >= target_price
+        elif direction == "SELL_USDC":
+            target_touched = current_price <= target_price
+        near_target = distance <= near_target_threshold
+
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT best_price_after_entry, worst_price_after_entry,
+                       max_favorable_pnl, max_adverse_pnl, min_distance_to_target,
+                       was_target_touched, was_near_target
+                FROM paper_cycles
+                WHERE id = ?
+                """,
+                (db_id,),
+            ).fetchone()
+            if row is None:
+                return
+
+            best_price = row[0]
+            worst_price = row[1]
+            if best_price is None:
+                best_price = current_price
+            if worst_price is None:
+                worst_price = current_price
+            if direction == "BUY_USDC":
+                best_price = max(float(best_price), current_price)
+                worst_price = min(float(worst_price), current_price)
+            else:
+                best_price = min(float(best_price), current_price)
+                worst_price = max(float(worst_price), current_price)
+
+            max_favorable_pnl = max(float(row[2] or 0.0), favorable_pnl)
+            max_adverse_pnl = min(float(row[3] or 0.0), adverse_pnl)
+            previous_distance = row[4]
+            min_distance = (
+                min(float(previous_distance), distance)
+                if previous_distance is not None
+                else distance
+            )
+
+            conn.execute(
+                """
+                UPDATE paper_cycles
+                SET best_price_after_entry = ?,
+                    worst_price_after_entry = ?,
+                    max_favorable_pnl = ?,
+                    max_adverse_pnl = ?,
+                    min_distance_to_target = ?,
+                    was_target_touched = ?,
+                    was_near_target = ?,
+                    near_target_threshold = ?
+                WHERE id = ?
+                """,
+                (
+                    best_price,
+                    worst_price,
+                    max_favorable_pnl,
+                    max_adverse_pnl,
+                    min_distance,
+                    1 if bool(row[5]) or target_touched else 0,
+                    1 if bool(row[6]) or near_target else 0,
+                    near_target_threshold,
+                    db_id,
+                ),
+            )
+            conn.commit()
+
+    @staticmethod
+    def _paper_cycle_excursions(direction: str, open_price: float, current_price: float) -> tuple[float, float]:
+        if direction == "BUY_USDC":
+            move = current_price - open_price
+        else:
+            move = open_price - current_price
+        return max(move, 0.0), min(move, 0.0)
 
     def save_hf_paper_cycle_entry_diagnostics(
         self,
@@ -1361,7 +1496,12 @@ class DatabaseManager:
             return conn.execute(
                 """
                 SELECT timestamp, cycle_id, direction, status, open_price, close_price,
-                       quantity, open_fee, close_fee, gross_profit, net_profit, close_reason
+                       quantity, open_fee, close_fee, gross_profit, net_profit, close_reason,
+                       best_price_after_entry, worst_price_after_entry,
+                       max_favorable_pnl, max_adverse_pnl, min_distance_to_target,
+                       was_target_touched, was_near_target, near_target_threshold,
+                       close_gap_to_target, best_possible_pnl, missed_pnl,
+                       execution_quality_ratio
                 FROM paper_cycles
                 ORDER BY timestamp DESC
                 LIMIT ?
@@ -1374,7 +1514,12 @@ class DatabaseManager:
             return conn.execute(
                 """
                 SELECT timestamp, cycle_id, direction, status, open_price, close_price,
-                       quantity, open_fee, close_fee, gross_profit, net_profit, close_reason
+                       quantity, open_fee, close_fee, gross_profit, net_profit, close_reason,
+                       best_price_after_entry, worst_price_after_entry,
+                       max_favorable_pnl, max_adverse_pnl, min_distance_to_target,
+                       was_target_touched, was_near_target, near_target_threshold,
+                       close_gap_to_target, best_possible_pnl, missed_pnl,
+                       execution_quality_ratio
                 FROM paper_cycles
                 WHERE strategy_profile = ?
                 ORDER BY timestamp DESC
@@ -1614,6 +1759,57 @@ class DatabaseManager:
         closed_at: str,
     ) -> bool:
         with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT direction, open_price, close_price, quantity,
+                       best_price_after_entry, worst_price_after_entry,
+                       max_favorable_pnl, max_adverse_pnl, min_distance_to_target,
+                       was_target_touched, was_near_target
+                FROM paper_cycles
+                WHERE id = ? AND status = 'OPEN'
+                """,
+                (db_id,),
+            ).fetchone()
+            if row is None:
+                return False
+
+            direction = str(row[0])
+            open_price = float(row[1])
+            target_price = float(row[2])
+            quantity = float(row[3])
+            favorable_move, adverse_move = self._paper_cycle_excursions(
+                direction,
+                open_price,
+                close_price,
+            )
+            favorable_pnl = favorable_move * quantity
+            adverse_pnl = adverse_move * quantity
+            distance_to_target = abs(target_price - close_price)
+            near_target_threshold = 0.000005
+            if direction == "BUY_USDC":
+                best_price = max(float(row[4] if row[4] is not None else open_price), close_price)
+                worst_price = min(float(row[5] if row[5] is not None else open_price), close_price)
+                target_touched = close_price >= target_price
+            else:
+                best_price = min(float(row[4] if row[4] is not None else open_price), close_price)
+                worst_price = max(float(row[5] if row[5] is not None else open_price), close_price)
+                target_touched = close_price <= target_price
+            max_favorable_pnl = max(float(row[6] or 0.0), favorable_pnl)
+            max_adverse_pnl = min(float(row[7] or 0.0), adverse_pnl)
+            previous_distance = row[8]
+            min_distance_to_target = (
+                min(float(previous_distance), distance_to_target)
+                if previous_distance is not None
+                else distance_to_target
+            )
+            was_target_touched = 1 if bool(row[9]) or target_touched else 0
+            was_near_target = 1 if bool(row[10]) or distance_to_target <= near_target_threshold else 0
+            missed_pnl = max_favorable_pnl - net_profit
+            execution_quality_ratio = (
+                net_profit / max_favorable_pnl
+                if max_favorable_pnl > 0
+                else 0.0
+            )
             cursor = conn.execute(
                 """
                 UPDATE paper_cycles
@@ -1625,6 +1821,17 @@ class DatabaseManager:
                     net_profit = ?,
                     close_reason = ?,
                     closed_at = ?,
+                    best_price_after_entry = ?,
+                    worst_price_after_entry = ?,
+                    max_favorable_pnl = ?,
+                    max_adverse_pnl = ?,
+                    min_distance_to_target = ?,
+                    was_target_touched = ?,
+                    was_near_target = ?,
+                    close_gap_to_target = ?,
+                    best_possible_pnl = ?,
+                    missed_pnl = ?,
+                    execution_quality_ratio = ?,
                     recovery_status = 'RESOLVED'
                 WHERE id = ? AND status = 'OPEN'
                 """,
@@ -1636,6 +1843,17 @@ class DatabaseManager:
                     net_profit,
                     close_reason,
                     closed_at,
+                    best_price,
+                    worst_price,
+                    max_favorable_pnl,
+                    max_adverse_pnl,
+                    min_distance_to_target,
+                    was_target_touched,
+                    was_near_target,
+                    distance_to_target,
+                    max_favorable_pnl,
+                    missed_pnl,
+                    execution_quality_ratio,
                     db_id,
                 ),
             )
@@ -1726,7 +1944,13 @@ class DatabaseManager:
                     COALESCE(SUM(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') AND direction = 'BUY_USDC' AND net_profit > 0 THEN 1 ELSE 0 END), 0) AS buy_wins,
                     COALESCE(SUM(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') AND direction = 'SELL_USDC' THEN 1 ELSE 0 END), 0) AS sell_count,
                     COALESCE(SUM(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') AND direction = 'SELL_USDC' THEN net_profit ELSE 0 END), 0) AS sell_total_pnl,
-                    COALESCE(SUM(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') AND direction = 'SELL_USDC' AND net_profit > 0 THEN 1 ELSE 0 END), 0) AS sell_wins
+                    COALESCE(SUM(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') AND direction = 'SELL_USDC' AND net_profit > 0 THEN 1 ELSE 0 END), 0) AS sell_wins,
+                    COALESCE(SUM(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') AND was_near_target = 1 AND close_reason != 'target' THEN 1 ELSE 0 END), 0) AS missed_target_count,
+                    COALESCE(SUM(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') AND was_near_target = 1 AND net_profit < 0 THEN 1 ELSE 0 END), 0) AS missed_target_then_loss_count,
+                    COALESCE(AVG(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') THEN max_favorable_pnl END), 0) AS average_mfe,
+                    COALESCE(AVG(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') THEN max_adverse_pnl END), 0) AS average_mae,
+                    COALESCE(AVG(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') THEN missed_pnl END), 0) AS average_missed_pnl,
+                    COALESCE(MIN(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') THEN max_adverse_pnl END), 0) AS worst_adverse_move
                 FROM paper_cycles
                 WHERE strategy_profile = ?
                 """,
@@ -1765,6 +1989,12 @@ class DatabaseManager:
             "sell_total_pnl": float(row[20]),
             "sell_average_pnl": (float(row[20]) / int(row[19])) if int(row[19]) else 0.0,
             "sell_win_rate": (int(row[21]) / int(row[19])) if int(row[19]) else 0.0,
+            "missed_target_count": int(row[22]),
+            "missed_target_then_loss_count": int(row[23]),
+            "average_mfe": float(row[24]),
+            "average_mae": float(row[25]),
+            "average_missed_pnl": float(row[26]),
+            "worst_adverse_move": float(row[27]),
             "win_rate": (winning_cycles / closed_cycles) if closed_cycles else 0.0,
         }
 
@@ -1813,7 +2043,13 @@ class DatabaseManager:
                     COALESCE(SUM(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') AND direction = 'BUY_USDC' AND net_profit > 0 THEN 1 ELSE 0 END), 0) AS buy_wins,
                     COALESCE(SUM(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') AND direction = 'SELL_USDC' THEN 1 ELSE 0 END), 0) AS sell_count,
                     COALESCE(SUM(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') AND direction = 'SELL_USDC' THEN net_profit ELSE 0 END), 0) AS sell_total_pnl,
-                    COALESCE(SUM(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') AND direction = 'SELL_USDC' AND net_profit > 0 THEN 1 ELSE 0 END), 0) AS sell_wins
+                    COALESCE(SUM(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') AND direction = 'SELL_USDC' AND net_profit > 0 THEN 1 ELSE 0 END), 0) AS sell_wins,
+                    COALESCE(SUM(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') AND was_near_target = 1 AND close_reason != 'target' THEN 1 ELSE 0 END), 0) AS missed_target_count,
+                    COALESCE(SUM(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') AND was_near_target = 1 AND net_profit < 0 THEN 1 ELSE 0 END), 0) AS missed_target_then_loss_count,
+                    COALESCE(AVG(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') THEN max_favorable_pnl END), 0) AS average_mfe,
+                    COALESCE(AVG(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') THEN max_adverse_pnl END), 0) AS average_mae,
+                    COALESCE(AVG(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') THEN missed_pnl END), 0) AS average_missed_pnl,
+                    COALESCE(MIN(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') THEN max_adverse_pnl END), 0) AS worst_adverse_move
                 FROM paper_cycles
                 WHERE strategy_profile = ? AND id > ?
                 """,
@@ -1850,6 +2086,12 @@ class DatabaseManager:
             "sell_total_pnl": float(row[19]),
             "sell_average_pnl": (float(row[19]) / int(row[18])) if int(row[18]) else 0.0,
             "sell_win_rate": (int(row[20]) / int(row[18])) if int(row[18]) else 0.0,
+            "missed_target_count": int(row[21]),
+            "missed_target_then_loss_count": int(row[22]),
+            "average_mfe": float(row[23]),
+            "average_mae": float(row[24]),
+            "average_missed_pnl": float(row[25]),
+            "worst_adverse_move": float(row[26]),
             "win_rate": (winning_cycles / closed_cycles) if closed_cycles else 0.0,
         }
 

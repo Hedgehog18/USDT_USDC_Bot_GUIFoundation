@@ -27,6 +27,18 @@ class PaperReportExporter:
                 "gross_profit",
                 "net_profit",
                 "close_reason",
+                "best_price_after_entry",
+                "worst_price_after_entry",
+                "max_favorable_pnl",
+                "max_adverse_pnl",
+                "min_distance_to_target",
+                "was_target_touched",
+                "was_near_target",
+                "near_target_threshold",
+                "close_gap_to_target",
+                "best_possible_pnl",
+                "missed_pnl",
+                "execution_quality_ratio",
             ])
             writer.writerows(rows)
 
@@ -90,6 +102,15 @@ class PaperReportExporter:
                 "sell_total_pnl",
                 "sell_average_pnl",
                 "sell_win_rate",
+                "missed_target_count",
+                "missed_target_timeout_count",
+                "missed_target_then_loss_count",
+                "average_missed_target_distance",
+                "average_missed_pnl",
+                "max_adverse_pnl",
+                "average_adverse_pnl",
+                "average_favorable_pnl",
+                "worst_close_gap_to_target",
                 "strategy_profile",
             ])
             writer.writerow([
@@ -125,6 +146,15 @@ class PaperReportExporter:
                 stats.sell_total_pnl,
                 stats.sell_average_pnl,
                 stats.sell_win_rate,
+                stats.missed_target_count,
+                stats.missed_target_timeout_count,
+                stats.missed_target_then_loss_count,
+                stats.average_missed_target_distance,
+                stats.average_missed_pnl,
+                stats.max_adverse_pnl,
+                stats.average_adverse_pnl,
+                stats.average_favorable_pnl,
+                stats.worst_close_gap_to_target,
                 strategy_profile,
             ])
 
