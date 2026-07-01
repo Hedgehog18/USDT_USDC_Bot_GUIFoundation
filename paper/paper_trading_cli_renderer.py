@@ -314,6 +314,11 @@ class PaperTradingCliRenderer:
                 ("Direction", cycle.get("direction")),
                 ("Entry Price", self._format_float(cycle.get("open_price"))),
                 ("Target Price", self._format_float(cycle.get("target_price"))),
+                ("Current Price", self._format_recovery_float(cycle.get("current_price"))),
+                ("Distance Target", self._format_recovery_distance(cycle)),
+                ("Target Status", cycle.get("target_status", "unknown")),
+                ("Est. PnL Now", self._format_recovery_signed(cycle.get("estimated_pnl_now"))),
+                ("Decision Hint", cycle.get("decision_hint", "operator decision required")),
                 ("Opened Session", cycle.get("opened_session_id")),
                 ("Current Session", cycle.get("current_session_id")),
                 ("Opened At", cycle.get("opened_at")),
@@ -455,6 +460,23 @@ class PaperTradingCliRenderer:
         if value is None or str(value) == "N/A":
             return "N/A"
         return f"{float(value):.8f}"
+
+    @staticmethod
+    def _format_recovery_float(value: Any) -> str:
+        if value is None or str(value) in {"", "N/A", "None", "unavailable"}:
+            return "unavailable"
+        return f"{float(value):.8f}"
+
+    @staticmethod
+    def _format_recovery_signed(value: Any) -> str:
+        if value is None or str(value) in {"", "N/A", "None", "unavailable"}:
+            return "unavailable"
+        return f"{float(value):+.8f}"
+
+    def _format_recovery_distance(self, cycle: dict[str, Any]) -> str:
+        if cycle.get("target_status") == "reached":
+            return "reached"
+        return self._format_recovery_float(cycle.get("distance_to_target"))
 
     @staticmethod
     def _format_compact_float(value: Any) -> str:

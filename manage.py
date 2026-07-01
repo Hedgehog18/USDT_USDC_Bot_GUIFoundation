@@ -3724,6 +3724,7 @@ def command_collect_closed_cycles(args) -> None:
 
     recovery_cycle = _find_collection_recovery_cycle(database, current_session_id)
     if recovery_cycle is not None:
+        recovery_cycle = _enrich_collection_recovery_cycle(config, database, recovery_cycle)
         PaperTradingCliRenderer().render_recovery_required(
             "Open cycle detected from previous session. Automatic close is disabled. Manual recovery action required.",
             cycle=recovery_cycle,
@@ -3977,7 +3978,7 @@ def _collection_recovery_cycle_from_row(row: tuple, current_session_id: str) -> 
         _status,
         open_price,
         target_price,
-        _quantity,
+        quantity,
         _open_fee,
         _close_fee,
         _gross_profit,
@@ -3999,6 +4000,7 @@ def _collection_recovery_cycle_from_row(row: tuple, current_session_id: str) -> 
         "direction": str(direction),
         "open_price": float(open_price),
         "target_price": float(target_price),
+        "quantity": float(quantity),
         "opened_at": str(opened_at),
         "elapsed": _format_collection_elapsed(opened_at),
         "opened_session_id": opened_session_id or "UNKNOWN",
@@ -4022,6 +4024,80 @@ def _format_collection_elapsed(opened_at: str | None) -> str:
         return f"{minutes}m {remaining_seconds}s"
     hours, remaining_minutes = divmod(minutes, 60)
     return f"{hours}h {remaining_minutes}m"
+
+
+def _enrich_collection_recovery_cycle(config, database, cycle: dict) -> dict:
+    enriched = dict(cycle)
+    price_info = _load_recovery_current_price_info(config, database)
+    if price_info is None:
+        enriched.update({
+            "current_price": None,
+            "current_price_source": "unavailable",
+            "current_price_timestamp": "unavailable",
+            "distance_to_target": None,
+            "target_status": "unknown",
+            "estimated_pnl_now": None,
+            "decision_hint": "current price unavailable / choose recovery action manually",
+        })
+        return enriched
+
+    current_price, source, timestamp = price_info
+    target_price = float(cycle["target_price"])
+    direction = str(cycle["direction"])
+    target_reached = (
+        current_price >= target_price
+        if direction == "BUY_USDC"
+        else current_price <= target_price
+    )
+    distance_to_target = 0.0 if target_reached else abs(target_price - current_price)
+    estimated_pnl = FeeEngine(config).calculate_profit(
+        direction=direction,
+        open_price=float(cycle["open_price"]),
+        close_price=float(current_price),
+        quantity=float(cycle["quantity"]),
+        use_taker_fee=True,
+    ).net_profit
+    if target_reached:
+        decision_hint = "target reached / resume may close safely"
+    elif estimated_pnl < 0:
+        decision_hint = "target not reached / estimated loss if closed now"
+    elif estimated_pnl > 0:
+        decision_hint = "target not reached / estimated profit if closed now"
+    else:
+        decision_hint = "target not reached / estimated breakeven if closed now"
+
+    enriched.update({
+        "current_price": float(current_price),
+        "current_price_source": source,
+        "current_price_timestamp": timestamp,
+        "distance_to_target": distance_to_target,
+        "target_status": "reached" if target_reached else "not reached",
+        "estimated_pnl_now": float(estimated_pnl),
+        "decision_hint": decision_hint,
+    })
+    return enriched
+
+
+def _load_recovery_current_price_info(config, database) -> tuple[float, str, str] | None:
+    try:
+        return _load_binance_paper_price(config)
+    except Exception:
+        pass
+    try:
+        with database.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT timestamp, price
+                FROM market_snapshots
+                ORDER BY timestamp DESC
+                LIMIT 1
+                """
+            ).fetchone()
+    except Exception:
+        return None
+    if not row:
+        return None
+    return float(row[1]), "LATEST_MARKET_SNAPSHOT", str(row[0])
 
 
 def _load_collection_price_info(config, database, *, require_binance: bool) -> tuple[float, str, str] | None:

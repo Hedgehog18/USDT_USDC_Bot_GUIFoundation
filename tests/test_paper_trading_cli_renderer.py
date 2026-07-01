@@ -239,6 +239,11 @@ def test_renderer_prints_recovery_required_warning(capsys):
             "direction": "BUY_USDC",
             "open_price": 1.0001,
             "target_price": 1.0002,
+            "current_price": 1.00015,
+            "distance_to_target": 0.00005,
+            "target_status": "not reached",
+            "estimated_pnl_now": 0.0005,
+            "decision_hint": "target not reached / estimated profit if closed now",
             "opened_session_id": "old-session",
             "current_session_id": "current-session",
             "opened_at": "2026-07-01T09:00:00",
@@ -252,7 +257,41 @@ def test_renderer_prints_recovery_required_warning(capsys):
     assert "RECOVERY REQUIRED" in output
     assert "Open cycle detected from previous session" in output
     assert "DB ID: 9" in output
+    assert "Current Price: 1.00015000" in output
+    assert "Distance Target: 0.00005000" in output
+    assert "Target Status: not reached" in output
+    assert "Est. PnL Now: +0.00050000" in output
+    assert "Decision Hint: target not reached / estimated profit if closed now" in output
     assert "Automatic close: DISABLED" in output
     assert "paper-recovery-action --db-id 9 --action resume" in output
     assert "paper-close-cycle --db-id 9 --reason manual" in output
     assert "paper-recovery-action --db-id 9 --action abandon --reason stale" in output
+
+
+def test_renderer_prints_recovery_unavailable_price(capsys):
+    PaperTradingCliRenderer(force_plain=True).render_recovery_required(
+        "Open cycle detected from previous session. Automatic close is disabled.",
+        cycle={
+            "db_id": 9,
+            "direction": "BUY_USDC",
+            "open_price": 1.0001,
+            "target_price": 1.0002,
+            "current_price": None,
+            "distance_to_target": None,
+            "target_status": "unknown",
+            "estimated_pnl_now": None,
+            "decision_hint": "current price unavailable / choose recovery action manually",
+            "opened_session_id": "old-session",
+            "current_session_id": "current-session",
+            "opened_at": "2026-07-01T09:00:00",
+            "elapsed": "3h 2m",
+            "recovery_status": "RECOVERY_REQUIRED",
+        },
+    )
+
+    output = capsys.readouterr().out
+
+    assert "Current Price: unavailable" in output
+    assert "Distance Target: unavailable" in output
+    assert "Est. PnL Now: unavailable" in output
+    assert "Target Status: unknown" in output

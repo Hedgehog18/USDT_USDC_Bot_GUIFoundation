@@ -7,7 +7,9 @@ from manage import (
     _collection_entry_diagnostics,
     _collection_recovery_cycle_from_row,
     _collection_target_settings,
+    _enrich_collection_recovery_cycle,
     _find_collection_recovery_cycle,
+    _load_recovery_current_price_info,
     command_collect_closed_cycles,
     _print_closed_cycle_collection_progress,
 )
@@ -315,6 +317,63 @@ def test_find_collection_recovery_cycle_marks_database_cycle():
     assert database.marked == [42]
 
 
+def test_collection_recovery_cycle_enrichment_calculates_current_price_and_pnl(monkeypatch):
+    config = SimpleNamespace(
+        symbol="USDCUSDT",
+        maker_fee_percent=0.001,
+        taker_fee_percent=0.001,
+    )
+    cycle = _collection_recovery_cycle_from_row(
+        _open_recovery_row(opened_session_id="old-session"),
+        "current-session",
+    )
+
+    monkeypatch.setattr(
+        "manage._load_recovery_current_price_info",
+        lambda config, database: (1.00015, "BINANCE", "2026-07-01T10:05:00"),
+    )
+
+    enriched = _enrich_collection_recovery_cycle(config, object(), cycle)
+
+    assert enriched["current_price"] == 1.00015
+    assert abs(enriched["distance_to_target"] - 0.00005) < 0.000000001
+    assert enriched["target_status"] == "not reached"
+    assert round(enriched["estimated_pnl_now"], 8) == 0.0005
+    assert enriched["decision_hint"] == "target not reached / estimated profit if closed now"
+
+
+def test_collection_recovery_cycle_enrichment_handles_unavailable_price(monkeypatch):
+    config = SimpleNamespace(
+        symbol="USDCUSDT",
+        maker_fee_percent=0.001,
+        taker_fee_percent=0.001,
+    )
+    cycle = _collection_recovery_cycle_from_row(
+        _open_recovery_row(opened_session_id="old-session"),
+        "current-session",
+    )
+
+    monkeypatch.setattr("manage._load_recovery_current_price_info", lambda config, database: None)
+
+    enriched = _enrich_collection_recovery_cycle(config, object(), cycle)
+
+    assert enriched["current_price"] is None
+    assert enriched["distance_to_target"] is None
+    assert enriched["estimated_pnl_now"] is None
+    assert enriched["target_status"] == "unknown"
+    assert "current price unavailable" in enriched["decision_hint"]
+
+
+def test_recovery_price_info_returns_none_when_fetch_fails():
+    class FakeDatabase:
+        def connect(self):
+            raise RuntimeError("database unavailable")
+
+    config = SimpleNamespace(symbol="USDCUSDT")
+
+    assert _load_recovery_current_price_info(config, FakeDatabase()) is None
+
+
 def test_collect_closed_cycles_stops_before_progress_when_recovery_exists(monkeypatch, capsys):
     class FakeLogger:
         def debug(self, *args, **kwargs):
@@ -334,8 +393,14 @@ def test_collect_closed_cycles_stops_before_progress_when_recovery_exists(monkey
     def fail_engine(*args, **kwargs):
         raise AssertionError("PaperTradingEngine must not start in early recovery mode")
 
-    monkeypatch.setattr("manage.build_context", lambda: (object(), FakeLogger(), FakeDatabase()))
+    config = SimpleNamespace(symbol="USDCUSDT", maker_fee_percent=0.001, taker_fee_percent=0.001)
+
+    monkeypatch.setattr("manage.build_context", lambda: (config, FakeLogger(), FakeDatabase()))
     monkeypatch.setattr("manage._ensure_profile_allowed_for_paper", lambda config, profile: None)
+    monkeypatch.setattr(
+        "manage._load_recovery_current_price_info",
+        lambda config, database: (1.0002, "BINANCE", "2026-07-01T10:05:00"),
+    )
     monkeypatch.setattr("manage.PaperTradingEngine", fail_engine)
 
     args = SimpleNamespace(
@@ -367,6 +432,12 @@ def test_collect_closed_cycles_stops_before_progress_when_recovery_exists(monkey
     assert "--reason" in output
     assert "manual" in output
     assert "stale" in output
+    assert "Current Price" in output
+    assert "1.00020000" in output
+    assert "Distance Target" in output
+    assert "reached" in output
+    assert "Est. PnL Now" in output
+    assert "Decision Hint" in output
     assert "New:" not in output
     assert "Cycle:" not in output
 
