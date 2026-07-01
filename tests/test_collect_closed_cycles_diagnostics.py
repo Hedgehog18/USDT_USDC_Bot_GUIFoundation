@@ -5,7 +5,10 @@ from manage import (
     _collection_action_taken,
     _collection_close_reason,
     _collection_entry_diagnostics,
+    _collection_recovery_cycle_from_row,
     _collection_target_settings,
+    _find_collection_recovery_cycle,
+    command_collect_closed_cycles,
     _print_closed_cycle_collection_progress,
 )
 
@@ -237,6 +240,135 @@ def test_collection_target_reached_uses_new_stats_not_lifetime():
         500,
         new_mode=True,
     ) is False
+
+
+def _open_recovery_row(*, db_id=9, opened_session_id="old-session", recovery_status="ACTIVE"):
+    return (
+        db_id,
+        "2026-07-01T10:00:00",
+        db_id,
+        "mean_reversion_hf_micro_v1",
+        "BUY_USDC",
+        "OPEN",
+        1.0001,
+        1.0002,
+        10.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        "2026-07-01T09:00:00",
+        None,
+        opened_session_id,
+        recovery_status,
+    )
+
+
+def test_collection_recovery_cycle_detects_old_open_cycle():
+    cycle = _collection_recovery_cycle_from_row(
+        _open_recovery_row(opened_session_id="old-session"),
+        "current-session",
+    )
+
+    assert cycle["db_id"] == 9
+    assert cycle["direction"] == "BUY_USDC"
+    assert cycle["opened_session_id"] == "old-session"
+    assert cycle["current_session_id"] == "current-session"
+
+
+def test_collection_recovery_cycle_ignores_current_session_open_cycle():
+    cycle = _collection_recovery_cycle_from_row(
+        _open_recovery_row(opened_session_id="current-session"),
+        "current-session",
+    )
+
+    assert cycle is None
+
+
+def test_collection_recovery_cycle_ignores_resume_requested_cycle():
+    cycle = _collection_recovery_cycle_from_row(
+        _open_recovery_row(recovery_status="RESUME_REQUESTED"),
+        "current-session",
+    )
+
+    assert cycle is None
+
+
+def test_find_collection_recovery_cycle_marks_database_cycle():
+    class FakeDatabase:
+        def __init__(self):
+            self.marked = []
+
+        def load_open_paper_cycles_with_recovery(self, limit=1000):
+            return [_open_recovery_row(db_id=42)]
+
+        def mark_paper_cycle_recovery_required(self, db_id):
+            self.marked.append(db_id)
+            return True
+
+    database = FakeDatabase()
+
+    cycle = _find_collection_recovery_cycle(database, "current-session")
+
+    assert cycle["db_id"] == 42
+    assert cycle["recovery_status"] == "RECOVERY_REQUIRED"
+    assert database.marked == [42]
+
+
+def test_collect_closed_cycles_stops_before_progress_when_recovery_exists(monkeypatch, capsys):
+    class FakeLogger:
+        def debug(self, *args, **kwargs):
+            return None
+
+    class FakeDatabase:
+        def load_paper_cycle_collection_baseline(self, profile):
+            return {"max_cycle_id": 42, "closed_cycles": 1132, "net_profit": 0.1}
+
+        def load_open_paper_cycles_with_recovery(self, limit=1000):
+            return [_open_recovery_row(db_id=77, opened_session_id="old-session")]
+
+        def mark_paper_cycle_recovery_required(self, db_id):
+            self.marked = db_id
+            return True
+
+    def fail_engine(*args, **kwargs):
+        raise AssertionError("PaperTradingEngine must not start in early recovery mode")
+
+    monkeypatch.setattr("manage.build_context", lambda: (object(), FakeLogger(), FakeDatabase()))
+    monkeypatch.setattr("manage._ensure_profile_allowed_for_paper", lambda config, profile: None)
+    monkeypatch.setattr("manage.PaperTradingEngine", fail_engine)
+
+    args = SimpleNamespace(
+        profile="mean_reversion_hf_micro_v1",
+        target=500,
+        target_new=None,
+        interval=0,
+        max_iterations=1,
+        print_every=1,
+        safe_stop=False,
+        beep=False,
+        require_binance=False,
+        events_only=False,
+        verbose_rich=False,
+        resume_recovery=False,
+    )
+
+    command_collect_closed_cycles(args)
+
+    output = capsys.readouterr().out
+    assert "RECOVERY REQUIRED" in output
+    assert "DB ID" in output
+    assert "77" in output
+    assert "paper-recovery-action" in output
+    assert "paper-close-cycle" in output
+    assert "--db-id 77" in output
+    assert "--action resume" in output
+    assert "--action abandon" in output
+    assert "--reason" in output
+    assert "manual" in output
+    assert "stale" in output
+    assert "New:" not in output
+    assert "Cycle:" not in output
 
 
 def test_collection_target_settings_rejects_target_and_target_new():

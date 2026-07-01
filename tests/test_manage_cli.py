@@ -173,6 +173,7 @@ def test_manage_cli_has_paper_cycle_commands():
     open_cycles_args = parser.parse_args(["paper-open-cycles", "--limit", "7"])
     close_cycle_args = parser.parse_args(["paper-close-cycle", "--db-id", "9", "--reason", "stale"])
     recovery_args = parser.parse_args(["paper-recovery-action", "--db-id", "9", "--action", "resume"])
+    auto_recovery_args = parser.parse_args(["paper-recovery-action", "--action", "resume"])
     close_watch_args = parser.parse_args([
         "paper-close-watch",
         "--profile",
@@ -198,6 +199,9 @@ def test_manage_cli_has_paper_cycle_commands():
     assert recovery_args.command == "paper-recovery-action"
     assert recovery_args.db_id == 9
     assert recovery_args.action == "resume"
+    assert auto_recovery_args.command == "paper-recovery-action"
+    assert auto_recovery_args.db_id is None
+    assert auto_recovery_args.action == "resume"
     assert close_watch_args.command == "paper-close-watch"
     assert close_watch_args.profile == "mean_reversion_v2_small_target"
     assert close_watch_args.interval == 10

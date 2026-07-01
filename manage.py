@@ -3694,6 +3694,7 @@ def command_collect_closed_cycles(args) -> None:
 
     use_new_target, collection_target = _collection_target_settings(args)
     collection_id = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+    current_session_id = f"collection-{collection_id}"
 
     if args.interval < 0:
         raise ValueError("--interval must be 0 or greater.")
@@ -3720,6 +3721,14 @@ def command_collect_closed_cycles(args) -> None:
     print("Mode: DEMO/PAPER only. Real trading disabled.")
     if args.safe_stop:
         print("Safe stop requested: new paper cycle entries are disabled.")
+
+    recovery_cycle = _find_collection_recovery_cycle(database, current_session_id)
+    if recovery_cycle is not None:
+        PaperTradingCliRenderer().render_recovery_required(
+            "Open cycle detected from previous session. Automatic close is disabled. Manual recovery action required.",
+            cycle=recovery_cycle,
+        )
+        return
 
     stats = database.load_paper_cycle_collection_stats(profile)
     new_stats = database.load_new_paper_cycle_collection_stats(profile, baseline_max_id)
@@ -3781,6 +3790,7 @@ def command_collect_closed_cycles(args) -> None:
             safety_baseline_max_id=baseline_max_id if use_new_target else 0,
             safe_stop=args.safe_stop,
             resume_recovery_cycles=args.resume_recovery,
+            session_id=current_session_id,
         ).run(1)
         stats = database.load_paper_cycle_collection_stats(profile)
         new_stats = database.load_new_paper_cycle_collection_stats(profile, baseline_max_id)
@@ -3940,6 +3950,78 @@ def _collection_target_settings(args) -> tuple[bool, int]:
     if target <= 0:
         raise ValueError("--target must be greater than 0.")
     return True, target
+
+
+def _find_collection_recovery_cycle(database, current_session_id: str) -> dict | None:
+    load_with_recovery = getattr(database, "load_open_paper_cycles_with_recovery", None)
+    rows = load_with_recovery(limit=1000) if callable(load_with_recovery) else []
+    for row in rows:
+        cycle = _collection_recovery_cycle_from_row(row, current_session_id)
+        if cycle is None:
+            continue
+        mark_recovery = getattr(database, "mark_paper_cycle_recovery_required", None)
+        if callable(mark_recovery):
+            mark_recovery(int(cycle["db_id"]))
+            cycle["recovery_status"] = "RECOVERY_REQUIRED"
+        return cycle
+    return None
+
+
+def _collection_recovery_cycle_from_row(row: tuple, current_session_id: str) -> dict | None:
+    (
+        db_id,
+        _timestamp,
+        cycle_id,
+        strategy_profile,
+        direction,
+        _status,
+        open_price,
+        target_price,
+        _quantity,
+        _open_fee,
+        _close_fee,
+        _gross_profit,
+        _net_profit,
+        opened_at,
+        _closed_at,
+        opened_session_id,
+        recovery_status,
+    ) = row
+    recovery_status = str(recovery_status or "ACTIVE")
+    if opened_session_id == current_session_id:
+        return None
+    if recovery_status == "RESUME_REQUESTED":
+        return None
+    return {
+        "db_id": int(db_id),
+        "cycle_id": int(cycle_id),
+        "strategy_profile": str(strategy_profile),
+        "direction": str(direction),
+        "open_price": float(open_price),
+        "target_price": float(target_price),
+        "opened_at": str(opened_at),
+        "elapsed": _format_collection_elapsed(opened_at),
+        "opened_session_id": opened_session_id or "UNKNOWN",
+        "current_session_id": current_session_id,
+        "recovery_status": recovery_status,
+    }
+
+
+def _format_collection_elapsed(opened_at: str | None) -> str:
+    if not opened_at:
+        return "unknown"
+    try:
+        opened = datetime.fromisoformat(str(opened_at))
+    except ValueError:
+        return "unknown"
+    seconds = max(0, int((datetime.utcnow() - opened).total_seconds()))
+    if seconds < 60:
+        return f"{seconds}s"
+    minutes, remaining_seconds = divmod(seconds, 60)
+    if minutes < 60:
+        return f"{minutes}m {remaining_seconds}s"
+    hours, remaining_minutes = divmod(minutes, 60)
+    return f"{hours}h {remaining_minutes}m"
 
 
 def _load_collection_price_info(config, database, *, require_binance: bool) -> tuple[float, str, str] | None:
@@ -4534,13 +4616,14 @@ def command_paper_close_cycle(args) -> None:
 
 def command_paper_recovery_action(args) -> None:
     _config, _logger, database = build_context()
+    db_id = _resolve_paper_recovery_db_id(database, args.db_id)
     if args.action == "resume":
-        updated = database.request_paper_cycle_resume(args.db_id)
+        updated = database.request_paper_cycle_resume(db_id)
         status = "RESUME_REQUESTED"
         message = "Cycle tracking will resume on the next paper processing run without immediate close."
     elif args.action == "abandon":
         updated = database.abandon_paper_cycle(
-            args.db_id,
+            db_id,
             args.reason,
             datetime.utcnow().isoformat(),
         )
@@ -4550,15 +4633,31 @@ def command_paper_recovery_action(args) -> None:
         raise ValueError(f"Unsupported recovery action: {args.action}")
 
     if not updated:
-        raise ValueError(f"OPEN paper cycle not found for db_id={args.db_id}.")
+        raise ValueError(f"OPEN paper cycle not found for db_id={db_id}.")
 
     print("=== Paper Recovery Action ===")
-    print(f"db_id: {args.db_id}")
+    print(f"db_id: {db_id}")
     print(f"action: {args.action}")
     print(f"status: {status}")
     print(f"reason: {args.reason}")
     print(message)
     print("Manual close remains available via: python manage.py paper-close-cycle --db-id <id> --reason manual")
+
+
+def _resolve_paper_recovery_db_id(database, db_id: int | None) -> int:
+    if db_id is not None:
+        return int(db_id)
+    load_with_recovery = getattr(database, "load_open_paper_cycles_with_recovery", None)
+    rows = load_with_recovery(limit=1000) if callable(load_with_recovery) else []
+    candidates = [
+        row for row in rows
+        if str(row[16] or "ACTIVE") in {"RECOVERY_REQUIRED", "RESUME_REQUESTED"}
+    ]
+    if len(candidates) == 1:
+        return int(candidates[0][0])
+    if not candidates:
+        raise ValueError("No unresolved recovery paper cycle found. Pass --db-id explicitly.")
+    raise ValueError("Multiple recovery paper cycles found. Pass --db-id explicitly.")
 
 
 def command_paper_close_watch(args) -> None:
@@ -5116,7 +5215,7 @@ def build_parser() -> argparse.ArgumentParser:
         "paper-recovery-action",
         help="Resolve an OPEN paper cycle that requires operator recovery",
     )
-    paper_recovery_action_parser.add_argument("--db-id", type=int, required=True)
+    paper_recovery_action_parser.add_argument("--db-id", type=int, default=None)
     paper_recovery_action_parser.add_argument(
         "--action",
         choices=("resume", "abandon"),

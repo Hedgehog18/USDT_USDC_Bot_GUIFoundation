@@ -301,18 +301,48 @@ class PaperTradingCliRenderer:
         ]
         self._render_sections(sections)
 
-    def render_recovery_required(self, message: str | None = None) -> None:
+    def render_recovery_required(self, message: str | None = None, cycle: dict[str, Any] | None = None) -> None:
         text = message or (
             "Open cycle detected from previous session. "
             "Automatic close is disabled. Choose recovery action before continuing."
         )
-        self._render_sections([
-            self._section("RECOVERY REQUIRED", [
-                ("Warning", text),
-                ("Automatic close", "disabled"),
-                ("Required action", "resume / close manually / abandon"),
+        rows = [("Warning", text)]
+        if cycle:
+            db_id = cycle.get("db_id")
+            rows.extend([
+                ("DB ID", db_id),
+                ("Direction", cycle.get("direction")),
+                ("Entry Price", self._format_float(cycle.get("open_price"))),
+                ("Target Price", self._format_float(cycle.get("target_price"))),
+                ("Opened Session", cycle.get("opened_session_id")),
+                ("Current Session", cycle.get("current_session_id")),
+                ("Opened At", cycle.get("opened_at")),
+                ("Elapsed", cycle.get("elapsed")),
+                ("Recovery Status", cycle.get("recovery_status")),
             ])
+        rows.extend([
+            ("Automatic close", "DISABLED"),
+            (
+                "Resume",
+                f"python manage.py paper-recovery-action --db-id {cycle.get('db_id')} --action resume"
+                if cycle
+                else None,
+            ),
+            (
+                "Manual close",
+                f"python manage.py paper-close-cycle --db-id {cycle.get('db_id')} --reason manual"
+                if cycle
+                else None,
+            ),
+            (
+                "Abandon",
+                f"python manage.py paper-recovery-action --db-id {cycle.get('db_id')} --action abandon --reason stale"
+                if cycle
+                else None,
+            ),
+            ("Required action", "resume / close manually / abandon"),
         ])
+        self._render_sections([self._section("RECOVERY REQUIRED", rows)])
 
     def _current_cycle_section(self, nearest_open_cycle):
         if nearest_open_cycle is None:

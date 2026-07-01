@@ -233,11 +233,26 @@ def test_renderer_prints_collection_summary(capsys):
 
 def test_renderer_prints_recovery_required_warning(capsys):
     PaperTradingCliRenderer(force_plain=True).render_recovery_required(
-        "Open cycle detected from previous session. Automatic close is disabled."
+        "Open cycle detected from previous session. Automatic close is disabled.",
+        cycle={
+            "db_id": 9,
+            "direction": "BUY_USDC",
+            "open_price": 1.0001,
+            "target_price": 1.0002,
+            "opened_session_id": "old-session",
+            "current_session_id": "current-session",
+            "opened_at": "2026-07-01T09:00:00",
+            "elapsed": "3h 2m",
+            "recovery_status": "RECOVERY_REQUIRED",
+        },
     )
 
     output = capsys.readouterr().out
 
     assert "RECOVERY REQUIRED" in output
     assert "Open cycle detected from previous session" in output
-    assert "Automatic close: disabled" in output
+    assert "DB ID: 9" in output
+    assert "Automatic close: DISABLED" in output
+    assert "paper-recovery-action --db-id 9 --action resume" in output
+    assert "paper-close-cycle --db-id 9 --reason manual" in output
+    assert "paper-recovery-action --db-id 9 --action abandon --reason stale" in output
