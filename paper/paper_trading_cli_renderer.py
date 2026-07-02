@@ -215,7 +215,7 @@ class PaperTradingCliRenderer:
             f"Open: {int(stats.get('open_cycles', 0))} | "
             f"New Profit: {self._format_signed(float(stats.get('net_profit', 0.0)))} | "
             f"Lifetime Profit: {self._format_signed(float(lifetime.get('net_profit', 0.0)))} | "
-            f"Win: {self._format_percent(float(stats.get('win_rate', 0.0)))} | "
+            f"New Win: {self._format_percent(float(stats.get('win_rate', 0.0)))} | "
             f"Action: {action_taken}"
         )
         if nearest_open_cycle is not None:

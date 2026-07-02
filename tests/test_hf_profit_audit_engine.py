@@ -77,6 +77,33 @@ def test_hf_profit_audit_since_id_limits_current_run_scope(tmp_path):
     assert report.current_run_cycles == 2
     assert report.current_run_net_profit == pytest.approx(0.15)
     assert report.latest_100_net_profit == pytest.approx(0.25)
+    assert report.latest_250_net_profit == pytest.approx(0.25)
+    assert report.latest_500_net_profit == pytest.approx(0.25)
+
+
+def test_hf_profit_audit_latest_windows_use_recent_cycles(tmp_path):
+    database = DatabaseManager(str(tmp_path / "bot.sqlite"))
+    for db_id in range(1, 601):
+        _insert_cycle(database, db_id=db_id, net_profit=float(db_id))
+
+    report = HFProfitAuditEngine(database).build_report("mean_reversion_hf_micro_v1")
+
+    assert report.latest_100_net_profit == pytest.approx(sum(range(501, 601)))
+    assert report.latest_250_net_profit == pytest.approx(sum(range(351, 601)))
+    assert report.latest_500_net_profit == pytest.approx(sum(range(101, 601)))
+
+
+def test_hf_profit_audit_extreme_contribution(tmp_path):
+    database = DatabaseManager(str(tmp_path / "bot.sqlite"))
+    _insert_cycle(database, db_id=1, net_profit=0.1, close_price=1.00001000)
+    _insert_cycle(database, db_id=2, net_profit=0.3, close_price=0.99992000)
+
+    report = HFProfitAuditEngine(database).build_report("mean_reversion_hf_micro_v1")
+
+    assert report.extreme_close_cycles_count == 1
+    assert report.extreme_close_net_profit == pytest.approx(0.3)
+    assert report.extreme_close_profit_share == pytest.approx(0.75)
+    assert report.net_without_extreme_close_cycles == pytest.approx(0.1)
 
 
 def test_hf_profit_audit_handles_empty_profile(tmp_path):

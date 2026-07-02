@@ -81,6 +81,7 @@ from analytics.hf_micro_grid_sim_engine import (
     HF_GRID_DEFAULT_TARGET_PERCENT,
     HFMicroGridSimulationEngine,
 )
+from analytics.hf_extreme_move_diagnostics_engine import HFExtremeMoveDiagnosticsEngine
 from analytics.hf_profit_audit_engine import HFProfitAuditEngine
 from analytics.max_holding_sensitivity_engine import MaxHoldingSensitivityEngine
 from analytics.market_session_diagnostics_engine import MarketSessionDiagnosticsEngine
@@ -3237,8 +3238,14 @@ def command_hf_profit_audit(args) -> None:
     print(f"Closed cycles: {report.closed_cycles}")
     print(f"Profile total net: {report.total_net_profit:+.8f}")
     print(f"Latest 100 cycles net: {report.latest_100_net_profit:+.8f}")
+    print(f"Latest 250 cycles net: {report.latest_250_net_profit:+.8f}")
+    print(f"Latest 500 cycles net: {report.latest_500_net_profit:+.8f}")
     print(f"Current run cycles: {report.current_run_cycles}")
     print(f"Current run net: {report.current_run_net_profit:+.8f}")
+    print(f"Extreme close cycles: {report.extreme_close_cycles_count}")
+    print(f"Extreme close net: {report.extreme_close_net_profit:+.8f}")
+    print(f"Extreme close profit share: {report.extreme_close_profit_share * 100:.2f}%")
+    print(f"Net without extreme close cycles: {report.net_without_extreme_close_cycles:+.8f}")
     print("")
     print("Best cycle:")
     print(_format_hf_profit_audit_cycle(report.best_cycle))
@@ -3249,6 +3256,79 @@ def command_hf_profit_audit(args) -> None:
     _print_hf_profit_audit_cycles("Abnormal quantity cycles", report.abnormal_quantity_cycles)
     _print_hf_profit_audit_cycles("Abnormal open/close distance cycles", report.abnormal_distance_cycles)
     _print_hf_profit_audit_cycles("Fallback/extreme close price cycles", report.fallback_price_cycles)
+
+
+def command_hf_extreme_move_diagnostics(args) -> None:
+    _config, _logger, database = build_context()
+    report = HFExtremeMoveDiagnosticsEngine(database).build_report(args.profile)
+
+    print("=== HF Extreme Move Diagnostics ===")
+    print(f"Profile: {report.profile}")
+    print(f"Total closed cycles: {report.total_cycles}")
+    print(f"Lifetime net: {report.lifetime_net_profit:+.8f}")
+    print(f"Known extreme close prices: {_format_price_list(report.known_extreme_close_prices)}")
+    print(f"Observed min close price: {_format_optional_price(report.observed_min_close_price)}")
+    print(f"Observed max close price: {_format_optional_price(report.observed_max_close_price)}")
+    print("")
+    print("Extreme contribution:")
+    print(f"- extreme cycles: {report.extreme_cycles_count}")
+    print(f"- extreme net: {report.extreme_net_profit:+.8f}")
+    print(f"- extreme profit share: {report.extreme_profit_share * 100:.2f}%")
+    print(f"- net without extreme cycles: {report.net_without_extreme_cycles:+.8f}")
+    print(f"- recommendation: {report.recommendation}")
+    print("")
+    print("Recent vs lifetime windows:")
+    for window in report.windows:
+        print(
+            f"- {window.label}: cycles={window.cycles_count} "
+            f"net={window.net_profit:+.8f} extreme_cycles={window.extreme_cycles_count} "
+            f"extreme_net={window.extreme_net_profit:+.8f} "
+            f"extreme_share={window.extreme_profit_share * 100:.2f}% "
+            f"net_without_extreme={window.net_without_extreme_cycles:+.8f}"
+        )
+
+    _print_hf_extreme_cycles("Top 10 profit cycles", report.top_profit_cycles)
+    _print_hf_extreme_cycles("Extreme close price cycles", report.extreme_close_cycles)
+    print("")
+    print("Best extreme cycle:")
+    print(_format_hf_extreme_cycle(report.best_extreme_cycle))
+    print("Worst extreme cycle:")
+    print(_format_hf_extreme_cycle(report.worst_extreme_cycle))
+
+
+def _print_hf_extreme_cycles(title: str, cycles) -> None:
+    print("")
+    print(f"{title}:")
+    if not cycles:
+        print("- none")
+        return
+    for cycle in cycles:
+        print(_format_hf_extreme_cycle(cycle))
+
+
+def _format_hf_extreme_cycle(cycle) -> str:
+    if cycle is None:
+        return "- none"
+    holding = "N/A" if cycle.holding_seconds is None else f"{cycle.holding_seconds:.0f}s"
+    return (
+        f"- db_id={cycle.db_id} {cycle.direction} "
+        f"net={cycle.net_profit:+.8f} open={cycle.open_price:.8f} "
+        f"close={cycle.close_price:.8f} holding={holding} "
+        f"reason={cycle.close_reason or 'N/A'} "
+        f"extreme_close={str(cycle.is_extreme_close_price).lower()}"
+    )
+
+
+def _format_price_list(prices: list[float]) -> str:
+    if not prices:
+        return "N/A"
+    return ", ".join(f"{price:.8f}" for price in prices)
+
+
+def _format_optional_price(price: float | None) -> str:
+    if price is None:
+        return "N/A"
+    return f"{price:.8f}"
 
 
 def _print_hf_profit_audit_cycles(title: str, cycles) -> None:
@@ -5307,6 +5387,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Show current-run net for paper cycles with database id greater than this value",
     )
     hf_profit_audit_parser.set_defaults(func=command_hf_profit_audit)
+
+    hf_extreme_move_diagnostics_parser = subparsers.add_parser(
+        "hf-extreme-move-diagnostics",
+        help="Show HF extreme close price and outlier move diagnostics",
+    )
+    hf_extreme_move_diagnostics_parser.add_argument(
+        "--profile",
+        choices=SUPPORTED_RUNTIME_STRATEGY_PROFILES,
+        default="mean_reversion_hf_micro_v1",
+    )
+    hf_extreme_move_diagnostics_parser.set_defaults(func=command_hf_extreme_move_diagnostics)
 
     notifications_parser = subparsers.add_parser("notifications", help="РџРѕРєР°Р·Р°С‚Рё РїРѕРІС–РґРѕРјР»РµРЅРЅСЏ")
     notifications_parser.add_argument("--limit", type=int, default=10)

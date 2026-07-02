@@ -96,6 +96,9 @@ def test_renderer_hides_na_collection_fields(capsys):
     assert "Open: 0" in output
     assert "New Profit: +0.00000000" in output
     assert "Lifetime Profit: +0.00000000" in output
+    assert "New Win: 0.00%" in output
+    assert " | Profit:" not in output
+    assert " | Win:" not in output
     assert "Block: no_signal" in output
     assert "CURRENT COLLECTION DIRECTION BREAKDOWN" not in output
     assert "CURRENT COLLECTION CLOSE BREAKDOWN" not in output
@@ -154,6 +157,7 @@ def test_renderer_prints_open_cycle(capsys):
     assert "Lifetime: 12" in output
     assert "New Profit: +0.00100000" in output
     assert "Lifetime Profit: +0.02000000" in output
+    assert "New Win: 100.00%" in output
     assert "uPnL: -0.00020000" in output
     assert "Tracking: 2m 48s / 4m 30s" in output
     assert "Age:" not in output

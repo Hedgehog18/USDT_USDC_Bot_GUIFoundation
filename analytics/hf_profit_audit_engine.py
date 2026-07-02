@@ -27,8 +27,14 @@ class HFProfitAuditReport:
     closed_cycles: int
     total_net_profit: float
     latest_100_net_profit: float
+    latest_250_net_profit: float
+    latest_500_net_profit: float
     current_run_cycles: int
     current_run_net_profit: float
+    extreme_close_cycles_count: int
+    extreme_close_net_profit: float
+    extreme_close_profit_share: float
+    net_without_extreme_close_cycles: float
     best_cycle: HFProfitAuditCycle | None
     worst_cycle: HFProfitAuditCycle | None
     top_cycles: list[HFProfitAuditCycle]
@@ -55,17 +61,31 @@ class HFProfitAuditEngine:
             if since_id is not None and int(row["id"]) > since_id
         ]
         latest_100 = closed_rows[:100]
+        latest_250 = closed_rows[:250]
+        latest_500 = closed_rows[:500]
         top_rows = sorted(closed_rows, key=lambda row: float(row["net_profit"] or 0.0), reverse=True)[:10]
+        total_net_profit = sum(float(row["net_profit"] or 0.0) for row in closed_rows)
+        extreme_rows = [
+            row for row in closed_rows
+            if self._is_fallback_close_price(float(row["close_price"] or 0.0))
+        ]
+        extreme_net_profit = sum(float(row["net_profit"] or 0.0) for row in extreme_rows)
 
         return HFProfitAuditReport(
             profile=profile,
             since_id=since_id,
             total_cycles=len(rows),
             closed_cycles=len(closed_rows),
-            total_net_profit=sum(float(row["net_profit"] or 0.0) for row in closed_rows),
+            total_net_profit=total_net_profit,
             latest_100_net_profit=sum(float(row["net_profit"] or 0.0) for row in latest_100),
+            latest_250_net_profit=sum(float(row["net_profit"] or 0.0) for row in latest_250),
+            latest_500_net_profit=sum(float(row["net_profit"] or 0.0) for row in latest_500),
             current_run_cycles=len(current_rows),
             current_run_net_profit=sum(float(row["net_profit"] or 0.0) for row in current_rows),
+            extreme_close_cycles_count=len(extreme_rows),
+            extreme_close_net_profit=extreme_net_profit,
+            extreme_close_profit_share=self._profit_share(extreme_net_profit, total_net_profit),
+            net_without_extreme_close_cycles=total_net_profit - extreme_net_profit,
             best_cycle=self._cycle(max(closed_rows, key=lambda row: float(row["net_profit"] or 0.0))) if closed_rows else None,
             worst_cycle=self._cycle(min(closed_rows, key=lambda row: float(row["net_profit"] or 0.0))) if closed_rows else None,
             top_cycles=[self._cycle(row) for row in top_rows],
@@ -128,3 +148,8 @@ class HFProfitAuditEngine:
         if close_price < 0.99 or close_price > 1.01:
             return True
         return any(abs(close_price - value) < 0.00000001 for value in self.FALLBACK_CLOSE_PRICES)
+
+    def _profit_share(self, part: float, total: float) -> float:
+        if total <= 0:
+            return 0.0
+        return part / total
