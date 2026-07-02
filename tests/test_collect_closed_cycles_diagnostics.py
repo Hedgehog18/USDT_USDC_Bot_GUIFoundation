@@ -592,7 +592,8 @@ def test_collection_progress_prints_empty_new_run(capsys):
     assert "New: 0/5" in output
     assert "Lifetime: 0" in output
     assert "Open: 0" in output
-    assert "Profit: +0.00000000" in output
+    assert "New Profit: +0.00000000" in output
+    assert "Lifetime Profit: +0.00000000" in output
     assert "Block: no_signal" in output
     assert "CURRENT COLLECTION PERFORMANCE" not in output
     assert "LIFETIME SUMMARY" not in output

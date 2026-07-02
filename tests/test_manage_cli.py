@@ -276,6 +276,7 @@ def test_manage_cli_accepts_hf_micro_profile_for_paper_workflow_commands():
         ["paper-profit-concentration", "--profile", "mean_reversion_hf_micro_v1", "--since-id", "90"],
         ["paper-outlier-validation", "--profile", "mean_reversion_hf_micro_v1", "--since-id", "90"],
         ["hf-losing-cycle-diagnostics", "--profile", "mean_reversion_hf_micro_v1", "--since-id", "140", "--limit", "50"],
+        ["hf-profit-audit", "--profile", "mean_reversion_hf_micro_v1", "--since-id", "140"],
         ["exit-risk-diagnostics", "--profile", "mean_reversion_hf_micro_v1"],
     ]
 
@@ -300,6 +301,21 @@ def test_manage_cli_hf_losing_cycle_diagnostics_accepts_since_id_and_limit():
     assert args.profile == "mean_reversion_hf_micro_v1"
     assert args.since_id == 140
     assert args.limit == 50
+
+
+def test_manage_cli_hf_profit_audit_accepts_since_id():
+    parser = build_parser()
+    args = parser.parse_args([
+        "hf-profit-audit",
+        "--profile",
+        "mean_reversion_hf_micro_v1",
+        "--since-id",
+        "140",
+    ])
+
+    assert args.command == "hf-profit-audit"
+    assert args.profile == "mean_reversion_hf_micro_v1"
+    assert args.since_id == 140
 
 
 def test_manage_cli_has_collect_closed_cycles_command():

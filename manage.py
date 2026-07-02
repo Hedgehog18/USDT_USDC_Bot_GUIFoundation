@@ -81,6 +81,7 @@ from analytics.hf_micro_grid_sim_engine import (
     HF_GRID_DEFAULT_TARGET_PERCENT,
     HFMicroGridSimulationEngine,
 )
+from analytics.hf_profit_audit_engine import HFProfitAuditEngine
 from analytics.max_holding_sensitivity_engine import MaxHoldingSensitivityEngine
 from analytics.market_session_diagnostics_engine import MarketSessionDiagnosticsEngine
 from analytics.ml_baseline_trainer import MLBaselineTrainer
@@ -3222,6 +3223,57 @@ def command_hf_losing_cycle_diagnostics(args) -> None:
         print(f"- {item}")
 
 
+def command_hf_profit_audit(args) -> None:
+    _config, _logger, database = build_context()
+    report = HFProfitAuditEngine(database).build_report(
+        profile=args.profile,
+        since_id=args.since_id,
+    )
+
+    print("=== HF Profit Audit ===")
+    print(f"Profile: {report.profile}")
+    print(f"Since ID: {report.since_id if report.since_id is not None else 'N/A'}")
+    print(f"Total cycles: {report.total_cycles}")
+    print(f"Closed cycles: {report.closed_cycles}")
+    print(f"Profile total net: {report.total_net_profit:+.8f}")
+    print(f"Latest 100 cycles net: {report.latest_100_net_profit:+.8f}")
+    print(f"Current run cycles: {report.current_run_cycles}")
+    print(f"Current run net: {report.current_run_net_profit:+.8f}")
+    print("")
+    print("Best cycle:")
+    print(_format_hf_profit_audit_cycle(report.best_cycle))
+    print("Worst cycle:")
+    print(_format_hf_profit_audit_cycle(report.worst_cycle))
+    _print_hf_profit_audit_cycles("Top 10 cycles by net_profit", report.top_cycles)
+    _print_hf_profit_audit_cycles("Suspicious high PnL cycles", report.suspicious_cycles)
+    _print_hf_profit_audit_cycles("Abnormal quantity cycles", report.abnormal_quantity_cycles)
+    _print_hf_profit_audit_cycles("Abnormal open/close distance cycles", report.abnormal_distance_cycles)
+    _print_hf_profit_audit_cycles("Fallback/extreme close price cycles", report.fallback_price_cycles)
+
+
+def _print_hf_profit_audit_cycles(title: str, cycles) -> None:
+    print("")
+    print(f"{title}:")
+    if not cycles:
+        print("- none")
+        return
+    for cycle in cycles:
+        print(_format_hf_profit_audit_cycle(cycle))
+
+
+def _format_hf_profit_audit_cycle(cycle) -> str:
+    if cycle is None:
+        return "- none"
+    issue = f" issue={cycle.issue}" if getattr(cycle, "issue", "") else ""
+    distance = abs(float(cycle.close_price) - float(cycle.open_price))
+    return (
+        f"- db_id={cycle.db_id} {cycle.direction} {cycle.status} "
+        f"net={cycle.net_profit:+.8f} qty={cycle.quantity:.8f} "
+        f"open={cycle.open_price:.8f} close={cycle.close_price:.8f} "
+        f"distance={distance:.8f} reason={cycle.close_reason or 'N/A'}{issue}"
+    )
+
+
 def _print_profile_cycle_summary(cycle) -> None:
     if cycle is None:
         print("- No realized cycles.")
@@ -5238,6 +5290,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="Maximum losing cycles to include in detail output",
     )
     hf_losing_cycle_diagnostics_parser.set_defaults(func=command_hf_losing_cycle_diagnostics)
+
+    hf_profit_audit_parser = subparsers.add_parser(
+        "hf-profit-audit",
+        help="Audit HF profile profit scope and suspicious paper cycle PnL",
+    )
+    hf_profit_audit_parser.add_argument(
+        "--profile",
+        choices=SUPPORTED_RUNTIME_STRATEGY_PROFILES,
+        default="mean_reversion_hf_micro_v1",
+    )
+    hf_profit_audit_parser.add_argument(
+        "--since-id",
+        type=int,
+        default=None,
+        help="Show current-run net for paper cycles with database id greater than this value",
+    )
+    hf_profit_audit_parser.set_defaults(func=command_hf_profit_audit)
 
     notifications_parser = subparsers.add_parser("notifications", help="РџРѕРєР°Р·Р°С‚Рё РїРѕРІС–РґРѕРјР»РµРЅРЅСЏ")
     notifications_parser.add_argument("--limit", type=int, default=10)
