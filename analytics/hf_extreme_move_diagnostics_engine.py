@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
+from analytics.hf_extreme_price import KNOWN_HF_EXTREME_CLOSE_PRICES, is_extreme_close_price
 from storage.database_manager import DatabaseManager
 
 
@@ -51,9 +52,6 @@ class HFExtremeMoveDiagnosticsReport:
 
 
 class HFExtremeMoveDiagnosticsEngine:
-    KNOWN_EXTREME_CLOSE_PRICES = (0.99992000,)
-    PRICE_EPSILON = 0.00000001
-
     def __init__(self, database: DatabaseManager) -> None:
         self.database = database
 
@@ -80,7 +78,7 @@ class HFExtremeMoveDiagnosticsEngine:
             extreme_net_profit=extreme_net,
             extreme_profit_share=self._profit_share(extreme_net, lifetime_net),
             net_without_extreme_cycles=lifetime_net - extreme_net,
-            known_extreme_close_prices=list(self.KNOWN_EXTREME_CLOSE_PRICES),
+            known_extreme_close_prices=list(KNOWN_HF_EXTREME_CLOSE_PRICES),
             observed_min_close_price=observed_min,
             observed_max_close_price=observed_max,
             top_profit_cycles=[self._cycle(row, extreme_prices) for row in top_rows],
@@ -152,7 +150,7 @@ class HFExtremeMoveDiagnosticsEngine:
         )
 
     def _extreme_prices(self, observed_min: float | None, observed_max: float | None) -> set[float]:
-        prices = set(self.KNOWN_EXTREME_CLOSE_PRICES)
+        prices = set(KNOWN_HF_EXTREME_CLOSE_PRICES)
         if observed_min is not None:
             prices.add(observed_min)
         if observed_max is not None:
@@ -160,7 +158,7 @@ class HFExtremeMoveDiagnosticsEngine:
         return prices
 
     def _is_extreme_close_price(self, close_price: float, extreme_prices: set[float]) -> bool:
-        return any(abs(close_price - price) <= self.PRICE_EPSILON for price in extreme_prices)
+        return is_extreme_close_price(close_price, extra_extreme_prices=extreme_prices)
 
     def _sum_net(self, rows: list[dict]) -> float:
         return sum(float(row["net_profit"] or 0.0) for row in rows)

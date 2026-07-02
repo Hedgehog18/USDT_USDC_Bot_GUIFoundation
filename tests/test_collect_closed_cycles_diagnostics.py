@@ -10,12 +10,14 @@ from manage import (
     _collection_target_settings,
     _enrich_collection_recovery_cycle,
     _find_collection_recovery_cycle,
+    _load_new_collection_stats,
     _load_recovery_current_price_info,
     _print_closed_cycle_collection_event,
     command_collect_closed_cycles,
     _print_closed_cycle_collection_progress,
     _should_print_collection_progress,
 )
+from storage.database_manager import DatabaseManager
 
 
 def test_collection_entry_diagnostics_reports_outside_session():
@@ -529,6 +531,45 @@ def test_collection_target_settings_rejects_non_positive_target_new():
         raise AssertionError("Expected ValueError")
 
 
+def test_load_new_collection_stats_adds_extreme_free_metrics(tmp_path):
+    database = DatabaseManager(str(tmp_path / "bot.sqlite"))
+    with database.connect() as conn:
+        for db_id, close_price, net_profit in (
+            (1, 1.00084000, -0.0001),
+            (2, 0.99992000, 0.00914618),
+        ):
+            conn.execute(
+                """
+                INSERT INTO paper_cycles (
+                    id, timestamp, cycle_id, strategy_profile, direction, status,
+                    open_price, close_price, quantity, open_fee, close_fee,
+                    gross_profit, net_profit, opened_at, closed_at, close_reason
+                ) VALUES (?, ?, ?, 'mean_reversion_hf_micro_v1', 'SELL_USDC', 'CLOSED',
+                          1.000835, ?, 10, 0, 0, ?, ?, ?, ?, 'target')
+                """,
+                (
+                    db_id,
+                    f"2026-07-02T12:{db_id:02d}:00",
+                    db_id,
+                    close_price,
+                    net_profit,
+                    net_profit,
+                    f"2026-07-02T12:{db_id:02d}:00",
+                    f"2026-07-02T12:{db_id:02d}:10",
+                ),
+            )
+        conn.commit()
+
+    stats = _load_new_collection_stats(database, "mean_reversion_hf_micro_v1", 0)
+
+    assert stats["closed_cycles"] == 2
+    assert abs(float(stats["net_profit_without_extreme"]) - (-0.0001)) < 0.00000001
+    assert abs(float(stats["extreme_profit"]) - 0.00914618) < 0.00000001
+    assert stats["extreme_cycles"] == 1
+    assert stats["non_extreme_cycles"] == 1
+    assert stats["extreme_recommendation"] == "EXTREME_DEPENDENT_RUN"
+
+
 def test_collection_progress_prints_empty_new_run(capsys):
     stats = {
         "closed_cycles": 0,
@@ -593,8 +634,12 @@ def test_collection_progress_prints_empty_new_run(capsys):
     assert "Lifetime: 0" in output
     assert "Open: 0" in output
     assert "New Profit: +0.00000000" in output
+    assert "New Profit NoExt: +0.00000000" in output
+    assert "New Extreme Profit: +0.00000000" in output
+    assert "Extreme: 0" in output
     assert "Lifetime Profit: +0.00000000" in output
     assert "New Win: 0.00%" in output
+    assert "New Win NoExt: 0.00%" in output
     assert " | Profit:" not in output
     assert "Block: no_signal" in output
     assert "CURRENT COLLECTION PERFORMANCE" not in output

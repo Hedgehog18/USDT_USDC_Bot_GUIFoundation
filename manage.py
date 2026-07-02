@@ -69,6 +69,7 @@ from analytics.holding_horizon_diagnostics_engine import HoldingHorizonDiagnosti
 from analytics.high_frequency_dataset_summary_engine import HighFrequencyDatasetSummaryEngine
 from analytics.high_frequency_diagnostics_engine import HighFrequencyDiagnosticsEngine
 from analytics.high_frequency_snapshot_collector import HighFrequencySnapshotCollector
+from analytics.hf_collection_extreme_metrics import HFCollectionExtremeMetricsEngine
 from analytics.hf_losing_cycle_diagnostics_engine import HFLosingCycleDiagnosticsEngine
 from analytics.hf_micro_grid_guard_sweep_engine import HFMicroGridGuardSweepEngine
 from analytics.hf_micro_grid_sim_engine import (
@@ -3867,7 +3868,7 @@ def command_collect_closed_cycles(args) -> None:
         return
 
     stats = database.load_paper_cycle_collection_stats(profile)
-    new_stats = database.load_new_paper_cycle_collection_stats(profile, baseline_max_id)
+    new_stats = _load_new_collection_stats(database, profile, baseline_max_id)
     _print_closed_cycle_collection_summary(
         new_stats,
         lifetime_stats=stats,
@@ -3893,7 +3894,7 @@ def command_collect_closed_cycles(args) -> None:
         price_info = _load_collection_price_info(config, database, require_binance=args.require_binance)
         if price_info is None:
             stats = database.load_paper_cycle_collection_stats(profile)
-            new_stats = database.load_new_paper_cycle_collection_stats(profile, baseline_max_id)
+            new_stats = _load_new_collection_stats(database, profile, baseline_max_id)
             progress_label = (
                 f"NEW CLOSED {int(new_stats['closed_cycles'])} / {collection_target}"
                 if use_new_target
@@ -3931,7 +3932,7 @@ def command_collect_closed_cycles(args) -> None:
             cycle_tracking_started_at_by_db_id=cycle_tracking_started_at_by_db_id,
         ).run(1)
         stats = database.load_paper_cycle_collection_stats(profile)
-        new_stats = database.load_new_paper_cycle_collection_stats(profile, baseline_max_id)
+        new_stats = _load_new_collection_stats(database, profile, baseline_max_id)
         action_taken = _collection_action_taken(before_stats, stats, result)
         entry_diagnostics = _collection_entry_diagnostics(
             entry_debug_items,
@@ -4101,6 +4102,11 @@ def _print_closed_cycle_collection_summary(
         collection_id=collection_id,
         profile=profile,
     )
+
+
+def _load_new_collection_stats(database, profile: str, baseline_max_id: int) -> dict[str, float | int | str]:
+    stats = database.load_new_paper_cycle_collection_stats(profile, baseline_max_id)
+    return HFCollectionExtremeMetricsEngine(database).enrich_stats(stats, profile, baseline_max_id)
 
 
 def _collection_target_settings(args) -> tuple[bool, int]:

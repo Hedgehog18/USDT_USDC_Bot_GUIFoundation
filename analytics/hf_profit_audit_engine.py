@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from analytics.hf_extreme_price import is_extreme_close_price
 from storage.database_manager import DatabaseManager
 
 
@@ -48,8 +49,6 @@ class HFProfitAuditEngine:
     SUSPICIOUS_NET_THRESHOLD = 0.01
     ABNORMAL_QUANTITY_LIMIT = 20.0
     ABNORMAL_DISTANCE_LIMIT = 0.001
-    FALLBACK_CLOSE_PRICES = {0.99992000}
-
     def __init__(self, database: DatabaseManager) -> None:
         self.database = database
 
@@ -147,7 +146,7 @@ class HFProfitAuditEngine:
     def _is_fallback_close_price(self, close_price: float) -> bool:
         if close_price < 0.99 or close_price > 1.01:
             return True
-        return any(abs(close_price - value) < 0.00000001 for value in self.FALLBACK_CLOSE_PRICES)
+        return is_extreme_close_price(close_price)
 
     def _profit_share(self, part: float, total: float) -> float:
         if total <= 0:

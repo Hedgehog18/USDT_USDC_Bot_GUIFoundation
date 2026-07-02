@@ -214,8 +214,13 @@ class PaperTradingCliRenderer:
             f"Lifetime: {int(lifetime.get('closed_cycles', 0))} | "
             f"Open: {int(stats.get('open_cycles', 0))} | "
             f"New Profit: {self._format_signed(float(stats.get('net_profit', 0.0)))} | "
-            f"Lifetime Profit: {self._format_signed(float(lifetime.get('net_profit', 0.0)))} | "
+            f"New Profit NoExt: {self._format_signed(float(stats.get('net_profit_without_extreme', stats.get('net_profit', 0.0))))} | "
+            f"New Extreme Profit: {self._format_signed(float(stats.get('extreme_profit', 0.0)))} | "
+            f"Extreme: {int(stats.get('extreme_cycles', 0))} | "
+            f"NonExt: {int(stats.get('non_extreme_cycles', stats.get('closed_cycles', 0)))} | "
             f"New Win: {self._format_percent(float(stats.get('win_rate', 0.0)))} | "
+            f"New Win NoExt: {self._format_percent(float(stats.get('win_rate_without_extreme', stats.get('win_rate', 0.0))))} | "
+            f"Lifetime Profit: {self._format_signed(float(lifetime.get('net_profit', 0.0)))} | "
             f"Action: {action_taken}"
         )
         if nearest_open_cycle is not None:
@@ -249,7 +254,7 @@ class PaperTradingCliRenderer:
         profile: str | None = None,
     ) -> None:
         lifetime = lifetime_stats or {}
-        self._render_sections([
+        sections = [
             self._section("NEW COLLECTION SUMMARY", [
                 ("Collection ID", collection_id or "N/A"),
                 ("Profile", profile or "N/A"),
@@ -262,7 +267,13 @@ class PaperTradingCliRenderer:
                 ("New timeout loss", int(stats.get("timeout_loss", 0))),
                 ("New manual closed", int(stats["manual_closed"])),
                 ("New net profit", self._format_signed(float(stats["net_profit"]))),
+                ("New net profit without extreme", self._format_signed(float(stats.get("net_profit_without_extreme", stats["net_profit"])))),
+                ("New extreme profit", self._format_signed(float(stats.get("extreme_profit", 0.0)))),
+                ("New extreme cycles", int(stats.get("extreme_cycles", 0))),
+                ("New non-extreme cycles", int(stats.get("non_extreme_cycles", stats["closed_cycles"]))),
+                ("Extreme profit share", self._format_percent(float(stats.get("extreme_profit_share", 0.0)))),
                 ("New win rate", self._format_percent(float(stats["win_rate"]))),
+                ("New win rate without extreme", self._format_percent(float(stats.get("win_rate_without_extreme", stats["win_rate"])))),
                 ("New average cycle PnL", self._format_signed(float(stats.get("average_cycle_pnl", 0.0)))),
                 ("New expectancy", self._format_signed(float(stats.get("expectancy", 0.0)))),
                 ("New profit factor", f"{float(stats.get('profit_factor', 0.0)):.4f}"),
@@ -280,7 +291,14 @@ class PaperTradingCliRenderer:
                 ("Average missed PnL", self._format_float(float(stats.get("average_missed_pnl", 0.0)))),
                 ("Worst adverse move", self._format_float(float(stats.get("worst_adverse_move", 0.0)))),
             ]),
-        ])
+        ]
+        warning = stats.get("extreme_warning")
+        if self._is_useful(warning):
+            sections.append(self._section("EXTREME RUN WARNING", [
+                ("Warning", warning),
+                ("Recommendation", stats.get("extreme_recommendation")),
+            ]))
+        self._render_sections(sections)
 
     def render_profile_performance_summary(self, summary) -> None:
         sections = [

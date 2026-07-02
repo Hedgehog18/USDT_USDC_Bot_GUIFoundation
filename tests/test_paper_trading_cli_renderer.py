@@ -65,6 +65,11 @@ def test_renderer_hides_na_collection_fields(capsys):
         "winning_cycles": 0,
         "breakeven_cycles": 0,
         "losing_cycles": 0,
+        "net_profit_without_extreme": 0.0,
+        "extreme_profit": 0.0,
+        "extreme_cycles": 0,
+        "non_extreme_cycles": 0,
+        "win_rate_without_extreme": 0.0,
     }
     diagnostics = {
         "candidate_detected": "no",
@@ -95,8 +100,12 @@ def test_renderer_hides_na_collection_fields(capsys):
     assert "Lifetime: 0" in output
     assert "Open: 0" in output
     assert "New Profit: +0.00000000" in output
+    assert "New Profit NoExt: +0.00000000" in output
+    assert "New Extreme Profit: +0.00000000" in output
+    assert "Extreme: 0" in output
     assert "Lifetime Profit: +0.00000000" in output
     assert "New Win: 0.00%" in output
+    assert "New Win NoExt: 0.00%" in output
     assert " | Profit:" not in output
     assert " | Win:" not in output
     assert "Block: no_signal" in output
@@ -123,6 +132,11 @@ def test_renderer_prints_open_cycle(capsys):
         "open_cycles": 1,
         "net_profit": 0.001,
         "win_rate": 1.0,
+        "net_profit_without_extreme": -0.0001,
+        "extreme_profit": 0.0011,
+        "extreme_cycles": 1,
+        "non_extreme_cycles": 1,
+        "win_rate_without_extreme": 0.0,
     }
     diagnostics = {
         "candidate_detected": "no",
@@ -156,8 +170,13 @@ def test_renderer_prints_open_cycle(capsys):
     assert "collection test-collection" in output
     assert "Lifetime: 12" in output
     assert "New Profit: +0.00100000" in output
+    assert "New Profit NoExt: -0.00010000" in output
+    assert "New Extreme Profit: +0.00110000" in output
+    assert "Extreme: 1" in output
+    assert "NonExt: 1" in output
     assert "Lifetime Profit: +0.02000000" in output
     assert "New Win: 100.00%" in output
+    assert "New Win NoExt: 0.00%" in output
     assert "uPnL: -0.00020000" in output
     assert "Tracking: 2m 48s / 4m 30s" in output
     assert "Age:" not in output
@@ -222,6 +241,14 @@ def test_renderer_prints_collection_summary(capsys):
         "timeout_loss": 1,
         "manual_closed": 0,
         "net_profit": 0.01,
+        "net_profit_without_extreme": 0.002,
+        "extreme_profit": 0.008,
+        "extreme_cycles": 1,
+        "non_extreme_cycles": 4,
+        "extreme_profit_share": 0.8,
+        "win_rate_without_extreme": 0.5,
+        "extreme_recommendation": "MODERATE_EXTREME_IMPACT_RUN",
+        "extreme_warning": "WARNING: New run is extreme-dependent. Do not evaluate ordinary HF performance using raw New Profit.",
         "win_rate": 0.6,
     }
 
@@ -237,6 +264,14 @@ def test_renderer_prints_collection_summary(capsys):
     assert "NEW COLLECTION SUMMARY" in output
     assert "Collection ID: collection-1" in output
     assert "New timeout profit: 1" in output
+    assert "New net profit without extreme: +0.00200000" in output
+    assert "New extreme profit: +0.00800000" in output
+    assert "New extreme cycles: 1" in output
+    assert "New non-extreme cycles: 4" in output
+    assert "Extreme profit share: 80.00%" in output
+    assert "New win rate without extreme: 50.00%" in output
+    assert "EXTREME RUN WARNING" in output
+    assert "Recommendation: MODERATE_EXTREME_IMPACT_RUN" in output
     assert "New win rate: 60.00%" in output
     assert "Lifetime closed cycles: 100" in output
 
