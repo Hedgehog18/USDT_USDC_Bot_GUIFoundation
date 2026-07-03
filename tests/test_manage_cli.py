@@ -280,6 +280,7 @@ def test_manage_cli_accepts_hf_micro_profile_for_paper_workflow_commands():
         ["hf-extreme-move-diagnostics", "--profile", "mean_reversion_hf_micro_v1"],
         ["hf-run-regime-comparison", "--profile", "mean_reversion_hf_micro_v1", "--run-a-since-id", "100", "--run-b-since-id", "200", "--limit", "50"],
         ["hf-velocity-filter-sim", "--profile", "mean_reversion_hf_micro_v1", "--since-id", "1534", "--limit", "50"],
+        ["hf-regime-filter-sim", "--profile", "mean_reversion_hf_micro_v1", "--since-id", "1534", "--limit", "50"],
         ["exit-risk-diagnostics", "--profile", "mean_reversion_hf_micro_v1"],
     ]
 
@@ -378,6 +379,27 @@ def test_manage_cli_hf_velocity_filter_sim_accepts_thresholds_and_confirmation()
     assert args.drift_threshold == pytest.approx(0.000025)
     assert args.require_direction_confirmed is True
     assert args.limit == 100
+
+
+def test_manage_cli_hf_regime_filter_sim_accepts_since_id_limit_and_threshold():
+    parser = build_parser()
+    args = parser.parse_args([
+        "hf-regime-filter-sim",
+        "--profile",
+        "mean_reversion_hf_micro_v1",
+        "--since-id",
+        "1534",
+        "--limit",
+        "100",
+        "--velocity-threshold",
+        "0.00002",
+    ])
+
+    assert args.command == "hf-regime-filter-sim"
+    assert args.profile == "mean_reversion_hf_micro_v1"
+    assert args.since_id == 1534
+    assert args.limit == 100
+    assert args.velocity_threshold == pytest.approx(0.00002)
 
 
 def test_manage_cli_has_collect_closed_cycles_command():

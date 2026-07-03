@@ -84,6 +84,7 @@ from analytics.hf_micro_grid_sim_engine import (
 )
 from analytics.hf_extreme_move_diagnostics_engine import HFExtremeMoveDiagnosticsEngine
 from analytics.hf_profit_audit_engine import HFProfitAuditEngine
+from analytics.hf_regime_filter_sim_engine import HFRegimeFilterSimulationEngine
 from analytics.hf_run_regime_comparison_engine import HFRunRegimeComparisonEngine
 from analytics.hf_velocity_filter_sim_engine import HFVelocityFilterSimulationEngine
 from analytics.max_holding_sensitivity_engine import MaxHoldingSensitivityEngine
@@ -3367,6 +3368,44 @@ def command_hf_velocity_filter_sim(args) -> None:
         )
 
 
+def command_hf_regime_filter_sim(args) -> None:
+    _config, _logger, database = build_context()
+    report = HFRegimeFilterSimulationEngine(database).simulate(
+        profile=args.profile,
+        since_id=args.since_id,
+        limit=args.limit,
+        velocity_threshold=args.velocity_threshold,
+    )
+
+    print("=== HF Regime-aware Velocity Filter Simulation ===")
+    print(f"Profile: {report.profile}")
+    print(f"Since ID: {report.since_id}")
+    print(f"Limit: {report.limit if report.limit is not None else 'N/A'}")
+    print(f"Velocity filter threshold: {report.velocity_threshold:.8f}")
+    print(f"Total cycles: {report.total_cycles}")
+    print("")
+    print("Regime results:")
+    for item in report.regimes:
+        result = item.filter_result
+        print(
+            f"- {item.regime}: "
+            f"cycles={item.cycles_count} "
+            f"net_no_ext={item.net_profit_without_extreme:+.8f} "
+            f"win={item.win_rate * 100:.2f}% "
+            f"timeout_losses={item.timeout_losses} "
+            f"blocked={result.blocked_cycles} "
+            f"blocked_winners={result.blocked_winners} "
+            f"blocked_losers={result.blocked_losers} "
+            f"kept_net_no_ext={result.net_kept_without_extreme:+.8f} "
+            f"improvement={result.net_improvement_vs_baseline:+.8f} "
+            f"cycles_day_after={result.cycles_per_day_estimate_after_filter:.2f} "
+            f"recommendation={result.recommendation}"
+        )
+    print("")
+    print(f"Best regime: {report.best_regime or 'N/A'}")
+    print(f"Conclusion: {report.conclusion}")
+
+
 def _print_hf_run_regime_series(series) -> None:
     print("")
     print(f"--- {series.label} ---")
@@ -5584,6 +5623,24 @@ def build_parser() -> argparse.ArgumentParser:
     hf_velocity_filter_sim_parser.add_argument("--require-direction-confirmed", action="store_true")
     hf_velocity_filter_sim_parser.add_argument("--limit", type=int, default=None)
     hf_velocity_filter_sim_parser.set_defaults(func=command_hf_velocity_filter_sim)
+
+    hf_regime_filter_sim_parser = subparsers.add_parser(
+        "hf-regime-filter-sim",
+        help="Dry-run regime-aware HF velocity filter scenarios",
+    )
+    hf_regime_filter_sim_parser.add_argument(
+        "--profile",
+        choices=SUPPORTED_RUNTIME_STRATEGY_PROFILES,
+        default="mean_reversion_hf_micro_v1",
+    )
+    hf_regime_filter_sim_parser.add_argument("--since-id", type=int, default=0)
+    hf_regime_filter_sim_parser.add_argument("--limit", type=int, default=None)
+    hf_regime_filter_sim_parser.add_argument(
+        "--velocity-threshold",
+        type=_positive_decimal_float,
+        default=0.00002,
+    )
+    hf_regime_filter_sim_parser.set_defaults(func=command_hf_regime_filter_sim)
 
     notifications_parser = subparsers.add_parser("notifications", help="РџРѕРєР°Р·Р°С‚Рё РїРѕРІС–РґРѕРјР»РµРЅРЅСЏ")
     notifications_parser.add_argument("--limit", type=int, default=10)

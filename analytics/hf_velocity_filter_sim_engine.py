@@ -24,6 +24,11 @@ class HFVelocityCycle:
     current_price: float | None
     previous_price: float | None
     last_different_price: float | None
+    short_center: float | None = None
+    hf_entry_mode: str | None = None
+    price_buffer_unique_values: int | None = None
+    flat_samples_count: int | None = None
+    flat_price_buffer: bool | None = None
 
     @property
     def price_velocity(self) -> float | None:
@@ -233,7 +238,10 @@ class HFVelocityFilterSimulationEngine:
                 SELECT
                     pc.id, pc.direction, pc.net_profit, pc.close_price,
                     pc.close_reason, pc.opened_at, pc.closed_at,
-                    diag.current_price, diag.previous_price, diag.last_different_price
+                    diag.current_price, diag.previous_price, diag.last_different_price,
+                    diag.short_center, diag.hf_entry_mode,
+                    diag.price_buffer_unique_values, diag.flat_samples_count,
+                    diag.flat_price_buffer
                 FROM paper_cycles pc
                 LEFT JOIN hf_paper_cycle_entry_diagnostics diag
                     ON diag.paper_cycle_id = pc.id
@@ -257,6 +265,11 @@ class HFVelocityFilterSimulationEngine:
                 current_price=self._optional_float(row[7]),
                 previous_price=self._optional_float(row[8]),
                 last_different_price=self._optional_float(row[9]),
+                short_center=self._optional_float(row[10]),
+                hf_entry_mode=None if row[11] is None else str(row[11]),
+                price_buffer_unique_values=self._optional_int(row[12]),
+                flat_samples_count=self._optional_int(row[13]),
+                flat_price_buffer=None if row[14] is None else bool(row[14]),
             )
             for row in rows
         ]
@@ -306,6 +319,11 @@ class HFVelocityFilterSimulationEngine:
         if value is None:
             return None
         return float(value)
+
+    def _optional_int(self, value: object) -> int | None:
+        if value is None:
+            return None
+        return int(value)
 
     def _parse_datetime(self, value: object) -> datetime | None:
         if value is None:
