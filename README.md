@@ -67,6 +67,20 @@ python manage.py paper-stats --limit 100
 python manage.py paper-safety --limit 20
 ```
 
+## Research Roadmap
+
+Phase 1: HF Baseline - completed.
+
+- Official baseline: `mean_reversion_hf_micro_v1`
+- Status: `FROZEN BASELINE`
+- Documentation: [docs/HF_V1_BASELINE.md](docs/HF_V1_BASELINE.md)
+
+Phase 2: Extreme Strategy Research - planned.
+
+- Extreme Strategy v1 is a separate research direction, not HF v2.
+- No runtime implementation exists yet.
+- Documentation: [docs/EXTREME_STRATEGY_V1_RESEARCH.md](docs/EXTREME_STRATEGY_V1_RESEARCH.md)
+
 ## Safety Notice
 
 Real trading is not enabled in this GUI MVP checkpoint. Do not use this project for live order placement without a separate real-trading implementation, dedicated risk controls, API-key management, and review.
