@@ -279,6 +279,7 @@ def test_manage_cli_accepts_hf_micro_profile_for_paper_workflow_commands():
         ["hf-profit-audit", "--profile", "mean_reversion_hf_micro_v1", "--since-id", "140"],
         ["hf-extreme-move-diagnostics", "--profile", "mean_reversion_hf_micro_v1"],
         ["hf-run-regime-comparison", "--profile", "mean_reversion_hf_micro_v1", "--run-a-since-id", "100", "--run-b-since-id", "200", "--limit", "50"],
+        ["hf-velocity-filter-sim", "--profile", "mean_reversion_hf_micro_v1", "--since-id", "1534", "--limit", "50"],
         ["exit-risk-diagnostics", "--profile", "mean_reversion_hf_micro_v1"],
     ]
 
@@ -351,6 +352,32 @@ def test_manage_cli_hf_run_regime_comparison_accepts_aliases_and_limit():
     assert args.good_since_id == 100
     assert args.bad_since_id == 200
     assert args.limit == 50
+
+
+def test_manage_cli_hf_velocity_filter_sim_accepts_thresholds_and_confirmation():
+    parser = build_parser()
+    args = parser.parse_args([
+        "hf-velocity-filter-sim",
+        "--profile",
+        "mean_reversion_hf_micro_v1",
+        "--since-id",
+        "1534",
+        "--velocity-threshold",
+        "0.000015",
+        "--drift-threshold",
+        "0.000025",
+        "--require-direction-confirmed",
+        "--limit",
+        "100",
+    ])
+
+    assert args.command == "hf-velocity-filter-sim"
+    assert args.profile == "mean_reversion_hf_micro_v1"
+    assert args.since_id == 1534
+    assert args.velocity_threshold == pytest.approx(0.000015)
+    assert args.drift_threshold == pytest.approx(0.000025)
+    assert args.require_direction_confirmed is True
+    assert args.limit == 100
 
 
 def test_manage_cli_has_collect_closed_cycles_command():
