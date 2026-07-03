@@ -194,6 +194,7 @@ class PaperTradingCliRenderer:
         nearest_open_cycle,
         action_taken: str,
         entry_diagnostics: dict[str, str],
+        last_closed_cycle: dict | None = None,
         lifetime_stats: dict[str, float | int] | None = None,
         collection_id: str | int | None = None,
         tracking_limit_seconds: float | None = None,
@@ -223,6 +224,9 @@ class PaperTradingCliRenderer:
             f"Lifetime Profit: {self._format_signed(float(lifetime.get('net_profit', 0.0)))} | "
             f"Action: {action_taken}"
         )
+        if action_taken == "closed" and last_closed_cycle is not None:
+            self._print_compact_closed_cycle(last_closed_cycle)
+            return
         if nearest_open_cycle is not None:
             print(
                 "Cycle: "
@@ -265,6 +269,46 @@ class PaperTradingCliRenderer:
             f"lead_warning={self._compact_text(entry_diagnostics.get('lead_time_warning'))}"
         )
 
+    def _print_compact_closed_cycle(self, cycle: dict) -> None:
+        print(
+            "Closed Cycle: "
+            f"db_id={self._compact_text(cycle.get('db_id'))} | "
+            f"profile={self._compact_text(cycle.get('profile'))} | "
+            f"direction={self._compact_text(cycle.get('direction'))} | "
+            f"reason={self._compact_text(cycle.get('close_reason'))} | "
+            f"net={self._format_signed(float(cycle.get('net_profit', 0.0)))}"
+        )
+        print(
+            "Closed Prices: "
+            f"open={self._format_float(cycle.get('open_price'))} | "
+            f"close={self._format_float(cycle.get('close_price'))} | "
+            f"target={self._format_float(cycle.get('target_price'))} | "
+            f"distance={self._format_float(cycle.get('distance_to_target_at_close'))} | "
+            f"holding={self._format_seconds(cycle.get('holding_seconds'))}"
+        )
+        print(
+            "Closed Flags: "
+            f"target_hit={self._compact_text(cycle.get('target_hit'))} | "
+            f"timeout_hit={self._compact_text(cycle.get('timeout_hit'))} | "
+            f"was_extreme_close={self._compact_text(cycle.get('was_extreme_close'))} | "
+            f"breakeven_close={self._compact_text(cycle.get('breakeven_close'))} | "
+            f"possible_reason={self._compact_text(cycle.get('possible_reason'))}"
+        )
+        if cycle.get("profile") != "extreme_strategy_v1":
+            return
+        print(
+            "Extreme Entry: "
+            f"signal={self._compact_text(cycle.get('extreme_signal_at_entry'))} | "
+            f"strength={self._format_float(cycle.get('entry_signal_strength'))} | "
+            f"velocity={self._format_float(cycle.get('entry_velocity_value'))}/"
+            f"{self._format_float(cycle.get('entry_velocity_threshold'))} | "
+            f"compression={self._format_float(cycle.get('entry_compression_score'))}/"
+            f"{self._format_float(cycle.get('entry_compression_threshold'))} | "
+            f"expected={self._compact_text(cycle.get('expected_direction'))} | "
+            f"lead_warning={self._compact_text(cycle.get('lead_warning'))} | "
+            f"false_positive_hint={self._compact_text(cycle.get('false_positive_hint'))}"
+        )
+
     def render_collection_summary(
         self,
         stats: dict[str, float | int],
@@ -282,6 +326,10 @@ class PaperTradingCliRenderer:
                 ("New automatic closed", int(stats["automatic_closed"])),
                 ("New target closed", int(stats["target_closed"])),
                 ("New timeout closed", int(stats["timeout_closed"])),
+                ("New breakeven closed", int(stats.get("breakeven_cycles", 0))),
+                ("New zero-net cycles", int(stats.get("zero_net_cycles", stats.get("breakeven_cycles", 0)))),
+                ("New extreme_target closed", int(stats.get("extreme_target_closed", 0))),
+                ("New extreme_timeout closed", int(stats.get("extreme_timeout_closed", 0))),
                 ("New timeout profit", int(stats.get("timeout_profit", 0))),
                 ("New timeout breakeven", int(stats.get("timeout_breakeven", 0))),
                 ("New timeout loss", int(stats.get("timeout_loss", 0))),

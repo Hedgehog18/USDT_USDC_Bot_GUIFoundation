@@ -2083,7 +2083,10 @@ class DatabaseManager:
                     COALESCE(AVG(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') THEN max_favorable_pnl END), 0) AS average_mfe,
                     COALESCE(AVG(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') THEN max_adverse_pnl END), 0) AS average_mae,
                     COALESCE(AVG(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') THEN missed_pnl END), 0) AS average_missed_pnl,
-                    COALESCE(MIN(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') THEN max_adverse_pnl END), 0) AS worst_adverse_move
+                    COALESCE(MIN(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') THEN max_adverse_pnl END), 0) AS worst_adverse_move,
+                    COALESCE(SUM(CASE WHEN status IN ('CLOSED', 'CLOSED_MANUAL') AND net_profit = 0 THEN 1 ELSE 0 END), 0) AS zero_net_cycles,
+                    COALESCE(SUM(CASE WHEN status = 'CLOSED' AND close_reason = 'extreme_target' THEN 1 ELSE 0 END), 0) AS extreme_target_closed,
+                    COALESCE(SUM(CASE WHEN status = 'CLOSED' AND close_reason = 'extreme_timeout' THEN 1 ELSE 0 END), 0) AS extreme_timeout_closed
                 FROM paper_cycles
                 WHERE strategy_profile = ? AND id > ?
                 """,
@@ -2126,6 +2129,9 @@ class DatabaseManager:
             "average_mae": float(row[24]),
             "average_missed_pnl": float(row[25]),
             "worst_adverse_move": float(row[26]),
+            "zero_net_cycles": int(row[27]),
+            "extreme_target_closed": int(row[28]),
+            "extreme_timeout_closed": int(row[29]),
             "win_rate": (winning_cycles / closed_cycles) if closed_cycles else 0.0,
         }
 

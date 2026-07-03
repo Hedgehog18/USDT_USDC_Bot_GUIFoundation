@@ -77,6 +77,7 @@ from analytics.high_frequency_dataset_summary_engine import HighFrequencyDataset
 from analytics.high_frequency_diagnostics_engine import HighFrequencyDiagnosticsEngine
 from analytics.high_frequency_snapshot_collector import HighFrequencySnapshotCollector
 from analytics.hf_collection_extreme_metrics import HFCollectionExtremeMetricsEngine
+from analytics.hf_extreme_price import is_extreme_close_price
 from analytics.hf_losing_cycle_diagnostics_engine import HFLosingCycleDiagnosticsEngine
 from analytics.hf_micro_grid_guard_sweep_engine import HFMicroGridGuardSweepEngine
 from analytics.hf_micro_grid_sim_engine import (
@@ -4485,6 +4486,11 @@ def command_collect_closed_cycles(args) -> None:
                 result=result,
             )
         if should_print_progress:
+            last_closed_cycle = _collection_last_closed_cycle_details(
+                database,
+                profile,
+                close_debug_items,
+            ) if action_taken == "closed" else None
             _print_closed_cycle_collection_progress(
                 new_stats,
                 collection_target,
@@ -4493,6 +4499,7 @@ def command_collect_closed_cycles(args) -> None:
                 nearest_open_cycle=nearest_open_cycle,
                 action_taken=action_taken,
                 close_reason=_collection_close_reason(close_debug_items, profile),
+                last_closed_cycle=last_closed_cycle,
                 entry_diagnostics=entry_diagnostics,
                 new_mode=use_new_target,
                 lifetime_stats=stats,
@@ -4535,6 +4542,7 @@ def _print_closed_cycle_collection_progress(
     action_taken: str,
     close_reason: str,
     entry_diagnostics: dict[str, str],
+    last_closed_cycle: dict | None = None,
     new_mode: bool = False,
     lifetime_stats: dict[str, float | int] | None = None,
     collection_id: str | int | None = None,
@@ -4550,6 +4558,7 @@ def _print_closed_cycle_collection_progress(
             price_info=price_info,
             nearest_open_cycle=nearest_open_cycle,
             action_taken=action_taken,
+            last_closed_cycle=last_closed_cycle,
             entry_diagnostics=entry_diagnostics,
             lifetime_stats=lifetime_stats,
             collection_id=collection_id,
@@ -4820,6 +4829,164 @@ def _collection_close_reason(close_debug_items: list[dict], profile: str) -> str
         if reason:
             return str(reason)
     return "N/A"
+
+
+def _collection_last_closed_cycle_details(database, profile: str, close_debug_items: list[dict]) -> dict | None:
+    close_item = _latest_collection_profile_close_debug(close_debug_items, profile)
+    db_id = close_item.get("db_id") if close_item else None
+    if db_id is None:
+        return None
+    with database.connect() as conn:
+        row = conn.execute(
+            """
+            SELECT
+                c.id, c.strategy_profile, c.direction, c.open_price, c.close_price,
+                c.net_profit, c.close_reason, c.opened_at, c.closed_at,
+                d.session_signal, d.velocity_spike_signal, d.compression_signal,
+                d.signal_strength, d.lead_warning, d.expected_direction,
+                d.entry_direction, d.velocity_value, d.velocity_threshold,
+                d.compression_score, d.compression_threshold
+            FROM paper_cycles c
+            LEFT JOIN hf_paper_cycle_entry_diagnostics d ON d.paper_cycle_id = c.id
+            WHERE c.id = ?
+            """,
+            (int(db_id),),
+        ).fetchone()
+    if not row:
+        return None
+
+    close_reason = str(row[6] or close_item.get("close_reason") or "N/A")
+    open_price = _collection_optional_float(row[3])
+    close_price = _collection_optional_float(row[4])
+    target_price = _collection_optional_float(close_item.get("target_price"))
+    net_profit = _collection_optional_float(row[5]) or 0.0
+    target_hit = bool(close_item.get("target_close_condition_met")) or "target" in close_reason.lower()
+    timeout_hit = bool(close_item.get("max_holding_condition_met")) or "timeout" in close_reason.lower()
+    distance_to_target = (
+        abs(float(close_price) - float(target_price))
+        if close_price is not None and target_price is not None
+        else None
+    )
+    holding_seconds = _collection_optional_float(close_item.get("active_tracking"))
+    if holding_seconds is None:
+        holding_seconds = _collection_holding_seconds(row[7], row[8])
+    breakeven_close = net_profit == 0.0
+    detail = {
+        "db_id": int(row[0]),
+        "profile": str(row[1] or profile),
+        "direction": str(row[2] or "N/A"),
+        "open_price": open_price,
+        "close_price": close_price,
+        "target_price": target_price,
+        "net_profit": net_profit,
+        "close_reason": close_reason,
+        "holding_seconds": holding_seconds,
+        "target_hit": "yes" if target_hit else "no",
+        "timeout_hit": "yes" if timeout_hit else "no",
+        "distance_to_target_at_close": distance_to_target,
+        "was_extreme_close": "yes" if close_price is not None and is_extreme_close_price(close_price) else "no",
+        "breakeven_close": "yes" if breakeven_close else "no",
+        "possible_reason": _collection_breakeven_possible_reason(
+            open_price=open_price,
+            close_price=close_price,
+            target_hit=target_hit,
+            timeout_hit=timeout_hit,
+            breakeven=breakeven_close,
+        ),
+        "extreme_signal_at_entry": _collection_bool_label(row[9]),
+        "entry_velocity_signal": _collection_bool_label(row[10]),
+        "entry_compression_signal": _collection_bool_label(row[11]),
+        "entry_signal_strength": _collection_optional_float(row[12]),
+        "lead_warning": str(row[13] or "N/A"),
+        "expected_direction": str(row[14] or "N/A"),
+        "entry_direction": str(row[15] or "N/A"),
+        "entry_velocity_value": _collection_optional_float(row[16]),
+        "entry_velocity_threshold": _collection_optional_float(row[17]),
+        "entry_compression_score": _collection_optional_float(row[18]),
+        "entry_compression_threshold": _collection_optional_float(row[19]),
+    }
+    if detail["profile"] == "extreme_strategy_v1" and net_profit <= 0:
+        detail["false_positive_hint"] = _collection_extreme_false_positive_hint(detail)
+    else:
+        detail["false_positive_hint"] = "N/A"
+    return detail
+
+
+def _latest_collection_profile_close_debug(close_debug_items: list[dict], profile: str) -> dict | None:
+    for item in reversed(close_debug_items):
+        if item.get("strategy_profile") != profile:
+            continue
+        if item.get("close_attempted") or item.get("close_result") == "CLOSED":
+            return item
+    return None
+
+
+def _collection_optional_float(value) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _collection_bool_label(value) -> str:
+    if value is None:
+        return "N/A"
+    return "yes" if bool(value) else "no"
+
+
+def _collection_holding_seconds(opened_at, closed_at) -> float | None:
+    if not opened_at or not closed_at:
+        return None
+    try:
+        opened = datetime.fromisoformat(str(opened_at))
+        closed = datetime.fromisoformat(str(closed_at))
+    except ValueError:
+        return None
+    return max(0.0, (closed - opened).total_seconds())
+
+
+def _collection_breakeven_possible_reason(
+    *,
+    open_price: float | None,
+    close_price: float | None,
+    target_hit: bool,
+    timeout_hit: bool,
+    breakeven: bool,
+) -> str:
+    if not breakeven:
+        return "N/A"
+    if open_price is not None and close_price is not None and abs(open_price - close_price) <= 0.00000001:
+        return "timeout_at_entry_price" if timeout_hit else "price_unchanged"
+    if target_hit:
+        return "rounding_to_tick"
+    if not target_hit:
+        return "target_not_reached"
+    return "unknown"
+
+
+def _collection_extreme_false_positive_hint(detail: dict) -> str:
+    velocity = detail.get("entry_velocity_value")
+    threshold = detail.get("entry_velocity_threshold")
+    compression = detail.get("entry_compression_score")
+    compression_threshold = detail.get("entry_compression_threshold") or 60.0
+    if velocity is None or threshold is None or compression is None:
+        return "unknown"
+    if abs(float(velocity)) <= abs(float(threshold)) * 1.5:
+        return "weak_velocity_spike"
+    if str(detail.get("lead_warning", "")).lower() == "yes":
+        return "late_entry"
+    if float(compression) >= float(compression_threshold) and detail.get("target_hit") == "no":
+        return "compression_without_breakout"
+    direction = detail.get("direction")
+    open_price = detail.get("open_price")
+    close_price = detail.get("close_price")
+    if open_price is not None and close_price is not None:
+        moved_against = close_price < open_price if direction == "BUY_USDC" else close_price > open_price
+        if moved_against:
+            return "wrong_direction"
+    return "insufficient_follow_through"
 
 
 def _collection_entry_diagnostics(entry_debug_items: list[dict], fallback_market_state=None) -> dict[str, str]:

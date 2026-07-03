@@ -229,6 +229,112 @@ def test_renderer_prints_extreme_open_signal_metrics(capsys):
     assert "compression_score=100.00000000/60.00000000" in output
 
 
+def test_renderer_prints_closed_cycle_details(capsys):
+    stats = {
+        "closed_cycles": 1,
+        "open_cycles": 0,
+        "net_profit": 0.0,
+        "win_rate": 0.0,
+    }
+    last_closed_cycle = {
+        "db_id": 42,
+        "profile": "extreme_strategy_v1",
+        "direction": "SELL_USDC",
+        "open_price": 1.000825,
+        "close_price": 1.000825,
+        "target_price": 1.000815,
+        "net_profit": 0.0,
+        "close_reason": "extreme_timeout",
+        "holding_seconds": 60.0,
+        "target_hit": "no",
+        "timeout_hit": "yes",
+        "distance_to_target_at_close": 0.00001,
+        "was_extreme_close": "no",
+        "breakeven_close": "yes",
+        "possible_reason": "timeout_at_entry_price",
+        "extreme_signal_at_entry": "yes",
+        "entry_signal_strength": 80.0,
+        "entry_velocity_value": -0.000002,
+        "entry_velocity_threshold": 0.000001,
+        "entry_compression_score": 100.0,
+        "entry_compression_threshold": 60.0,
+        "expected_direction": "SELL_USDC",
+        "lead_warning": "yes",
+        "false_positive_hint": "late_entry",
+    }
+
+    PaperTradingCliRenderer(force_plain=True).render_collection_progress_compact(
+        stats,
+        3,
+        iteration=4,
+        price_info=(1.000825, "BINANCE", "2026-07-01T10:00:00"),
+        nearest_open_cycle=None,
+        action_taken="closed",
+        last_closed_cycle=last_closed_cycle,
+        entry_diagnostics={},
+    )
+
+    output = capsys.readouterr().out
+
+    assert "Closed Cycle: db_id=42" in output
+    assert "profile=extreme_strategy_v1" in output
+    assert "reason=extreme_timeout" in output
+    assert "net=+0.00000000" in output
+    assert "open=1.00082500" in output
+    assert "close=1.00082500" in output
+    assert "target=1.00081500" in output
+    assert "holding=1m 0s" in output
+    assert "target_hit=no" in output
+    assert "timeout_hit=yes" in output
+    assert "breakeven_close=yes" in output
+    assert "possible_reason=timeout_at_entry_price" in output
+    assert "Extreme Entry: signal=yes" in output
+    assert "velocity=-0.00000200/0.00000100" in output
+    assert "false_positive_hint=late_entry" in output
+
+
+def test_renderer_closed_cycle_hf_v1_does_not_print_extreme_entry(capsys):
+    stats = {
+        "closed_cycles": 1,
+        "open_cycles": 0,
+        "net_profit": 0.0001,
+        "win_rate": 1.0,
+    }
+
+    PaperTradingCliRenderer(force_plain=True).render_collection_progress_compact(
+        stats,
+        3,
+        iteration=4,
+        price_info=(1.000825, "BINANCE", "2026-07-01T10:00:00"),
+        nearest_open_cycle=None,
+        action_taken="closed",
+        last_closed_cycle={
+            "db_id": 43,
+            "profile": "mean_reversion_hf_micro_v1",
+            "direction": "BUY_USDC",
+            "open_price": 1.000825,
+            "close_price": 1.000835,
+            "target_price": 1.000835,
+            "net_profit": 0.0001,
+            "close_reason": "target",
+            "holding_seconds": 10.0,
+            "target_hit": "yes",
+            "timeout_hit": "no",
+            "distance_to_target_at_close": 0.0,
+            "was_extreme_close": "no",
+            "breakeven_close": "no",
+            "possible_reason": "N/A",
+        },
+        entry_diagnostics={},
+    )
+
+    output = capsys.readouterr().out
+
+    assert "Closed Cycle: db_id=43" in output
+    assert "profile=mean_reversion_hf_micro_v1" in output
+    assert "Extreme Entry:" not in output
+
+
 def test_renderer_verbose_progress_keeps_full_panels(capsys):
     stats = {
         "closed_cycles": 1,
@@ -286,6 +392,9 @@ def test_renderer_prints_collection_summary(capsys):
         "timeout_profit": 1,
         "timeout_breakeven": 0,
         "timeout_loss": 1,
+        "zero_net_cycles": 1,
+        "extreme_target_closed": 2,
+        "extreme_timeout_closed": 1,
         "manual_closed": 0,
         "net_profit": 0.01,
         "net_profit_without_extreme": 0.002,
@@ -311,6 +420,10 @@ def test_renderer_prints_collection_summary(capsys):
     assert "NEW COLLECTION SUMMARY" in output
     assert "Collection ID: collection-1" in output
     assert "New timeout profit: 1" in output
+    assert "New breakeven closed: 0" in output
+    assert "New zero-net cycles: 1" in output
+    assert "New extreme_target closed: 2" in output
+    assert "New extreme_timeout closed: 1" in output
     assert "New net profit without extreme: +0.00200000" in output
     assert "New extreme profit: +0.00800000" in output
     assert "New extreme cycles: 1" in output

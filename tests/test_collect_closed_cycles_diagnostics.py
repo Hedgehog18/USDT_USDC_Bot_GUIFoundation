@@ -5,6 +5,7 @@ from manage import (
     _apply_collection_paper_safety_block,
     _collection_action_taken,
     _collection_close_reason,
+    _collection_last_closed_cycle_details,
     _collection_entry_diagnostics,
     _collection_recovery_cycle_from_row,
     _collection_target_settings,
@@ -615,6 +616,131 @@ def test_load_new_collection_stats_adds_extreme_free_metrics(tmp_path):
     assert stats["extreme_cycles"] == 1
     assert stats["non_extreme_cycles"] == 1
     assert stats["extreme_recommendation"] == "EXTREME_DEPENDENT_RUN"
+
+
+def test_load_new_collection_stats_adds_extreme_close_counts(tmp_path):
+    database = DatabaseManager(str(tmp_path / "bot.sqlite"))
+    with database.connect() as conn:
+        for db_id, reason, net_profit in (
+            (1, "extreme_target", 0.001),
+            (2, "extreme_timeout", 0.0),
+        ):
+            conn.execute(
+                """
+                INSERT INTO paper_cycles (
+                    id, timestamp, cycle_id, strategy_profile, direction, status,
+                    open_price, close_price, quantity, open_fee, close_fee,
+                    gross_profit, net_profit, opened_at, closed_at, close_reason
+                ) VALUES (?, ?, ?, 'extreme_strategy_v1', 'SELL_USDC', 'CLOSED',
+                          1.000835, 1.000835, 10, 0, 0, ?, ?, ?, ?, ?)
+                """,
+                (
+                    db_id,
+                    f"2026-07-02T13:{db_id:02d}:00",
+                    db_id,
+                    net_profit,
+                    net_profit,
+                    f"2026-07-02T13:{db_id:02d}:00",
+                    f"2026-07-02T13:{db_id:02d}:10",
+                    reason,
+                ),
+            )
+        conn.commit()
+
+    stats = _load_new_collection_stats(database, "extreme_strategy_v1", 0)
+
+    assert stats["breakeven_cycles"] == 1
+    assert stats["zero_net_cycles"] == 1
+    assert stats["extreme_target_closed"] == 1
+    assert stats["extreme_timeout_closed"] == 1
+
+
+def test_collection_last_closed_cycle_details_includes_extreme_entry_diagnostics(tmp_path):
+    database = DatabaseManager(str(tmp_path / "bot.sqlite"))
+    with database.connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO paper_cycles (
+                id, timestamp, cycle_id, strategy_profile, direction, status,
+                open_price, close_price, quantity, open_fee, close_fee,
+                gross_profit, net_profit, opened_at, closed_at, close_reason
+            ) VALUES (7, '2026-07-02T14:00:00', 1, 'extreme_strategy_v1', 'SELL_USDC', 'CLOSED',
+                      1.000825, 1.000825, 10, 0, 0, 0, 0,
+                      '2026-07-02T14:00:00', '2026-07-02T14:01:00', 'extreme_timeout')
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO hf_paper_cycle_entry_diagnostics (
+                paper_cycle_id, timestamp, strategy_profile, current_price,
+                hf_entry_mode, entry_direction, entry_reason,
+                session_signal, velocity_spike_signal, compression_signal,
+                signal_strength, lead_warning, expected_direction,
+                velocity_value, velocity_threshold, compression_score, compression_threshold
+            ) VALUES (7, '2026-07-02T14:00:00', 'extreme_strategy_v1', 1.000825,
+                      'extreme_immediate_entry', 'SELL_USDC', 'extreme signal confirmed',
+                      1, 1, 1, 80.0, 'yes', 'SELL_USDC',
+                      -0.000002, 0.000001, 100.0, 60.0)
+            """
+        )
+        conn.commit()
+    close_debug_items = [{
+        "db_id": 7,
+        "strategy_profile": "extreme_strategy_v1",
+        "target_price": 1.000815,
+        "target_close_condition_met": False,
+        "max_holding_condition_met": True,
+        "active_tracking": 60.0,
+        "close_attempted": True,
+        "close_result": "CLOSED",
+        "close_reason": "extreme_timeout",
+    }]
+
+    detail = _collection_last_closed_cycle_details(database, "extreme_strategy_v1", close_debug_items)
+
+    assert detail["db_id"] == 7
+    assert detail["close_reason"] == "extreme_timeout"
+    assert detail["breakeven_close"] == "yes"
+    assert detail["possible_reason"] == "timeout_at_entry_price"
+    assert detail["timeout_hit"] == "yes"
+    assert detail["target_hit"] == "no"
+    assert detail["entry_signal_strength"] == 80.0
+    assert detail["entry_velocity_value"] == -0.000002
+    assert detail["entry_compression_score"] == 100.0
+    assert detail["false_positive_hint"] == "late_entry"
+
+
+def test_collection_last_closed_cycle_details_handles_missing_diagnostics(tmp_path):
+    database = DatabaseManager(str(tmp_path / "bot.sqlite"))
+    with database.connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO paper_cycles (
+                id, timestamp, cycle_id, strategy_profile, direction, status,
+                open_price, close_price, quantity, open_fee, close_fee,
+                gross_profit, net_profit, opened_at, closed_at, close_reason
+            ) VALUES (8, '2026-07-02T14:00:00', 1, 'mean_reversion_hf_micro_v1', 'BUY_USDC', 'CLOSED',
+                      1.000825, 1.000830, 10, 0, 0, 0.00005, 0.00005,
+                      '2026-07-02T14:00:00', '2026-07-02T14:01:00', 'target')
+            """
+        )
+        conn.commit()
+
+    detail = _collection_last_closed_cycle_details(database, "mean_reversion_hf_micro_v1", [{
+        "db_id": 8,
+        "strategy_profile": "mean_reversion_hf_micro_v1",
+        "target_price": 1.000830,
+        "target_close_condition_met": True,
+        "max_holding_condition_met": False,
+        "close_attempted": True,
+        "close_result": "CLOSED",
+        "close_reason": "target",
+    }])
+
+    assert detail["db_id"] == 8
+    assert detail["target_hit"] == "yes"
+    assert detail["extreme_signal_at_entry"] == "N/A"
+    assert detail["false_positive_hint"] == "N/A"
 
 
 def test_collection_progress_prints_empty_new_run(capsys):
