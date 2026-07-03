@@ -75,11 +75,23 @@ Phase 1: HF Baseline - completed.
 - Status: `FROZEN BASELINE`
 - Documentation: [docs/HF_V1_BASELINE.md](docs/HF_V1_BASELINE.md)
 
-Phase 2: Extreme Strategy Research - planned.
+Phase 2: Extreme Strategy Research - in progress.
 
 - Extreme Strategy v1 is a separate research direction, not HF v2.
 - No runtime implementation exists yet.
 - Documentation: [docs/EXTREME_STRATEGY_V1_RESEARCH.md](docs/EXTREME_STRATEGY_V1_RESEARCH.md)
+- Roadmap: [docs/EXTREME_STRATEGY_V1_ROADMAP.md](docs/EXTREME_STRATEGY_V1_ROADMAP.md)
+
+Phase 3: Multi-strategy Trading Platform - planned.
+
+- Future architecture should support multiple independent strategies.
+- HF v1 remains Strategy A and the frozen comparison baseline.
+- Extreme Strategy v1 is Strategy B and remains separate from HF v1.
+
+Phase 4: Dedicated Hardware - planned.
+
+- Future deployment research may require stable always-on hardware.
+- No dedicated hardware work is part of the current implementation.
 
 ## Safety Notice
 
