@@ -66,6 +66,7 @@ from analytics.exit_tolerance_sim_engine import ExitToleranceSimulationEngine
 from analytics.extreme_market_discovery_engine import ExtremeMarketDiscoveryEngine
 from analytics.extreme_replay_engine import ExtremeReplayEngine
 from analytics.extreme_replay_ranking_engine import ExtremeReplayRankingEngine
+from analytics.extreme_signal_discovery_engine import ExtremeSignalDiscoveryEngine
 from analytics.fee_model_report_engine import FeeModelReportEngine
 from analytics.filter_pass_diagnostics_engine import FilterPassDiagnosticsEngine
 from analytics.holding_horizon_diagnostics_engine import HoldingHorizonDiagnosticsEngine
@@ -3541,6 +3542,62 @@ def command_extreme_replay_ranking(args) -> None:
     print(f"Report saved: {report.report_path}")
 
 
+def command_extreme_signal_discovery(args) -> None:
+    _config, _logger, database = build_context()
+    report = ExtremeSignalDiscoveryEngine(database).build_report(profile=args.profile, output_path=args.output)
+
+    print("=== Extreme Signal Discovery ===")
+    print(f"Profile: {report.profile}")
+    print(f"Extreme events analyzed: {report.extreme_events_analyzed}")
+    print(f"Control windows analyzed: {report.control_windows_analyzed}")
+    print(f"Best pre-event window: {report.best_pre_event_window or 'N/A'}s")
+    print(
+        "Strongest signal candidate: "
+        f"{report.strongest_signal_candidate.name if report.strongest_signal_candidate else 'N/A'}"
+    )
+    print("")
+    print("Pre-event window comparison:")
+    for comparison in report.window_comparisons:
+        print(
+            f"- {comparison.window_seconds}s: "
+            f"extreme={comparison.extreme_count} "
+            f"control={comparison.control_count} "
+            f"strongest_metric={comparison.strongest_metric or 'N/A'} "
+            f"false_positive_risk={comparison.false_positive_risk * 100:.2f}%"
+        )
+        top_metrics = sorted(
+            comparison.signal_strength.items(),
+            key=lambda item: item[1],
+            reverse=True,
+        )[:3]
+        for metric, strength in top_metrics:
+            print(
+                f"  - {metric}: "
+                f"ext_avg={_format_hf_regime_float(comparison.extreme_average.get(metric))} "
+                f"ctrl_avg={_format_hf_regime_float(comparison.control_average.get(metric))} "
+                f"ratio={_format_hf_regime_float(comparison.ratio_extreme_control.get(metric))} "
+                f"strength={strength:.2f}"
+            )
+    print("")
+    print("Signal candidates ranking:")
+    for candidate in report.signal_candidates:
+        print(
+            f"- {candidate.name}: "
+            f"window={candidate.window_seconds}s "
+            f"covered={candidate.extreme_events_covered} "
+            f"control_matched={candidate.control_windows_matched} "
+            f"precision={candidate.precision_estimate * 100:.2f}% "
+            f"recall={candidate.recall_estimate * 100:.2f}% "
+            f"false_positive={candidate.false_positive_count} "
+            f"score={candidate.signal_score:.2f} "
+            f"recommendation={candidate.recommendation}"
+        )
+    print("")
+    print(f"Conclusion: {report.conclusion}")
+    print(f"Recommendation: {report.recommendation}")
+    print(f"Report saved: {report.report_path}")
+
+
 def _format_discovery_seconds(value: float | None) -> str:
     if value is None:
         return "N/A"
@@ -5823,6 +5880,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     extreme_replay_ranking_parser.add_argument("--output", default="reports/extreme_replay_ranking.txt")
     extreme_replay_ranking_parser.set_defaults(func=command_extreme_replay_ranking)
+
+    extreme_signal_discovery_parser = subparsers.add_parser(
+        "extreme-signal-discovery",
+        help="Discover visible pre-event signals before extreme events",
+    )
+    extreme_signal_discovery_parser.add_argument(
+        "--profile",
+        choices=SUPPORTED_RUNTIME_STRATEGY_PROFILES,
+        default="mean_reversion_hf_micro_v1",
+    )
+    extreme_signal_discovery_parser.add_argument("--output", default="reports/extreme_signal_discovery_report.txt")
+    extreme_signal_discovery_parser.set_defaults(func=command_extreme_signal_discovery)
 
     notifications_parser = subparsers.add_parser("notifications", help="РџРѕРєР°Р·Р°С‚Рё РїРѕРІС–РґРѕРјР»РµРЅРЅСЏ")
     notifications_parser.add_argument("--limit", type=int, default=10)
