@@ -69,14 +69,14 @@ class PaperAnalyticsEngine:
         timeout_profit_values = [value for value in timeout_pnls if value > 0]
         timeout_loss_values = [value for value in timeout_pnls if value < 0]
 
-        target_rows = [row for row in closed_rows if self._close_reason(row) == "target"]
+        target_rows = [row for row in closed_rows if self._is_target_reason(self._close_reason(row))]
         target_pnls = [float(row[10]) for row in target_rows]
 
         buy_rows = [row for row in closed_rows if row[2] == "BUY_USDC"]
         sell_rows = [row for row in closed_rows if row[2] == "SELL_USDC"]
         missed_target_rows = [
             row for row in closed_rows
-            if self._optional_bool(row, 18) and self._close_reason(row) != "target"
+            if self._optional_bool(row, 18) and not self._is_target_reason(self._close_reason(row))
         ]
         missed_target_timeout_rows = [
             row for row in missed_target_rows
@@ -144,6 +144,11 @@ class PaperAnalyticsEngine:
     def _is_timeout_reason(reason: str) -> bool:
         clean_reason = reason.lower()
         return clean_reason.startswith("max_holding_") or "timeout" in clean_reason
+
+    @staticmethod
+    def _is_target_reason(reason: str) -> bool:
+        clean_reason = reason.lower()
+        return clean_reason == "target" or "target" in clean_reason
 
     @staticmethod
     def _average_pnl(rows: list[tuple]) -> float:

@@ -2,11 +2,11 @@
 
 ## Purpose
 
-This document designs Phase 2 of the project.
+This document designs and tracks Phase 2 of the project.
 
 Phase 2 is the research phase for `Extreme Strategy v1`.
 
-No trading logic is implemented here. No runtime profile, paper profile, CLI command, or order logic is created by this roadmap.
+The roadmap started as documentation only. Phase 2.3 has now begun with a paper-only profile, while runtime and real trading remain explicitly out of scope.
 
 ## Strategic Context
 
@@ -24,7 +24,7 @@ Extreme Strategy v1 is a new and separate research direction:
 
 ```text
 Strategy B: Extreme v1
-Status: RESEARCH
+Status: PAPER RESEARCH
 Role: investigate rare extreme market moves as a separate strategy class
 ```
 
@@ -209,35 +209,58 @@ This roadmap does not implement replay. It only describes what replay must event
 
 ### Goal
 
-Create a separate paper-only Extreme Strategy profile after replay is strong enough.
+Create a separate paper-only Extreme Strategy profile after replay and signal lead-time analysis are strong enough.
 
-This is not part of the current implementation.
+Phase 2.3 has started with:
+
+```text
+Profile: extreme_strategy_v1
+Mode: PAPER ONLY
+Real trading: DISABLED
+Orders: PAPER SIMULATION ONLY
+HF v1 impact: NONE
+```
+
+`extreme_strategy_v1` is not HF v2 and is not an optimization of `mean_reversion_hf_micro_v1`.
 
 ### Preconditions
 
 Extreme Paper should not begin until:
 
-- Extreme Market Discovery is complete;
-- Replay is implemented and reviewed;
-- replay passes documented risk thresholds;
-- activation rules are stable;
-- exit rules are stable;
-- data-source behavior is verified;
-- concentration risk is acceptable;
-- paper safety policy is designed for extreme behavior;
-- comparison against HF v1 baseline is positive and honest.
+- Extreme Market Discovery is complete: done;
+- Replay is implemented and reviewed: done;
+- Replay Ranking identifies a strong replay candidate: done;
+- Signal Discovery identifies visible pre-event signals: done;
+- Lead Time Analysis recommends paper research: done;
+- paper safety policy is designed for extreme behavior: started;
+- comparison against HF v1 baseline remains mandatory.
 
 ### Paper Profile Design Principles
 
 If paper research is eventually approved, it should:
 
-- use a new profile name, not `mean_reversion_hf_micro_v1`;
+- use a new profile name, `extreme_strategy_v1`;
 - keep HF v1 frozen;
 - use separate reporting;
 - use separate validation summary mode;
 - distinguish ordinary HF cycles from extreme cycles;
 - never place real orders;
 - support safe stop and recovery behavior.
+
+### Initial Paper Profile Scope
+
+The first paper-only version uses diagnostics-driven signals:
+
+- session-specific signal, currently focused on `NEW_YORK`;
+- velocity spike before an extreme event;
+- flat/compressed market before the signal;
+- immediate-entry replay direction;
+- one open extreme cycle at a time;
+- separate target and max holding settings;
+- separate close reasons: `extreme_target` and `extreme_timeout`;
+- separate paper safety policy.
+
+The profile is deliberately conservative. It does not use grid, averaging, multiple layers, or real orders.
 
 ### Paper Success Criteria
 
@@ -320,21 +343,22 @@ Does Extreme Strategy v1 add a separate, robust edge beyond HF v1?
 
 Planned deliverables, in order:
 
-1. Extreme Market Discovery specification.
-2. Extreme event dataset definition.
-3. Extreme diagnostics command design.
-4. Extreme Replay design.
-5. Replay implementation proposal.
-6. Paper readiness criteria.
-7. Paper profile proposal, only if replay passes.
-8. Runtime readiness criteria, only after paper validation.
+1. Extreme Market Discovery specification: completed.
+2. Extreme event dataset definition: completed.
+3. Extreme diagnostics command design: completed.
+4. Extreme Replay design and implementation: completed.
+5. Replay Ranking: completed.
+6. Signal Discovery: completed.
+7. Signal Lead Time Analysis: completed.
+8. Paper-only `extreme_strategy_v1` profile: started.
+9. Runtime readiness criteria, only after paper validation.
 
 ## Current Decision
 
-Phase 2 begins as documentation and architecture.
+Phase 2.3 is active as paper-only research.
 
-No code should be written yet for Extreme Strategy v1.
+No runtime or real-trading code should be written for Extreme Strategy v1.
 
 HF v1 remains frozen.
 
-Future work must start with diagnostics and replay design, not runtime behavior.
+Future work must compare Extreme results against the frozen HF v1 baseline before any promotion decision.

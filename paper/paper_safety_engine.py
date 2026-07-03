@@ -5,11 +5,16 @@ from paper.models import PaperPortfolio
 
 
 HF_SAFETY_PROFILE = "mean_reversion_hf_micro_v1"
+EXTREME_SAFETY_PROFILE = "extreme_strategy_v1"
 HF_MAX_CONSECUTIVE_LOSSES = 10
 HF_MAX_REALIZED_DRAWDOWN = -0.005
 HF_TIMEOUT_LOSS_RATE_LIMIT = 0.80
 HF_TIMEOUT_WINDOW = 30
 HF_SAFETY_MIN_CYCLES = 30
+EXTREME_MAX_CONSECUTIVE_LOSSES = 5
+EXTREME_MAX_REALIZED_DRAWDOWN = -0.003
+EXTREME_SAFETY_MIN_CYCLES = 10
+EXTREME_LARGE_LOSS_LIMIT = -0.001
 
 
 @dataclass(frozen=True)
@@ -55,6 +60,13 @@ class PaperSafetyEngine:
         strategy_profile: str,
         baseline_max_id: int = 0,
     ) -> PaperSafetyResult:
+        if strategy_profile == EXTREME_SAFETY_PROFILE:
+            return self._check_extreme_strategy(
+                portfolio,
+                recent_cycles,
+                baseline_max_id=baseline_max_id,
+            )
+
         if strategy_profile != HF_SAFETY_PROFILE:
             result = self.check(portfolio, recent_cycles)
             return PaperSafetyResult(
@@ -69,6 +81,56 @@ class PaperSafetyEngine:
             recent_cycles,
             baseline_max_id=baseline_max_id,
         )
+
+    def _check_extreme_strategy(
+        self,
+        portfolio: PaperPortfolio,
+        recent_cycles: list[tuple],
+        *,
+        baseline_max_id: int,
+    ) -> PaperSafetyResult:
+        diagnostics = self._extreme_diagnostics(recent_cycles, baseline_max_id)
+
+        if portfolio.total_value < self.config.paper_min_portfolio_value:
+            return PaperSafetyResult(False, "CRITICAL", "Paper portfolio value below minimum threshold.", diagnostics)
+
+        closed_count = int(diagnostics["safety_window_cycles"])
+        if closed_count < EXTREME_SAFETY_MIN_CYCLES:
+            return PaperSafetyResult(
+                True,
+                "INFO",
+                "Extreme paper safety checks passed: minimum sample window not reached.",
+                diagnostics,
+            )
+
+        consecutive_losses = int(diagnostics["safety_consecutive_losses"].split("/")[0].strip())
+        if consecutive_losses >= EXTREME_MAX_CONSECUTIVE_LOSSES:
+            return PaperSafetyResult(
+                False,
+                "WARNING",
+                f"Extreme max consecutive losses reached: {consecutive_losses}/{EXTREME_MAX_CONSECUTIVE_LOSSES}.",
+                diagnostics,
+            )
+
+        realized_drawdown = float(diagnostics["safety_realized_drawdown"].split("/")[0].strip())
+        if realized_drawdown <= EXTREME_MAX_REALIZED_DRAWDOWN:
+            return PaperSafetyResult(
+                False,
+                "WARNING",
+                f"Extreme realized drawdown limit reached: {realized_drawdown:.8f} <= {EXTREME_MAX_REALIZED_DRAWDOWN:.8f}.",
+                diagnostics,
+            )
+
+        worst_loss = float(diagnostics["safety_worst_loss"])
+        if worst_loss <= EXTREME_LARGE_LOSS_LIMIT:
+            return PaperSafetyResult(
+                False,
+                "WARNING",
+                f"Extreme large-loss limit reached: {worst_loss:.8f} <= {EXTREME_LARGE_LOSS_LIMIT:.8f}.",
+                diagnostics,
+            )
+
+        return PaperSafetyResult(True, "INFO", "Extreme paper safety checks passed.", diagnostics)
 
     def _check_hf_micro(
         self,
@@ -177,6 +239,30 @@ class PaperSafetyEngine:
             "safety_timeout_loss_rate": f"{timeout_loss_rate * 100:.2f}%",
             "safety_timeout_window_net": f"{timeout_window_net:.8f}",
             "safety_min_cycles_met": "yes" if len(closed_cycles) >= HF_SAFETY_MIN_CYCLES else "no",
+        }
+
+    def _extreme_diagnostics(self, recent_cycles: list[tuple], baseline_max_id: int) -> dict[str, str]:
+        closed_cycles = [row for row in recent_cycles if self._status(row) in {"CLOSED", "CLOSED_MANUAL"}]
+        consecutive_losses = 0
+        for row in closed_cycles:
+            if self._net_profit(row) < 0:
+                consecutive_losses += 1
+            else:
+                break
+
+        net_profit = sum(self._net_profit(row) for row in closed_cycles)
+        worst_loss = min((self._net_profit(row) for row in closed_cycles), default=0.0)
+
+        return {
+            "paper_safety_policy": "extreme_v1",
+            "safety_window_scope": "new_run" if baseline_max_id > 0 else "full_profile_history",
+            "safety_window_cycles": str(len(closed_cycles)),
+            "safety_consecutive_losses": f"{consecutive_losses} / {EXTREME_MAX_CONSECUTIVE_LOSSES}",
+            "safety_realized_drawdown": f"{net_profit:.8f} / {EXTREME_MAX_REALIZED_DRAWDOWN:.8f}",
+            "safety_timeout_loss_rate": "N/A",
+            "safety_timeout_window_net": "N/A",
+            "safety_worst_loss": f"{worst_loss:.8f}",
+            "safety_min_cycles_met": "yes" if len(closed_cycles) >= EXTREME_SAFETY_MIN_CYCLES else "no",
         }
 
     @staticmethod

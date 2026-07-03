@@ -106,6 +106,18 @@ class FakeSequenceProfileBot:
         self.risk_manager = RiskManager(config)
 
 
+class FakeExtremeSequenceProfileBot:
+    def __init__(self, config, prices: list[float], *, hour: int = 18):
+        from paper.extreme_signal_provider import ExtremeSignalMarketAnalyzer
+        from strategy.profile_decision_engine import StrategyProfileDecisionEngine
+        from strategy.risk_manager import RiskManager
+        from tests.test_extreme_signal_provider import ExtremeSequenceAnalyzer
+
+        self.market_analyzer = ExtremeSignalMarketAnalyzer(ExtremeSequenceAnalyzer(prices, hour=hour))
+        self.decision_engine = StrategyProfileDecisionEngine(config, "extreme_strategy_v1")
+        self.risk_manager = RiskManager(config)
+
+
 class FakeCache:
     def __init__(self):
         self.clear_count = 0
@@ -436,6 +448,89 @@ def test_paper_trading_engine_hf_profile_fallback_buys_when_equal_center_after_h
     assert entry_debug_items[-1]["market_state"].hf_last_different_price == 1.0002
 
 
+def test_paper_trading_engine_extreme_profile_opens_only_when_all_signals_true(test_config, tmp_path: Path):
+    database = DatabaseManager(str(tmp_path / "bot.sqlite"))
+    bot = FakeExtremeSequenceProfileBot(test_config, prices=([1.0000] * 5) + [0.999998])
+    entry_debug_items = []
+
+    result = PaperTradingEngine(
+        test_config,
+        database,
+        bot=bot,
+        entry_zone_debug_callback=entry_debug_items.append,
+        strategy_profile="extreme_strategy_v1",
+    ).run(6)
+
+    rows = database.load_open_paper_cycles(limit=10)
+    assert result.opened_cycles == 1
+    assert len(rows) == 1
+    assert rows[0][3] == "extreme_strategy_v1"
+    assert rows[0][4] == "SELL_USDC"
+    assert entry_debug_items[-1]["market_state"].extreme_signal_detected is True
+
+
+def test_paper_trading_engine_extreme_profile_waits_without_session_signal(test_config, tmp_path: Path):
+    database = DatabaseManager(str(tmp_path / "bot.sqlite"))
+    bot = FakeExtremeSequenceProfileBot(test_config, prices=([1.0000] * 5) + [0.999998], hour=3)
+
+    result = PaperTradingEngine(
+        test_config,
+        database,
+        bot=bot,
+        strategy_profile="extreme_strategy_v1",
+    ).run(6)
+
+    assert result.opened_cycles == 0
+    assert database.load_open_paper_cycles(limit=10) == []
+
+
+def test_paper_trading_engine_extreme_profile_waits_without_velocity_spike(test_config, tmp_path: Path):
+    database = DatabaseManager(str(tmp_path / "bot.sqlite"))
+    bot = FakeExtremeSequenceProfileBot(test_config, prices=[1.0000] * 6)
+
+    result = PaperTradingEngine(
+        test_config,
+        database,
+        bot=bot,
+        strategy_profile="extreme_strategy_v1",
+    ).run(6)
+
+    assert result.opened_cycles == 0
+
+
+def test_paper_trading_engine_extreme_profile_waits_without_compression(test_config, tmp_path: Path):
+    database = DatabaseManager(str(tmp_path / "bot.sqlite"))
+    bot = FakeExtremeSequenceProfileBot(
+        test_config,
+        prices=[1.0000, 1.0001, 1.0002, 1.0003, 1.0004, 1.000398],
+    )
+
+    result = PaperTradingEngine(
+        test_config,
+        database,
+        bot=bot,
+        strategy_profile="extreme_strategy_v1",
+    ).run(6)
+
+    assert result.opened_cycles == 0
+
+
+def test_paper_trading_engine_extreme_profile_does_not_open_second_cycle(test_config, tmp_path: Path):
+    database = DatabaseManager(str(tmp_path / "bot.sqlite"))
+    bot = FakeExtremeSequenceProfileBot(test_config, prices=([1.0000] * 5) + [0.999998] + [0.999996])
+
+    result = PaperTradingEngine(
+        test_config,
+        database,
+        bot=bot,
+        strategy_profile="extreme_strategy_v1",
+    ).run(7)
+
+    rows = database.load_open_paper_cycles(limit=10)
+    assert result.opened_cycles == 1
+    assert len(rows) == 1
+
+
 def test_paper_trading_engine_hf_profile_closes_buy_on_target(test_config, tmp_path: Path):
     from datetime import datetime
     from paper.models import PaperCycle, PaperCycleStatus, PaperOrderSide
@@ -518,6 +613,97 @@ def test_paper_trading_engine_hf_profile_closes_sell_on_target(test_config, tmp_
 
     assert result.closed_cycles == 1
     assert row == ("CLOSED", "target")
+
+
+def test_paper_trading_engine_extreme_profile_closes_sell_on_target(test_config, tmp_path: Path):
+    from datetime import datetime
+    from paper.models import PaperCycle, PaperCycleStatus, PaperOrderSide
+
+    database = DatabaseManager(str(tmp_path / "bot.sqlite"))
+    open_cycle = PaperCycle(
+        id=1,
+        direction=PaperOrderSide.SELL_USDC,
+        status=PaperCycleStatus.OPEN,
+        open_price=1.000005,
+        close_price=1.000000,
+        quantity=10.0,
+        open_fee=0.0,
+        close_fee=0.0,
+        gross_profit=0.0,
+        net_profit=0.0,
+        opened_at=datetime.utcnow(),
+    )
+    session_id = "test-session"
+    row_id = database.save_paper_cycle(
+        open_cycle,
+        strategy_profile="extreme_strategy_v1",
+        opened_session_id=session_id,
+    )
+    close_debug_items = []
+
+    result = PaperTradingEngine(
+        test_config,
+        database,
+        bot=FakeBot(price=0.99999),
+        close_debug_callback=close_debug_items.append,
+        strategy_profile="extreme_strategy_v1",
+        session_id=session_id,
+    ).run(1)
+
+    with database.connect() as conn:
+        row = conn.execute("SELECT status, close_reason FROM paper_cycles WHERE id = ?", (row_id,)).fetchone()
+
+    assert result.closed_cycles == 1
+    assert row == ("CLOSED", "extreme_target")
+    assert close_debug_items[0]["close_reason"] == "extreme_target"
+
+
+def test_paper_trading_engine_extreme_profile_closes_after_timeout(test_config, tmp_path: Path):
+    from datetime import datetime
+    from paper.models import PaperCycle, PaperCycleStatus, PaperOrderSide
+
+    database = DatabaseManager(str(tmp_path / "bot.sqlite"))
+    open_cycle = PaperCycle(
+        id=1,
+        direction=PaperOrderSide.SELL_USDC,
+        status=PaperCycleStatus.OPEN,
+        open_price=1.000005,
+        close_price=0.999500,
+        quantity=10.0,
+        open_fee=0.0,
+        close_fee=0.0,
+        gross_profit=0.0,
+        net_profit=0.0,
+        opened_at=datetime.utcnow(),
+    )
+    session_id = "test-session"
+    row_id = database.save_paper_cycle(
+        open_cycle,
+        strategy_profile="extreme_strategy_v1",
+        opened_session_id=session_id,
+    )
+    close_debug_items = []
+    tracking_started = {row_id: 0.0}
+    clock = FakeClock(61.0)
+
+    result = PaperTradingEngine(
+        test_config,
+        database,
+        bot=FakeBot(price=1.000000),
+        close_debug_callback=close_debug_items.append,
+        strategy_profile="extreme_strategy_v1",
+        session_id=session_id,
+        cycle_tracking_started_at_by_db_id=tracking_started,
+        monotonic_clock=clock,
+    ).run(1)
+
+    with database.connect() as conn:
+        row = conn.execute("SELECT status, close_reason FROM paper_cycles WHERE id = ?", (row_id,)).fetchone()
+
+    assert result.closed_cycles == 1
+    assert row == ("CLOSED", "extreme_timeout")
+    assert close_debug_items[0]["max_holding_limit"] == 60.0
+    assert close_debug_items[0]["max_holding_condition_met"] is True
 
 
 def test_paper_trading_engine_hf_profile_closes_after_270s_timeout(test_config, tmp_path: Path):

@@ -31,6 +31,7 @@ from paper.paper_insights_exporter import PaperInsightsExporter
 from paper.paper_report_exporter import PaperReportExporter
 from paper.paper_trading_cli_renderer import PaperTradingCliRenderer
 from paper.paper_trading_engine import PaperTradingEngine
+from paper.extreme_signal_provider import EXTREME_MAX_HOLDING_SECONDS, ExtremeSignalMarketAnalyzer
 from paper.hf_short_center_provider import HFShortCenterMarketAnalyzer
 from paper.long_paper_run_workflow import LongPaperRunWorkflow
 
@@ -196,6 +197,8 @@ def _apply_profile_to_bot(bot: BotEngine, profile: str) -> BotEngine:
         bot.decision_engine = StrategyProfileDecisionEngine(bot.config, profile)
     if profile == "mean_reversion_hf_micro_v1" and not isinstance(bot.market_analyzer, HFShortCenterMarketAnalyzer):
         bot.market_analyzer = HFShortCenterMarketAnalyzer(bot.market_analyzer)
+    if profile == "extreme_strategy_v1" and not isinstance(bot.market_analyzer, ExtremeSignalMarketAnalyzer):
+        bot.market_analyzer = ExtremeSignalMarketAnalyzer(bot.market_analyzer)
     return bot
 
 
@@ -4817,7 +4820,7 @@ def _collection_entry_diagnostics(entry_debug_items: list[dict], fallback_market
             diagnostics["hf_entry_mode"] = "equal_center_last_different_fallback"
         elif diagnostics["entry_block_reason"] == "flat_price_buffer":
             diagnostics["hf_entry_mode"] = "flat_no_trade"
-        elif candidate_detected:
+        elif candidate_detected and not hasattr(market_state, "extreme_signal_detected"):
             diagnostics["hf_entry_mode"] = "short_center_direct"
         price = getattr(market_state, "price", None)
         diagnostics["entry_direction"] = action if candidate_detected else "N/A"
@@ -4855,6 +4858,30 @@ def _apply_collection_short_center_diagnostics(diagnostics: dict[str, str], mark
     )
     if ready is False:
         diagnostics["entry_block_reason"] = "no_short_center"
+    _apply_collection_extreme_signal_diagnostics(diagnostics, market_state)
+
+
+def _apply_collection_extreme_signal_diagnostics(diagnostics: dict[str, str], market_state) -> None:
+    if not hasattr(market_state, "extreme_signal_detected"):
+        return
+    signal_detected = bool(getattr(market_state, "extreme_signal_detected", False))
+    session_signal = bool(getattr(market_state, "extreme_session_signal", False))
+    velocity_signal = bool(getattr(market_state, "extreme_velocity_spike_signal", False))
+    compression_signal = bool(getattr(market_state, "extreme_compression_signal", False))
+    diagnostics["hf_entry_mode"] = "extreme_immediate_entry" if signal_detected else "extreme_watch"
+    diagnostics["extreme_signal_detected"] = "yes" if signal_detected else "no"
+    diagnostics["session_signal"] = "yes" if session_signal else "no"
+    diagnostics["velocity_spike_signal"] = "yes" if velocity_signal else "no"
+    diagnostics["compression_signal"] = "yes" if compression_signal else "no"
+    diagnostics["lead_time_warning"] = str(getattr(market_state, "extreme_lead_time_warning", "N/A"))
+    diagnostics["signal_strength"] = _format_collection_float(getattr(market_state, "extreme_signal_strength", None))
+    diagnostics["expected_direction"] = str(getattr(market_state, "extreme_expected_direction", "N/A"))
+    diagnostics["price_velocity_direction"] = str(getattr(market_state, "extreme_price_velocity_direction", "N/A"))
+    diagnostics["price_velocity"] = _format_collection_float(getattr(market_state, "extreme_price_velocity", None))
+    diagnostics["short_center_samples"] = str(getattr(market_state, "extreme_samples", "N/A"))
+    diagnostics["price_buffer_unique_values"] = str(getattr(market_state, "extreme_price_buffer_unique_values", "N/A"))
+    diagnostics["flat_samples_count"] = str(getattr(market_state, "extreme_flat_samples_count", "N/A"))
+    diagnostics["max_holding"] = _format_collection_float(getattr(market_state, "extreme_max_holding_seconds", None))
 
 
 def _apply_collection_paper_safety_block(
@@ -4883,6 +4910,7 @@ def _apply_collection_policy_diagnostics(
         "safety_consecutive_losses",
         "safety_realized_drawdown",
         "safety_timeout_loss_rate",
+        "safety_worst_loss",
         "safety_min_cycles_met",
     ):
         diagnostics[key] = str(policy_diagnostics.get(key, "N/A"))
@@ -4978,6 +5006,14 @@ def _collection_entry_block_reason(item: dict) -> str:
         return "equal_center_last_different_fallback"
     if "price_equals_short_center" in reason:
         return "price_equals_short_center"
+    if "session_signal_missing" in reason:
+        return "outside_session"
+    if "velocity_spike_missing" in reason:
+        return "velocity_spike_missing"
+    if "compression_missing" in reason:
+        return "compression_missing"
+    if "no_extreme_signal" in reason or "no_signal_direction" in reason:
+        return "no_signal"
     if "invalid_price" in reason:
         return "invalid_price"
     if "outside new_york session" in reason:
@@ -5065,6 +5101,8 @@ def _format_collection_float(value: float | None) -> str:
 def _collection_max_holding_limit(profile: str) -> float | None:
     if profile == "mean_reversion_hf_micro_v1":
         return 270.0
+    if profile == "extreme_strategy_v1":
+        return EXTREME_MAX_HOLDING_SECONDS
     return None
 
 

@@ -244,6 +244,17 @@ class PaperTradingCliRenderer:
             f"Candidate: {self._compact_text(entry_diagnostics.get('candidate_detected'))} | "
             f"Block: {self._compact_text(entry_diagnostics.get('entry_block_reason'))}"
         )
+        if self._is_useful(entry_diagnostics.get("extreme_signal_detected")):
+            print(
+                "Extreme: "
+                f"signal={self._compact_text(entry_diagnostics.get('extreme_signal_detected'))} | "
+                f"session={self._compact_text(entry_diagnostics.get('session_signal'))} | "
+                f"velocity={self._compact_text(entry_diagnostics.get('velocity_spike_signal'))} | "
+                f"compression={self._compact_text(entry_diagnostics.get('compression_signal'))} | "
+                f"strength={self._compact_text(entry_diagnostics.get('signal_strength'))} | "
+                f"expected={self._compact_text(entry_diagnostics.get('expected_direction'))} | "
+                f"lead_warning={self._compact_text(entry_diagnostics.get('lead_time_warning'))}"
+            )
 
     def render_collection_summary(
         self,
@@ -423,6 +434,14 @@ class PaperTradingCliRenderer:
             ("Entry Block Reason", entry_diagnostics.get("entry_block_reason")),
             ("Target Price", entry_diagnostics.get("target_price")),
             ("Target Distance", entry_diagnostics.get("target_distance")),
+            ("Extreme Signal", entry_diagnostics.get("extreme_signal_detected")),
+            ("Session Signal", entry_diagnostics.get("session_signal")),
+            ("Velocity Spike", entry_diagnostics.get("velocity_spike_signal")),
+            ("Compression Signal", entry_diagnostics.get("compression_signal")),
+            ("Signal Strength", entry_diagnostics.get("signal_strength")),
+            ("Expected Direction", entry_diagnostics.get("expected_direction")),
+            ("Lead Time Warning", entry_diagnostics.get("lead_time_warning")),
+            ("Max Holding", entry_diagnostics.get("max_holding")),
         ])
 
     def _safety_section(self, entry_diagnostics: dict[str, str]):

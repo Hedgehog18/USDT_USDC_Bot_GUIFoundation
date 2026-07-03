@@ -151,6 +151,29 @@ def test_strategy_profile_sim_hf_micro_uses_price_vs_short_center(test_config, t
     assert report.sell_candidates == 1
 
 
+def test_strategy_profile_sim_accepts_extreme_strategy_profile(test_config, tmp_path):
+    database = DatabaseManager(str(tmp_path / "bot.sqlite"))
+    with database.connect() as conn:
+        _insert_snapshot(
+            conn,
+            0,
+            50.0,
+            "LOW",
+            "BALANCED",
+            "NEUTRAL",
+            price=0.9999,
+            short_center=1.0,
+            timestamp="2026-01-01T18:00:00",
+        )
+        conn.commit()
+
+    report = StrategyProfileSimulationEngine(database, test_config).build_report("extreme_strategy_v1")
+
+    assert report.profile == "extreme_strategy_v1"
+    assert report.total_snapshots == 1
+    assert report.sell_candidates == 1
+
+
 def test_strategy_profile_sim_rejects_unknown_profile(test_config, tmp_path):
     database = DatabaseManager(str(tmp_path / "bot.sqlite"))
 

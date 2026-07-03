@@ -241,8 +241,8 @@ class ValidationSummaryEngine:
 
     @staticmethod
     def _profile_ignores_order_book(profile: str) -> bool:
-        return profile.startswith("mean_reversion_")
+        return profile.startswith("mean_reversion_") or profile == "extreme_strategy_v1"
 
     @staticmethod
     def _profile_ignores_center_confidence(profile: str) -> bool:
-        return profile.startswith("mean_reversion_")
+        return profile.startswith("mean_reversion_") or profile == "extreme_strategy_v1"

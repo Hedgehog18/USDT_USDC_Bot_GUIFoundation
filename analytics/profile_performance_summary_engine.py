@@ -98,7 +98,7 @@ class ProfilePerformanceSummaryEngine:
         timeout_values = [float(cycle["net_profit"]) for cycle in timeout_cycles]
         timeout_positive = [value for value in timeout_values if value > 0.0]
         timeout_negative = [value for value in timeout_values if value < 0.0]
-        target_cycles = [cycle for cycle in realized if cycle.get("close_reason") == "target"]
+        target_cycles = [cycle for cycle in realized if self._is_target_reason(cycle.get("close_reason"))]
         target_total_profit = self._sum_net(target_cycles)
         best_cycle = self._cycle_summary(max(realized, key=lambda item: item["net_profit"])) if realized else None
         worst_cycle = self._cycle_summary(min(realized, key=lambda item: item["net_profit"])) if realized else None
@@ -288,6 +288,13 @@ class ProfilePerformanceSummaryEngine:
             return False
         clean_reason = clean_display_text(reason).lower()
         return clean_reason.startswith("max_holding_") or "timeout" in clean_reason
+
+    @staticmethod
+    def _is_target_reason(reason: str | None) -> bool:
+        if not reason:
+            return False
+        clean_reason = clean_display_text(reason).lower()
+        return clean_reason == "target" or "target" in clean_reason
 
     @classmethod
     def _average_holding_time(cls, cycles: list[dict]) -> float | None:

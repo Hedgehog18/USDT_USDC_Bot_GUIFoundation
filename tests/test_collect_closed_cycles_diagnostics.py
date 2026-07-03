@@ -74,6 +74,46 @@ def test_collection_entry_diagnostics_reports_attempted_order():
     assert diagnostics["open_cycle_check_passed"] == "yes"
 
 
+def test_collection_entry_diagnostics_reports_extreme_signal_fields():
+    market_state = SimpleNamespace(
+        price=0.999998,
+        short_center=0.0,
+        extreme_signal_detected=True,
+        extreme_session_signal=True,
+        extreme_velocity_spike_signal=True,
+        extreme_compression_signal=True,
+        extreme_lead_time_warning="yes",
+        extreme_signal_strength=100.0,
+        extreme_expected_direction="SELL_USDC",
+        extreme_price_velocity_direction="DOWN",
+        extreme_price_velocity=-0.000002,
+        extreme_samples=6,
+        extreme_price_buffer_unique_values=2,
+        extreme_flat_samples_count=5,
+        extreme_max_holding_seconds=60.0,
+    )
+
+    diagnostics = _collection_entry_diagnostics([
+        {
+            "action": "SELL_USDC",
+            "reason": "extreme_strategy_v1: extreme signal confirmed",
+            "risk_allowed": True,
+            "order_attempted": True,
+            "target_profit": 0.000005,
+            "market_state": market_state,
+        }
+    ])
+
+    assert diagnostics["extreme_signal_detected"] == "yes"
+    assert diagnostics["session_signal"] == "yes"
+    assert diagnostics["velocity_spike_signal"] == "yes"
+    assert diagnostics["compression_signal"] == "yes"
+    assert diagnostics["hf_entry_mode"] == "extreme_immediate_entry"
+    assert diagnostics["expected_direction"] == "SELL_USDC"
+    assert diagnostics["target_price"] != "N/A"
+    assert diagnostics["max_holding"] == "60.00000000"
+
+
 def test_collection_progress_throttle_respects_interval():
     assert _should_print_collection_progress(None, 100.0, 60.0) is True
     assert _should_print_collection_progress(100.0, 159.9, 60.0) is False

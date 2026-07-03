@@ -294,6 +294,22 @@ def test_manage_cli_accepts_hf_micro_profile_for_paper_workflow_commands():
         assert args.profile == "mean_reversion_hf_micro_v1"
 
 
+def test_manage_cli_accepts_extreme_strategy_profile_for_paper_workflows():
+    parser = build_parser()
+    commands = [
+        ["strategy-profile-sim", "--profile", "extreme_strategy_v1"],
+        ["paper-cycle-sim", "--iterations", "3", "--profile", "extreme_strategy_v1"],
+        ["collect-closed-cycles", "--profile", "extreme_strategy_v1", "--target-new", "5"],
+        ["validation-summary", "--profile", "extreme_strategy_v1"],
+        ["profile-performance-summary", "--profile", "extreme_strategy_v1"],
+        ["exit-risk-diagnostics", "--profile", "extreme_strategy_v1"],
+    ]
+
+    for command in commands:
+        args = parser.parse_args(command)
+        assert args.profile == "extreme_strategy_v1"
+
+
 def test_manage_cli_hf_losing_cycle_diagnostics_accepts_since_id_and_limit():
     parser = build_parser()
     args = parser.parse_args([

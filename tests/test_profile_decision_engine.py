@@ -192,6 +192,61 @@ def test_profile_decision_engine_hf_micro_waits_without_short_center(test_config
     assert "no_short_center" in decision.reason
 
 
+def test_profile_decision_engine_extreme_strategy_opens_on_confirmed_signal(test_config):
+    market_state = _state(price=0.999998, work_position=50.0, micro_trend="NEUTRAL")
+    setattr(market_state, "extreme_session_signal", True)
+    setattr(market_state, "extreme_velocity_spike_signal", True)
+    setattr(market_state, "extreme_compression_signal", True)
+    setattr(market_state, "extreme_signal_detected", True)
+    setattr(market_state, "extreme_entry_direction", "SELL_USDC")
+    setattr(market_state, "extreme_signal_strength", 95.0)
+
+    decision = StrategyProfileDecisionEngine(test_config, "extreme_strategy_v1").make_decision(market_state)
+
+    assert decision.action == "SELL_USDC"
+    assert decision.target_profit == 0.00001
+    assert "extreme signal confirmed" in decision.reason
+
+
+def test_profile_decision_engine_extreme_strategy_requires_session_signal(test_config):
+    market_state = _state(price=0.999998, work_position=50.0, micro_trend="NEUTRAL")
+    setattr(market_state, "extreme_session_signal", False)
+    setattr(market_state, "extreme_velocity_spike_signal", True)
+    setattr(market_state, "extreme_compression_signal", True)
+    setattr(market_state, "extreme_signal_detected", True)
+
+    decision = StrategyProfileDecisionEngine(test_config, "extreme_strategy_v1").make_decision(market_state)
+
+    assert decision.action == "WAIT"
+    assert "session_signal_missing" in decision.reason
+
+
+def test_profile_decision_engine_extreme_strategy_requires_velocity_spike(test_config):
+    market_state = _state(price=0.999998, work_position=50.0, micro_trend="NEUTRAL")
+    setattr(market_state, "extreme_session_signal", True)
+    setattr(market_state, "extreme_velocity_spike_signal", False)
+    setattr(market_state, "extreme_compression_signal", True)
+    setattr(market_state, "extreme_signal_detected", True)
+
+    decision = StrategyProfileDecisionEngine(test_config, "extreme_strategy_v1").make_decision(market_state)
+
+    assert decision.action == "WAIT"
+    assert "velocity_spike_missing" in decision.reason
+
+
+def test_profile_decision_engine_extreme_strategy_requires_compression(test_config):
+    market_state = _state(price=0.999998, work_position=50.0, micro_trend="NEUTRAL")
+    setattr(market_state, "extreme_session_signal", True)
+    setattr(market_state, "extreme_velocity_spike_signal", True)
+    setattr(market_state, "extreme_compression_signal", False)
+    setattr(market_state, "extreme_signal_detected", True)
+
+    decision = StrategyProfileDecisionEngine(test_config, "extreme_strategy_v1").make_decision(market_state)
+
+    assert decision.action == "WAIT"
+    assert "compression_missing" in decision.reason
+
+
 def test_profile_decision_engine_rejects_removed_experimental_profiles(test_config):
     for profile in [
         "mean_reversion_v2_small_target_ny",

@@ -14,6 +14,7 @@ SUPPORTED_STRATEGY_PROFILES = (
     "mean_reversion_v2",
     "mean_reversion_v2_small_target",
     "mean_reversion_hf_micro_v1",
+    "extreme_strategy_v1",
 )
 
 
@@ -110,6 +111,7 @@ class StrategyProfileSimulationEngine:
             "mean_reversion_v2",
             "mean_reversion_v2_small_target",
             "mean_reversion_hf_micro_v1",
+            "extreme_strategy_v1",
         }:
             filters = {
                 "spread_stability": row["filters"]["spread_stability"],
@@ -117,8 +119,10 @@ class StrategyProfileSimulationEngine:
                 "market_regime": row["filters"]["market_regime"],
                 "volatility_regime": row["filters"]["volatility_regime"],
             }
-            if profile != "mean_reversion_hf_micro_v1":
+            if profile not in {"mean_reversion_hf_micro_v1", "extreme_strategy_v1"}:
                 filters["micro_trend"] = row["filters"]["micro_trend"]
+            if profile == "extreme_strategy_v1":
+                filters["new_york_session"] = row["filters"]["new_york_session"]
             return filters
         return dict(row["filters"])
 
@@ -206,9 +210,11 @@ class StrategyProfileSimulationEngine:
         }
 
     def _zone(self, row: dict, profile: str) -> str:
-        if profile == "mean_reversion_hf_micro_v1":
+        if profile in {"mean_reversion_hf_micro_v1", "extreme_strategy_v1"}:
             if row["short_center"] <= 0 or row["price"] == row["short_center"]:
                 return "CENTER"
+            if profile == "extreme_strategy_v1":
+                return "SELL" if row["price"] < row["short_center"] else "CENTER"
             return "BUY" if row["price"] < row["short_center"] else "SELL"
 
         work_position = row["work_position"]

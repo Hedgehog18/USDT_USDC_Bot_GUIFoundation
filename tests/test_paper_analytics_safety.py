@@ -37,6 +37,17 @@ def test_paper_analytics_from_rows():
     assert stats.sell_win_rate == 0.0
 
 
+def test_paper_analytics_counts_profile_target_reasons():
+    rows = [
+        ("t", 1, "SELL_USDC", "CLOSED", 1.0, 0.9999, 10.0, 0.0, 0.0, 0.001, 0.001, "extreme_target"),
+    ]
+
+    stats = PaperAnalyticsEngine().build_from_rows(rows)
+
+    assert stats.target_closed == 1
+    assert stats.target_total_profit == pytest.approx(0.001)
+
+
 def test_paper_safety_blocks_drawdown(test_config):
     engine = PaperSafetyEngine(test_config)
     portfolio = PaperPortfolio(usdt=70.0, usdc=0.0)
@@ -133,6 +144,37 @@ def test_hf_paper_safety_blocks_on_timeout_loss_rate(test_config):
     assert result.allowed is False
     assert "timeout loss rate" in result.reason
     assert result.diagnostics["safety_timeout_loss_rate"] == "80.00%"
+
+
+def test_extreme_paper_safety_uses_own_policy_and_min_sample(test_config):
+    engine = PaperSafetyEngine(test_config)
+    portfolio = PaperPortfolio(usdt=100.0, usdc=0.0)
+    rows = [_cycle_row(-0.01), _cycle_row(-0.02), _cycle_row(-0.03)]
+
+    result = engine.check_for_profile(
+        portfolio,
+        rows,
+        strategy_profile="extreme_strategy_v1",
+    )
+
+    assert result.allowed is True
+    assert result.diagnostics["paper_safety_policy"] == "extreme_v1"
+    assert result.diagnostics["safety_min_cycles_met"] == "no"
+
+
+def test_extreme_paper_safety_blocks_after_five_consecutive_losses(test_config):
+    engine = PaperSafetyEngine(test_config)
+    portfolio = PaperPortfolio(usdt=100.0, usdc=0.0)
+    rows = [_cycle_row(-0.0001) for _ in range(5)] + [_cycle_row(0.0001) for _ in range(5)]
+
+    result = engine.check_for_profile(
+        portfolio,
+        rows,
+        strategy_profile="extreme_strategy_v1",
+    )
+
+    assert result.allowed is False
+    assert "consecutive losses" in result.reason
 
 
 def _cycle_row(net_profit: float, close_reason: str = "target") -> tuple:

@@ -11,6 +11,7 @@ from paper.models import PaperCycle
 from paper.models import PaperCycleStatus
 from paper.models import PaperOrderSide
 from paper.models import PaperPortfolio
+from paper.extreme_signal_provider import EXTREME_MAX_HOLDING_SECONDS
 from paper.paper_cycle_manager import PaperCycleManager
 from paper.paper_exchange import PaperExchange
 from paper.paper_portfolio_manager import PaperPortfolioManager
@@ -185,6 +186,7 @@ class PaperTradingEngine:
                     close_epsilon=self._close_epsilon_for_profile(self.strategy_profile),
                 )
                 if closed_cycle:
+                    setattr(closed_cycle, "close_reason", self._target_close_reason(self.strategy_profile))
                     self.database.save_paper_cycle(closed_cycle, strategy_profile=self.strategy_profile)
                     self._stop_cycle_tracking(closed_cycle.id)
                     closed += 1
@@ -272,7 +274,7 @@ class PaperTradingEngine:
         )
 
     def _save_hf_entry_diagnostics(self, *, paper_cycle_id: int, market_state, decision) -> None:
-        if self.strategy_profile != "mean_reversion_hf_micro_v1":
+        if self.strategy_profile not in {"mean_reversion_hf_micro_v1", "extreme_strategy_v1"}:
             return
         save_method = getattr(self.database, "save_hf_paper_cycle_entry_diagnostics", None)
         if not callable(save_method):
@@ -282,13 +284,27 @@ class PaperTradingEngine:
             strategy_profile=self.strategy_profile,
             current_price=self._optional_float(getattr(market_state, "price", None)),
             short_center=self._optional_float(getattr(market_state, "short_center", None)),
-            previous_price=self._optional_float(getattr(market_state, "hf_previous_price", None)),
-            last_different_price=self._optional_float(getattr(market_state, "hf_last_different_price", None)),
-            hf_entry_mode=str(getattr(market_state, "hf_entry_mode", "")) or None,
-            price_buffer_unique_values=self._optional_int(
-                getattr(market_state, "hf_price_buffer_unique_values", None)
+            previous_price=self._optional_float(
+                getattr(market_state, "hf_previous_price", getattr(market_state, "extreme_previous_price", None))
             ),
-            flat_samples_count=self._optional_int(getattr(market_state, "hf_flat_samples_count", None)),
+            last_different_price=self._optional_float(getattr(market_state, "hf_last_different_price", None)),
+            hf_entry_mode=str(
+                getattr(
+                    market_state,
+                    "hf_entry_mode",
+                    "extreme_immediate_entry" if self.strategy_profile == "extreme_strategy_v1" else "",
+                )
+            ) or None,
+            price_buffer_unique_values=self._optional_int(
+                getattr(
+                    market_state,
+                    "hf_price_buffer_unique_values",
+                    getattr(market_state, "extreme_price_buffer_unique_values", None),
+                )
+            ),
+            flat_samples_count=self._optional_int(
+                getattr(market_state, "hf_flat_samples_count", getattr(market_state, "extreme_flat_samples_count", None))
+            ),
             flat_price_buffer=getattr(market_state, "hf_flat_price_buffer", None),
             entry_direction=decision.action,
             entry_reason=decision.reason,
@@ -313,7 +329,7 @@ class PaperTradingEngine:
             return None
 
     def _load_safety_cycles(self) -> list[tuple]:
-        if self.strategy_profile == "mean_reversion_hf_micro_v1":
+        if self.strategy_profile in {"mean_reversion_hf_micro_v1", "extreme_strategy_v1"}:
             return self.database.load_recent_paper_cycles_for_safety(
                 self.strategy_profile,
                 baseline_max_id=self.safety_baseline_max_id,
@@ -417,7 +433,7 @@ class PaperTradingEngine:
                 and cycle_age >= max_holding_limit
             )
             close_condition_met = target_close_condition_met or max_holding_condition_met
-            close_reason = "target" if target_close_condition_met else self._max_holding_close_reason(strategy_profile)
+            close_reason = self._target_close_reason(strategy_profile) if target_close_condition_met else self._max_holding_close_reason(strategy_profile)
 
             if not close_condition_met:
                 open_cycles_remaining = True
@@ -590,12 +606,22 @@ class PaperTradingEngine:
     def _max_holding_seconds_for_profile(self, strategy_profile: str) -> float | None:
         if strategy_profile == "mean_reversion_hf_micro_v1":
             return 270.0
+        if strategy_profile == "extreme_strategy_v1":
+            return EXTREME_MAX_HOLDING_SECONDS
         return None
 
     def _max_holding_close_reason(self, strategy_profile: str) -> str | None:
         if strategy_profile == "mean_reversion_hf_micro_v1":
             return "max_holding_270s"
+        if strategy_profile == "extreme_strategy_v1":
+            return "extreme_timeout"
         return None
+
+    @staticmethod
+    def _target_close_reason(strategy_profile: str) -> str:
+        if strategy_profile == "extreme_strategy_v1":
+            return "extreme_target"
+        return "target"
 
     @staticmethod
     def _close_debug_price_fields(
