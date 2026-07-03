@@ -282,6 +282,7 @@ def test_manage_cli_accepts_hf_micro_profile_for_paper_workflow_commands():
         ["hf-velocity-filter-sim", "--profile", "mean_reversion_hf_micro_v1", "--since-id", "1534", "--limit", "50"],
         ["hf-regime-filter-sim", "--profile", "mean_reversion_hf_micro_v1", "--since-id", "1534", "--limit", "50"],
         ["extreme-market-discovery", "--profile", "mean_reversion_hf_micro_v1"],
+        ["extreme-replay", "--profile", "mean_reversion_hf_micro_v1"],
         ["exit-risk-diagnostics", "--profile", "mean_reversion_hf_micro_v1"],
     ]
 
@@ -413,6 +414,21 @@ def test_manage_cli_extreme_market_discovery_accepts_profile():
 
     assert args.command == "extreme-market-discovery"
     assert args.profile == "mean_reversion_hf_micro_v1"
+
+
+def test_manage_cli_extreme_replay_accepts_profile_and_output():
+    parser = build_parser()
+    args = parser.parse_args([
+        "extreme-replay",
+        "--profile",
+        "mean_reversion_hf_micro_v1",
+        "--output",
+        "reports/custom_extreme_replay.txt",
+    ])
+
+    assert args.command == "extreme-replay"
+    assert args.profile == "mean_reversion_hf_micro_v1"
+    assert args.output == "reports/custom_extreme_replay.txt"
 
 
 def test_manage_cli_has_collect_closed_cycles_command():

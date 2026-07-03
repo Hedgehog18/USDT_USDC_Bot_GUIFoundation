@@ -64,6 +64,7 @@ from analytics.exit_rule_optimizer_engine import ExitRuleOptimizerEngine
 from analytics.exit_rule_sim_engine import ExitRuleSimulationEngine
 from analytics.exit_tolerance_sim_engine import ExitToleranceSimulationEngine
 from analytics.extreme_market_discovery_engine import ExtremeMarketDiscoveryEngine
+from analytics.extreme_replay_engine import ExtremeReplayEngine
 from analytics.fee_model_report_engine import FeeModelReportEngine
 from analytics.filter_pass_diagnostics_engine import FilterPassDiagnosticsEngine
 from analytics.holding_horizon_diagnostics_engine import HoldingHorizonDiagnosticsEngine
@@ -3458,6 +3459,49 @@ def command_extreme_market_discovery(args) -> None:
     print(f"Recommendation: {report.recommendation}")
 
 
+def command_extreme_replay(args) -> None:
+    _config, _logger, database = build_context()
+    report = ExtremeReplayEngine(database).build_report(profile=args.profile, output_path=args.output)
+    stats = report.statistics
+
+    print("=== Extreme Replay ===")
+    print(f"Profile: {report.profile}")
+    print(f"Events: {stats.events_count}")
+    print(f"Replay scenarios: {stats.scenario_count}")
+    print(f"Entered replays: {stats.entered_replays_count}")
+    print("")
+    print("Replay Statistics:")
+    print(f"- average potential profit: {_format_hf_regime_float(stats.average_potential_profit)}")
+    print(f"- median potential profit: {_format_hf_regime_float(stats.median_potential_profit)}")
+    print(f"- average favorable excursion: {_format_hf_regime_float(stats.average_favorable_excursion)}")
+    print(f"- average adverse excursion: {_format_hf_regime_float(stats.average_adverse_excursion)}")
+    print(f"- average reward/risk: {_format_hf_regime_float(stats.average_reward_risk)}")
+    print(f"- reward/risk distribution: {_format_hf_regime_counter(stats.reward_risk_distribution)}")
+    print("")
+    print("Latest replay events:")
+    for event in report.events[-10:]:
+        print(
+            f"- event=#{event.event_number} db_id={event.db_id} "
+            f"start={event.start_timestamp} end={event.end_timestamp} "
+            f"duration={_format_discovery_seconds(event.duration_seconds)} "
+            f"session={event.session} cluster={event.cluster_label} "
+            f"amplitude={event.amplitude_class}"
+        )
+        for scenario in event.scenarios:
+            if not scenario.entered:
+                print(f"  - {scenario.scenario}: skipped ({scenario.skipped_reason})")
+                continue
+            print(
+                f"  - {scenario.scenario}: {scenario.direction} "
+                f"MFE={_format_hf_regime_float(scenario.maximum_favorable_excursion)} "
+                f"MAE={_format_hf_regime_float(scenario.maximum_adverse_excursion)} "
+                f"RR={_format_hf_regime_float(scenario.reward_risk)}"
+            )
+    print("")
+    print(f"Assessment: {stats.assessment}")
+    print(f"Report saved: {report.report_path}")
+
+
 def _format_discovery_seconds(value: float | None) -> str:
     if value is None:
         return "N/A"
@@ -5716,6 +5760,18 @@ def build_parser() -> argparse.ArgumentParser:
         default="mean_reversion_hf_micro_v1",
     )
     extreme_market_discovery_parser.set_defaults(func=command_extreme_market_discovery)
+
+    extreme_replay_parser = subparsers.add_parser(
+        "extreme-replay",
+        help="Replay discovered extreme events without trading",
+    )
+    extreme_replay_parser.add_argument(
+        "--profile",
+        choices=SUPPORTED_RUNTIME_STRATEGY_PROFILES,
+        default="mean_reversion_hf_micro_v1",
+    )
+    extreme_replay_parser.add_argument("--output", default="reports/extreme_replay_report.txt")
+    extreme_replay_parser.set_defaults(func=command_extreme_replay)
 
     notifications_parser = subparsers.add_parser("notifications", help="РџРѕРєР°Р·Р°С‚Рё РїРѕРІС–РґРѕРјР»РµРЅРЅСЏ")
     notifications_parser.add_argument("--limit", type=int, default=10)
