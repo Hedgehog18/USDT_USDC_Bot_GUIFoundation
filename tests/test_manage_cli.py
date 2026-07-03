@@ -286,6 +286,7 @@ def test_manage_cli_accepts_hf_micro_profile_for_paper_workflow_commands():
         ["extreme-replay-ranking", "--profile", "mean_reversion_hf_micro_v1"],
         ["extreme-signal-discovery", "--profile", "mean_reversion_hf_micro_v1"],
         ["extreme-signal-leadtime", "--profile", "mean_reversion_hf_micro_v1"],
+        ["extreme-paper-signal-diagnostics", "--profile", "mean_reversion_hf_micro_v1", "--limit", "10"],
         ["exit-risk-diagnostics", "--profile", "mean_reversion_hf_micro_v1"],
     ]
 
@@ -303,6 +304,7 @@ def test_manage_cli_accepts_extreme_strategy_profile_for_paper_workflows():
         ["validation-summary", "--profile", "extreme_strategy_v1"],
         ["profile-performance-summary", "--profile", "extreme_strategy_v1"],
         ["exit-risk-diagnostics", "--profile", "extreme_strategy_v1"],
+        ["extreme-paper-signal-diagnostics", "--profile", "extreme_strategy_v1"],
     ]
 
     for command in commands:

@@ -65,6 +65,7 @@ from analytics.exit_rule_optimizer_engine import ExitRuleOptimizerEngine
 from analytics.exit_rule_sim_engine import ExitRuleSimulationEngine
 from analytics.exit_tolerance_sim_engine import ExitToleranceSimulationEngine
 from analytics.extreme_market_discovery_engine import ExtremeMarketDiscoveryEngine
+from analytics.extreme_paper_signal_diagnostics_engine import ExtremePaperSignalDiagnosticsEngine
 from analytics.extreme_replay_engine import ExtremeReplayEngine
 from analytics.extreme_replay_ranking_engine import ExtremeReplayRankingEngine
 from analytics.extreme_signal_discovery_engine import ExtremeSignalDiscoveryEngine
@@ -3644,6 +3645,64 @@ def command_extreme_signal_leadtime(args) -> None:
     print(f"Report saved: {report.report_path}")
 
 
+def command_extreme_paper_signal_diagnostics(args) -> None:
+    _config, _logger, database = build_context()
+    report = ExtremePaperSignalDiagnosticsEngine(database).build_report(
+        profile=args.profile,
+        limit=args.limit,
+    )
+
+    print("=== Extreme Paper Signal Diagnostics ===")
+    print("Diagnostics only. Runtime, real trading, HF v1, and Extreme entry logic are unchanged.")
+    print(f"Profile: {report.profile}")
+    print(f"Total extreme paper cycles: {report.total_cycles}")
+    print(f"Target closed: {report.target_closed}")
+    print(f"Timeout closed: {report.timeout_closed}")
+    print(f"False positives: {report.false_positives}")
+    print(f"Lead warning count: {report.lead_warning_count}")
+    print(f"Average signal strength winners: {_format_optional_float(report.average_signal_strength_winners)}")
+    print(f"Average signal strength losers: {_format_optional_float(report.average_signal_strength_losers)}")
+    print(f"Average velocity winners: {_format_optional_float(report.average_velocity_winners)}")
+    print(f"Average velocity losers: {_format_optional_float(report.average_velocity_losers)}")
+    print(f"Average compression winners: {_format_optional_float(report.average_compression_winners)}")
+    print(f"Average compression losers: {_format_optional_float(report.average_compression_losers)}")
+    print(f"Recommendation: {report.recommendation}")
+    if not report.cycles:
+        print("No extreme paper cycles available for this profile.")
+        return
+
+    print("--- Cycles ---")
+    for cycle in report.cycles:
+        print(
+            f"db_id={cycle.db_id} | direction={cycle.direction} | "
+            f"open={cycle.open_price:.8f} | close={cycle.close_price:.8f} | "
+            f"net={cycle.net_profit:+.8f} | reason={cycle.close_reason} | "
+            f"opened={cycle.opened_at} | closed={cycle.closed_at or 'OPEN'} | "
+            f"holding={_format_optional_seconds(cycle.holding_seconds)}"
+        )
+        print(
+            "  signals: "
+            f"session={cycle.session_signal} | velocity={cycle.velocity_spike_signal} | "
+            f"compression={cycle.compression_signal} | strength={_format_optional_float(cycle.signal_strength)} | "
+            f"lead_warning={cycle.lead_warning} | expected={cycle.expected_direction} | entry={cycle.entry_direction}"
+        )
+        print(
+            "  metrics: "
+            f"velocity={_format_optional_float(cycle.velocity_value)} / {_format_optional_float(cycle.velocity_threshold)} | "
+            f"compression={_format_optional_float(cycle.compression_score)} / {_format_optional_float(cycle.compression_threshold)} | "
+            f"move_5s={_format_optional_float(cycle.movement_5s)} | "
+            f"move_15s={_format_optional_float(cycle.movement_15s)} | "
+            f"move_30s={_format_optional_float(cycle.movement_30s)} | "
+            f"move_60s={_format_optional_float(cycle.movement_60s)}"
+        )
+        print(
+            "  outcome: "
+            f"MFE={cycle.max_favorable_excursion:+.8f} | MAE={cycle.max_adverse_excursion:+.8f} | "
+            f"target_approached={'yes' if cycle.extreme_target_approached else 'no'} | "
+            f"false_positive_category={cycle.false_positive_category}"
+        )
+
+
 def _format_discovery_seconds(value: float | None) -> str:
     if value is None:
         return "N/A"
@@ -4878,6 +4937,11 @@ def _apply_collection_extreme_signal_diagnostics(diagnostics: dict[str, str], ma
     diagnostics["expected_direction"] = str(getattr(market_state, "extreme_expected_direction", "N/A"))
     diagnostics["price_velocity_direction"] = str(getattr(market_state, "extreme_price_velocity_direction", "N/A"))
     diagnostics["price_velocity"] = _format_collection_float(getattr(market_state, "extreme_price_velocity", None))
+    diagnostics["velocity_threshold"] = _format_collection_float(getattr(market_state, "extreme_velocity_threshold", None))
+    diagnostics["compression_score"] = _format_collection_float(getattr(market_state, "extreme_compression_score", None))
+    diagnostics["compression_threshold"] = _format_collection_float(
+        getattr(market_state, "extreme_compression_threshold", 60.0)
+    )
     diagnostics["short_center_samples"] = str(getattr(market_state, "extreme_samples", "N/A"))
     diagnostics["price_buffer_unique_values"] = str(getattr(market_state, "extreme_price_buffer_unique_values", "N/A"))
     diagnostics["flat_samples_count"] = str(getattr(market_state, "extreme_flat_samples_count", "N/A"))
@@ -5985,6 +6049,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     extreme_signal_leadtime_parser.add_argument("--output", default="reports/extreme_signal_leadtime_report.txt")
     extreme_signal_leadtime_parser.set_defaults(func=command_extreme_signal_leadtime)
+
+    extreme_paper_signal_parser = subparsers.add_parser(
+        "extreme-paper-signal-diagnostics",
+        help="Analyze false positive signals for Extreme paper profile",
+    )
+    extreme_paper_signal_parser.add_argument(
+        "--profile",
+        choices=SUPPORTED_RUNTIME_STRATEGY_PROFILES,
+        default="extreme_strategy_v1",
+    )
+    extreme_paper_signal_parser.add_argument("--limit", type=int, default=None)
+    extreme_paper_signal_parser.set_defaults(func=command_extreme_paper_signal_diagnostics)
 
     notifications_parser = subparsers.add_parser("notifications", help="РџРѕРєР°Р·Р°С‚Рё РїРѕРІС–РґРѕРјР»РµРЅРЅСЏ")
     notifications_parser.add_argument("--limit", type=int, default=10)

@@ -59,6 +59,18 @@ class DatabaseMigrationManager:
             ColumnDefinition("missed_pnl", "REAL DEFAULT 0"),
             ColumnDefinition("execution_quality_ratio", "REAL DEFAULT 0"),
         ],
+        "hf_paper_cycle_entry_diagnostics": [
+            ColumnDefinition("session_signal", "INTEGER"),
+            ColumnDefinition("velocity_spike_signal", "INTEGER"),
+            ColumnDefinition("compression_signal", "INTEGER"),
+            ColumnDefinition("signal_strength", "REAL"),
+            ColumnDefinition("lead_warning", "TEXT"),
+            ColumnDefinition("expected_direction", "TEXT"),
+            ColumnDefinition("velocity_value", "REAL"),
+            ColumnDefinition("velocity_threshold", "REAL"),
+            ColumnDefinition("compression_score", "REAL"),
+            ColumnDefinition("compression_threshold", "REAL"),
+        ],
     }
 
     def __init__(self, db_path: str | Path) -> None:

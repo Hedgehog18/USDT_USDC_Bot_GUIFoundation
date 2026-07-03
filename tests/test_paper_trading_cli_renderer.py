@@ -182,6 +182,53 @@ def test_renderer_prints_open_cycle(capsys):
     assert "Age:" not in output
 
 
+def test_renderer_prints_extreme_open_signal_metrics(capsys):
+    open_cycle = SimpleNamespace(
+        db_id=11,
+        direction="SELL_USDC",
+        current_price=1.0008,
+        target_price=1.0007,
+        distance_to_target=0.0001,
+        unrealized_pnl=-0.0001,
+        age_seconds=1,
+    )
+    stats = {
+        "closed_cycles": 0,
+        "open_cycles": 1,
+        "net_profit": 0.0,
+        "win_rate": 0.0,
+    }
+    diagnostics = {
+        "extreme_signal_detected": "yes",
+        "session_signal": "yes",
+        "velocity_spike_signal": "yes",
+        "price_velocity": "-0.00000200",
+        "velocity_threshold": "0.00000100",
+        "compression_signal": "yes",
+        "compression_score": "100.00000000",
+        "compression_threshold": "60.00000000",
+        "signal_strength": "100.00000000",
+        "expected_direction": "SELL_USDC",
+        "lead_time_warning": "yes",
+    }
+
+    PaperTradingCliRenderer(force_plain=True).render_collection_progress_compact(
+        stats,
+        5,
+        iteration=1,
+        price_info=(1.0008, "BINANCE", "2026-07-01T10:00:00"),
+        nearest_open_cycle=open_cycle,
+        action_taken="opened",
+        entry_diagnostics=diagnostics,
+    )
+
+    output = capsys.readouterr().out
+
+    assert "Extreme: signal=yes" in output
+    assert "velocity_value=-0.00000200/0.00000100" in output
+    assert "compression_score=100.00000000/60.00000000" in output
+
+
 def test_renderer_verbose_progress_keeps_full_panels(capsys):
     stats = {
         "closed_cycles": 1,

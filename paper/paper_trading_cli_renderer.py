@@ -235,6 +235,8 @@ class PaperTradingCliRenderer:
                 f"{self._format_tracking_limit(tracking_limit_seconds)} | "
                 f"uPnL: {self._format_signed(getattr(nearest_open_cycle, 'unrealized_pnl', 0.0))}"
             )
+            if action_taken == "opened" and self._is_useful(entry_diagnostics.get("extreme_signal_detected")):
+                self._print_compact_extreme_signal(entry_diagnostics)
             return
         print(
             "Price: "
@@ -245,16 +247,23 @@ class PaperTradingCliRenderer:
             f"Block: {self._compact_text(entry_diagnostics.get('entry_block_reason'))}"
         )
         if self._is_useful(entry_diagnostics.get("extreme_signal_detected")):
-            print(
-                "Extreme: "
-                f"signal={self._compact_text(entry_diagnostics.get('extreme_signal_detected'))} | "
-                f"session={self._compact_text(entry_diagnostics.get('session_signal'))} | "
-                f"velocity={self._compact_text(entry_diagnostics.get('velocity_spike_signal'))} | "
-                f"compression={self._compact_text(entry_diagnostics.get('compression_signal'))} | "
-                f"strength={self._compact_text(entry_diagnostics.get('signal_strength'))} | "
-                f"expected={self._compact_text(entry_diagnostics.get('expected_direction'))} | "
-                f"lead_warning={self._compact_text(entry_diagnostics.get('lead_time_warning'))}"
-            )
+            self._print_compact_extreme_signal(entry_diagnostics)
+
+    def _print_compact_extreme_signal(self, entry_diagnostics: dict[str, str]) -> None:
+        print(
+            "Extreme: "
+            f"signal={self._compact_text(entry_diagnostics.get('extreme_signal_detected'))} | "
+            f"session={self._compact_text(entry_diagnostics.get('session_signal'))} | "
+            f"velocity={self._compact_text(entry_diagnostics.get('velocity_spike_signal'))} | "
+            f"velocity_value={self._compact_text(entry_diagnostics.get('price_velocity'))}/"
+            f"{self._compact_text(entry_diagnostics.get('velocity_threshold'))} | "
+            f"compression={self._compact_text(entry_diagnostics.get('compression_signal'))} | "
+            f"compression_score={self._compact_text(entry_diagnostics.get('compression_score'))}/"
+            f"{self._compact_text(entry_diagnostics.get('compression_threshold'))} | "
+            f"strength={self._compact_text(entry_diagnostics.get('signal_strength'))} | "
+            f"expected={self._compact_text(entry_diagnostics.get('expected_direction'))} | "
+            f"lead_warning={self._compact_text(entry_diagnostics.get('lead_time_warning'))}"
+        )
 
     def render_collection_summary(
         self,

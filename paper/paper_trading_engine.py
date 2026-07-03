@@ -308,6 +308,16 @@ class PaperTradingEngine:
             flat_price_buffer=getattr(market_state, "hf_flat_price_buffer", None),
             entry_direction=decision.action,
             entry_reason=decision.reason,
+            session_signal=getattr(market_state, "extreme_session_signal", None),
+            velocity_spike_signal=getattr(market_state, "extreme_velocity_spike_signal", None),
+            compression_signal=getattr(market_state, "extreme_compression_signal", None),
+            signal_strength=self._optional_float(getattr(market_state, "extreme_signal_strength", None)),
+            lead_warning=str(getattr(market_state, "extreme_lead_time_warning", "")) or None,
+            expected_direction=str(getattr(market_state, "extreme_expected_direction", "")) or None,
+            velocity_value=self._optional_float(getattr(market_state, "extreme_price_velocity", None)),
+            velocity_threshold=self._optional_float(getattr(market_state, "extreme_velocity_threshold", None)),
+            compression_score=self._optional_float(getattr(market_state, "extreme_compression_score", None)),
+            compression_threshold=60.0 if self.strategy_profile == "extreme_strategy_v1" else None,
         )
 
     @staticmethod

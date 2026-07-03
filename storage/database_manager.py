@@ -356,6 +356,16 @@ class DatabaseManager:
                     flat_price_buffer INTEGER,
                     entry_direction TEXT,
                     entry_reason TEXT,
+                    session_signal INTEGER,
+                    velocity_spike_signal INTEGER,
+                    compression_signal INTEGER,
+                    signal_strength REAL,
+                    lead_warning TEXT,
+                    expected_direction TEXT,
+                    velocity_value REAL,
+                    velocity_threshold REAL,
+                    compression_score REAL,
+                    compression_threshold REAL,
                     FOREIGN KEY(paper_cycle_id) REFERENCES paper_cycles(id)
                 )
             """)
@@ -1459,6 +1469,16 @@ class DatabaseManager:
         flat_price_buffer: bool | None,
         entry_direction: str,
         entry_reason: str,
+        session_signal: bool | None = None,
+        velocity_spike_signal: bool | None = None,
+        compression_signal: bool | None = None,
+        signal_strength: float | None = None,
+        lead_warning: str | None = None,
+        expected_direction: str | None = None,
+        velocity_value: float | None = None,
+        velocity_threshold: float | None = None,
+        compression_score: float | None = None,
+        compression_threshold: float | None = None,
     ) -> int:
         from datetime import datetime
 
@@ -1469,8 +1489,12 @@ class DatabaseManager:
                     paper_cycle_id, timestamp, strategy_profile,
                     current_price, short_center, previous_price, last_different_price,
                     hf_entry_mode, price_buffer_unique_values, flat_samples_count,
-                    flat_price_buffer, entry_direction, entry_reason
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    flat_price_buffer, entry_direction, entry_reason,
+                    session_signal, velocity_spike_signal, compression_signal,
+                    signal_strength, lead_warning, expected_direction,
+                    velocity_value, velocity_threshold, compression_score,
+                    compression_threshold
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     paper_cycle_id,
@@ -1486,6 +1510,16 @@ class DatabaseManager:
                     None if flat_price_buffer is None else int(bool(flat_price_buffer)),
                     entry_direction,
                     entry_reason,
+                    None if session_signal is None else int(bool(session_signal)),
+                    None if velocity_spike_signal is None else int(bool(velocity_spike_signal)),
+                    None if compression_signal is None else int(bool(compression_signal)),
+                    signal_strength,
+                    lead_warning,
+                    expected_direction,
+                    velocity_value,
+                    velocity_threshold,
+                    compression_score,
+                    compression_threshold,
                 ),
             )
             conn.commit()

@@ -87,6 +87,9 @@ def test_collection_entry_diagnostics_reports_extreme_signal_fields():
         extreme_expected_direction="SELL_USDC",
         extreme_price_velocity_direction="DOWN",
         extreme_price_velocity=-0.000002,
+        extreme_velocity_threshold=0.000001,
+        extreme_compression_score=100.0,
+        extreme_compression_threshold=60.0,
         extreme_samples=6,
         extreme_price_buffer_unique_values=2,
         extreme_flat_samples_count=5,
@@ -110,6 +113,10 @@ def test_collection_entry_diagnostics_reports_extreme_signal_fields():
     assert diagnostics["compression_signal"] == "yes"
     assert diagnostics["hf_entry_mode"] == "extreme_immediate_entry"
     assert diagnostics["expected_direction"] == "SELL_USDC"
+    assert diagnostics["price_velocity"] == "-0.00000200"
+    assert diagnostics["velocity_threshold"] == "0.00000100"
+    assert diagnostics["compression_score"] == "100.00000000"
+    assert diagnostics["compression_threshold"] == "60.00000000"
     assert diagnostics["target_price"] != "N/A"
     assert diagnostics["max_holding"] == "60.00000000"
 
