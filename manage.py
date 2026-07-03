@@ -84,6 +84,7 @@ from analytics.hf_micro_grid_sim_engine import (
 )
 from analytics.hf_extreme_move_diagnostics_engine import HFExtremeMoveDiagnosticsEngine
 from analytics.hf_profit_audit_engine import HFProfitAuditEngine
+from analytics.hf_run_regime_comparison_engine import HFRunRegimeComparisonEngine
 from analytics.max_holding_sensitivity_engine import MaxHoldingSensitivityEngine
 from analytics.market_session_diagnostics_engine import MarketSessionDiagnosticsEngine
 from analytics.ml_baseline_trainer import MLBaselineTrainer
@@ -3297,6 +3298,110 @@ def command_hf_extreme_move_diagnostics(args) -> None:
     print(_format_hf_extreme_cycle(report.worst_extreme_cycle))
 
 
+def command_hf_run_regime_comparison(args) -> None:
+    _config, _logger, database = build_context()
+    run_a_since_id = args.run_a_since_id
+    if run_a_since_id is None:
+        run_a_since_id = args.good_since_id if args.good_since_id is not None else 0
+    run_b_since_id = args.run_b_since_id
+    if run_b_since_id is None:
+        run_b_since_id = args.bad_since_id if args.bad_since_id is not None else 0
+    report = HFRunRegimeComparisonEngine(database).compare(
+        profile=args.profile,
+        run_a_since_id=int(run_a_since_id),
+        run_b_since_id=int(run_b_since_id),
+        limit=args.limit,
+    )
+
+    print("=== HF Run Regime Comparison ===")
+    print(f"Profile: {report.profile}")
+    _print_hf_run_regime_series(report.run_a)
+    _print_hf_run_regime_series(report.run_b)
+    print("")
+    print("Comparison summary:")
+    for item in report.differences:
+        print(f"- {item}")
+    print(f"Recommendation: {report.recommendation}")
+
+
+def _print_hf_run_regime_series(series) -> None:
+    print("")
+    print(f"--- {series.label} ---")
+    print(f"Since ID: {series.since_id}")
+    print(f"Limit: {series.limit if series.limit is not None else 'N/A'}")
+    print(f"Cycles count: {series.cycles_count}")
+    print(f"Net profit: {series.net_profit:+.8f}")
+    print(f"Net profit without extreme: {series.net_profit_without_extreme:+.8f}")
+    print(f"Extreme cycles: {series.extreme_cycles_count}")
+    print(f"Win rate: {series.win_rate * 100:.2f}%")
+    print(f"Win rate without extreme: {series.win_rate_without_extreme * 100:.2f}%")
+    print(f"Target closed: {series.target_closed_count}")
+    print(f"Timeout closed: {series.timeout_closed_count}")
+    print(f"Breakeven: {series.breakeven_count}")
+    print(f"Average net: {series.average_net:+.8f}")
+    print(f"Median net: {series.median_net:+.8f}")
+    print(f"Run duration: {_format_hf_regime_seconds(series.run_duration_seconds)}")
+    print(f"Cycles/hour: {series.cycles_per_hour:.2f}")
+    print(f"Cycles/day estimate: {series.cycles_per_day_estimate:.2f}")
+    print(f"Average holding: {_format_hf_regime_seconds(series.average_holding_seconds)}")
+    print(f"Median holding: {_format_hf_regime_seconds(series.median_holding_seconds)}")
+    _print_hf_run_direction("BUY", series.buy)
+    _print_hf_run_direction("SELL", series.sell)
+    print("Entry context:")
+    context = series.entry_context
+    print(f"- available: {context.available_count}")
+    print(f"- missing: {context.missing_count}")
+    print(f"- hf_entry_mode distribution: {_format_hf_regime_counter(context.hf_entry_mode_distribution)}")
+    print(f"- previous price relation: {_format_hf_regime_counter(context.previous_price_relation_distribution)}")
+    print(f"- last different relation: {_format_hf_regime_counter(context.last_different_price_relation_distribution)}")
+    print(f"- flat_price_buffer count: {context.flat_price_buffer_count}")
+    print(f"- equal center fallback count: {context.equal_center_fallback_count}")
+    print(f"- avg short_center distance: {_format_hf_regime_float(context.average_short_center_distance)}")
+    print(f"- avg buffer unique values: {_format_hf_regime_float(context.average_price_buffer_unique_values)}")
+    print(f"- avg flat samples count: {_format_hf_regime_float(context.average_flat_samples_count)}")
+    print(f"- avg price velocity: {_format_hf_regime_float(context.average_price_velocity)}")
+    print(f"- avg short-term drift: {_format_hf_regime_float(context.average_short_term_drift)}")
+    print(f"- direction confirmed: {context.direction_confirmed_count}")
+    print(f"- direction not confirmed: {context.direction_not_confirmed_count}")
+    print("Loss diagnostics:")
+    loss = series.loss_diagnostics
+    print(f"- losing cycles: {loss.losing_cycles_count}")
+    print(f"- categories: {_format_hf_regime_counter(loss.categories)}")
+    print(f"- no_follow_through: {loss.no_follow_through_count}")
+    print(f"- average adverse move: {_format_hf_regime_float(loss.average_adverse_move)}")
+    print(f"- average favorable move: {_format_hf_regime_float(loss.average_favorable_move)}")
+    print(f"- target touched: {loss.target_touched_count}")
+    print(f"- near target: {loss.near_target_count}")
+    print(f"- near target samples: {loss.near_target_samples}")
+
+
+def _print_hf_run_direction(label: str, breakdown) -> None:
+    print(
+        f"{label}: count={breakdown.count} "
+        f"win_rate={breakdown.win_rate * 100:.2f}% "
+        f"net={breakdown.net_profit:+.8f} "
+        f"timeout_loss={breakdown.timeout_loss_count}"
+    )
+
+
+def _format_hf_regime_counter(values: dict[str, int]) -> str:
+    if not values:
+        return "N/A"
+    return ", ".join(f"{key}={value}" for key, value in sorted(values.items()))
+
+
+def _format_hf_regime_float(value: float | None) -> str:
+    if value is None:
+        return "N/A"
+    return f"{value:.8f}"
+
+
+def _format_hf_regime_seconds(value: float | None) -> str:
+    if value is None:
+        return "N/A"
+    return f"{value:.0f}s"
+
+
 def _print_hf_extreme_cycles(title: str, cycles) -> None:
     print("")
     print(f"{title}:")
@@ -5404,6 +5509,22 @@ def build_parser() -> argparse.ArgumentParser:
         default="mean_reversion_hf_micro_v1",
     )
     hf_extreme_move_diagnostics_parser.set_defaults(func=command_hf_extreme_move_diagnostics)
+
+    hf_run_regime_comparison_parser = subparsers.add_parser(
+        "hf-run-regime-comparison",
+        help="Compare two HF paper-cycle runs by market regime diagnostics",
+    )
+    hf_run_regime_comparison_parser.add_argument(
+        "--profile",
+        choices=SUPPORTED_RUNTIME_STRATEGY_PROFILES,
+        default="mean_reversion_hf_micro_v1",
+    )
+    hf_run_regime_comparison_parser.add_argument("--good-since-id", type=int, default=None)
+    hf_run_regime_comparison_parser.add_argument("--bad-since-id", type=int, default=None)
+    hf_run_regime_comparison_parser.add_argument("--run-a-since-id", type=int, default=None)
+    hf_run_regime_comparison_parser.add_argument("--run-b-since-id", type=int, default=None)
+    hf_run_regime_comparison_parser.add_argument("--limit", type=int, default=None)
+    hf_run_regime_comparison_parser.set_defaults(func=command_hf_run_regime_comparison)
 
     notifications_parser = subparsers.add_parser("notifications", help="РџРѕРєР°Р·Р°С‚Рё РїРѕРІС–РґРѕРјР»РµРЅРЅСЏ")
     notifications_parser.add_argument("--limit", type=int, default=10)

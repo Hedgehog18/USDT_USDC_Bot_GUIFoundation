@@ -278,6 +278,7 @@ def test_manage_cli_accepts_hf_micro_profile_for_paper_workflow_commands():
         ["hf-losing-cycle-diagnostics", "--profile", "mean_reversion_hf_micro_v1", "--since-id", "140", "--limit", "50"],
         ["hf-profit-audit", "--profile", "mean_reversion_hf_micro_v1", "--since-id", "140"],
         ["hf-extreme-move-diagnostics", "--profile", "mean_reversion_hf_micro_v1"],
+        ["hf-run-regime-comparison", "--profile", "mean_reversion_hf_micro_v1", "--run-a-since-id", "100", "--run-b-since-id", "200", "--limit", "50"],
         ["exit-risk-diagnostics", "--profile", "mean_reversion_hf_micro_v1"],
     ]
 
@@ -329,6 +330,27 @@ def test_manage_cli_hf_extreme_move_diagnostics_accepts_profile():
 
     assert args.command == "hf-extreme-move-diagnostics"
     assert args.profile == "mean_reversion_hf_micro_v1"
+
+
+def test_manage_cli_hf_run_regime_comparison_accepts_aliases_and_limit():
+    parser = build_parser()
+    args = parser.parse_args([
+        "hf-run-regime-comparison",
+        "--profile",
+        "mean_reversion_hf_micro_v1",
+        "--good-since-id",
+        "100",
+        "--bad-since-id",
+        "200",
+        "--limit",
+        "50",
+    ])
+
+    assert args.command == "hf-run-regime-comparison"
+    assert args.profile == "mean_reversion_hf_micro_v1"
+    assert args.good_since_id == 100
+    assert args.bad_since_id == 200
+    assert args.limit == 50
 
 
 def test_manage_cli_has_collect_closed_cycles_command():
