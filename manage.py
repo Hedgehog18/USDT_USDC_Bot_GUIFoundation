@@ -67,6 +67,7 @@ from analytics.extreme_market_discovery_engine import ExtremeMarketDiscoveryEngi
 from analytics.extreme_replay_engine import ExtremeReplayEngine
 from analytics.extreme_replay_ranking_engine import ExtremeReplayRankingEngine
 from analytics.extreme_signal_discovery_engine import ExtremeSignalDiscoveryEngine
+from analytics.extreme_signal_leadtime_engine import ExtremeSignalLeadTimeEngine
 from analytics.fee_model_report_engine import FeeModelReportEngine
 from analytics.filter_pass_diagnostics_engine import FilterPassDiagnosticsEngine
 from analytics.holding_horizon_diagnostics_engine import HoldingHorizonDiagnosticsEngine
@@ -3598,6 +3599,48 @@ def command_extreme_signal_discovery(args) -> None:
     print(f"Report saved: {report.report_path}")
 
 
+def command_extreme_signal_leadtime(args) -> None:
+    _config, _logger, database = build_context()
+    report = ExtremeSignalLeadTimeEngine(database).build_report(profile=args.profile, output_path=args.output)
+
+    print("=== Extreme Signal Lead Time Analysis ===")
+    print(f"Profile: {report.profile}")
+    print(f"Extreme events analyzed: {report.extreme_events_analyzed}")
+    print(f"Control windows analyzed: {report.control_windows_analyzed}")
+    print(f"Best signal: {report.best_signal.signal_name if report.best_signal else 'N/A'}")
+    print("")
+    print("Lead time matrix:")
+    for row in report.lead_time_results:
+        print(
+            f"- {row.signal_name} @ {row.lead_time_seconds}s: "
+            f"detected={row.events_detected} "
+            f"rate={row.detection_rate * 100:.2f}% "
+            f"false_positive={row.false_positives} "
+            f"precision={row.precision * 100:.2f}% "
+            f"recall={row.recall * 100:.2f}% "
+            f"strength={row.signal_strength:.4f}"
+        )
+    print("")
+    print("Signal ranking:")
+    for summary in report.signal_summaries:
+        print(
+            f"- {summary.signal_name}: "
+            f"avg_lead={_format_discovery_seconds(summary.average_lead_time_seconds)} "
+            f"median_lead={_format_discovery_seconds(summary.median_lead_time_seconds)} "
+            f"best_lead={_format_discovery_seconds(summary.best_lead_time_seconds)} "
+            f"worst_lead={_format_discovery_seconds(summary.worst_lead_time_seconds)} "
+            f"detection={summary.detection_rate * 100:.2f}% "
+            f"false_positive={summary.false_positive_rate * 100:.2f}% "
+            f"first_significant={_format_discovery_seconds(summary.first_significant_lead_time_seconds)} "
+            f"last_not_visible={_format_discovery_seconds(summary.last_not_visible_lead_time_seconds)} "
+            f"score={summary.signal_score:.2f} "
+            f"recommendation={summary.recommendation}"
+        )
+    print("")
+    print(f"Final Recommendation: {report.final_recommendation}")
+    print(f"Report saved: {report.report_path}")
+
+
 def _format_discovery_seconds(value: float | None) -> str:
     if value is None:
         return "N/A"
@@ -5892,6 +5935,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     extreme_signal_discovery_parser.add_argument("--output", default="reports/extreme_signal_discovery_report.txt")
     extreme_signal_discovery_parser.set_defaults(func=command_extreme_signal_discovery)
+
+    extreme_signal_leadtime_parser = subparsers.add_parser(
+        "extreme-signal-leadtime",
+        help="Analyze when Extreme pre-event signals become visible",
+    )
+    extreme_signal_leadtime_parser.add_argument(
+        "--profile",
+        choices=SUPPORTED_RUNTIME_STRATEGY_PROFILES,
+        default="mean_reversion_hf_micro_v1",
+    )
+    extreme_signal_leadtime_parser.add_argument("--output", default="reports/extreme_signal_leadtime_report.txt")
+    extreme_signal_leadtime_parser.set_defaults(func=command_extreme_signal_leadtime)
 
     notifications_parser = subparsers.add_parser("notifications", help="РџРѕРєР°Р·Р°С‚Рё РїРѕРІС–РґРѕРјР»РµРЅРЅСЏ")
     notifications_parser.add_argument("--limit", type=int, default=10)

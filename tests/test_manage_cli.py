@@ -285,6 +285,7 @@ def test_manage_cli_accepts_hf_micro_profile_for_paper_workflow_commands():
         ["extreme-replay", "--profile", "mean_reversion_hf_micro_v1"],
         ["extreme-replay-ranking", "--profile", "mean_reversion_hf_micro_v1"],
         ["extreme-signal-discovery", "--profile", "mean_reversion_hf_micro_v1"],
+        ["extreme-signal-leadtime", "--profile", "mean_reversion_hf_micro_v1"],
         ["exit-risk-diagnostics", "--profile", "mean_reversion_hf_micro_v1"],
     ]
 
@@ -461,6 +462,21 @@ def test_manage_cli_extreme_signal_discovery_accepts_profile_and_output():
     assert args.command == "extreme-signal-discovery"
     assert args.profile == "mean_reversion_hf_micro_v1"
     assert args.output == "reports/custom_extreme_signal_discovery.txt"
+
+
+def test_manage_cli_extreme_signal_leadtime_accepts_profile_and_output():
+    parser = build_parser()
+    args = parser.parse_args([
+        "extreme-signal-leadtime",
+        "--profile",
+        "mean_reversion_hf_micro_v1",
+        "--output",
+        "reports/custom_extreme_signal_leadtime.txt",
+    ])
+
+    assert args.command == "extreme-signal-leadtime"
+    assert args.profile == "mean_reversion_hf_micro_v1"
+    assert args.output == "reports/custom_extreme_signal_leadtime.txt"
 
 
 def test_manage_cli_has_collect_closed_cycles_command():
