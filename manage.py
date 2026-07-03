@@ -65,6 +65,7 @@ from analytics.exit_rule_sim_engine import ExitRuleSimulationEngine
 from analytics.exit_tolerance_sim_engine import ExitToleranceSimulationEngine
 from analytics.extreme_market_discovery_engine import ExtremeMarketDiscoveryEngine
 from analytics.extreme_replay_engine import ExtremeReplayEngine
+from analytics.extreme_replay_ranking_engine import ExtremeReplayRankingEngine
 from analytics.fee_model_report_engine import FeeModelReportEngine
 from analytics.filter_pass_diagnostics_engine import FilterPassDiagnosticsEngine
 from analytics.holding_horizon_diagnostics_engine import HoldingHorizonDiagnosticsEngine
@@ -3502,6 +3503,44 @@ def command_extreme_replay(args) -> None:
     print(f"Report saved: {report.report_path}")
 
 
+def command_extreme_replay_ranking(args) -> None:
+    _config, _logger, database = build_context()
+    report = ExtremeReplayRankingEngine(database).build_report(profile=args.profile, output_path=args.output)
+
+    print("=== Extreme Replay Scenario Ranking ===")
+    print(f"Profile: {report.profile}")
+    print(f"Scenarios ranked: {len(report.scenario_rankings)}")
+    print("")
+    for item in report.scenario_rankings:
+        print(
+            f"- {item.scenario_name}: "
+            f"events={item.events_count} "
+            f"win={item.win_rate * 100:.2f}% "
+            f"avg_profit={_format_hf_regime_float(item.average_potential_profit)} "
+            f"median_profit={_format_hf_regime_float(item.median_potential_profit)} "
+            f"total_profit={item.total_potential_profit:.8f} "
+            f"avg_mfe={_format_hf_regime_float(item.average_mfe)} "
+            f"avg_mae={_format_hf_regime_float(item.average_mae)} "
+            f"worst_mae={_format_hf_regime_float(item.worst_mae)} "
+            f"avg_rr={_format_hf_regime_float(item.average_reward_risk)} "
+            f"top1_share={item.best_event_contribution_share * 100:.2f}% "
+            f"top3_share={item.top3_event_contribution_share * 100:.2f}% "
+            f"score={item.stability_score:.2f} "
+            f"recommendation={item.recommendation}"
+        )
+        print(f"  clusters: {_format_hf_regime_counter(item.cluster_breakdown)}")
+        print(f"  sessions: {_format_hf_regime_counter(item.session_breakdown)}")
+        print(
+            f"  recovery avg/median: "
+            f"{_format_discovery_seconds(item.average_recovery_seconds)} / "
+            f"{_format_discovery_seconds(item.median_recovery_seconds)}"
+        )
+    print("")
+    print(f"Best replay scenario: {report.best_scenario.scenario_name if report.best_scenario else 'N/A'}")
+    print(f"Reason: {report.reason}")
+    print(f"Report saved: {report.report_path}")
+
+
 def _format_discovery_seconds(value: float | None) -> str:
     if value is None:
         return "N/A"
@@ -5772,6 +5811,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     extreme_replay_parser.add_argument("--output", default="reports/extreme_replay_report.txt")
     extreme_replay_parser.set_defaults(func=command_extreme_replay)
+
+    extreme_replay_ranking_parser = subparsers.add_parser(
+        "extreme-replay-ranking",
+        help="Rank Extreme Replay scenarios by stability and risk",
+    )
+    extreme_replay_ranking_parser.add_argument(
+        "--profile",
+        choices=SUPPORTED_RUNTIME_STRATEGY_PROFILES,
+        default="mean_reversion_hf_micro_v1",
+    )
+    extreme_replay_ranking_parser.add_argument("--output", default="reports/extreme_replay_ranking.txt")
+    extreme_replay_ranking_parser.set_defaults(func=command_extreme_replay_ranking)
 
     notifications_parser = subparsers.add_parser("notifications", help="РџРѕРєР°Р·Р°С‚Рё РїРѕРІС–РґРѕРјР»РµРЅРЅСЏ")
     notifications_parser.add_argument("--limit", type=int, default=10)
