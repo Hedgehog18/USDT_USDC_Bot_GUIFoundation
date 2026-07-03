@@ -63,6 +63,7 @@ from analytics.exit_risk_diagnostics_engine import ExitRiskDiagnosticsEngine
 from analytics.exit_rule_optimizer_engine import ExitRuleOptimizerEngine
 from analytics.exit_rule_sim_engine import ExitRuleSimulationEngine
 from analytics.exit_tolerance_sim_engine import ExitToleranceSimulationEngine
+from analytics.extreme_market_discovery_engine import ExtremeMarketDiscoveryEngine
 from analytics.fee_model_report_engine import FeeModelReportEngine
 from analytics.filter_pass_diagnostics_engine import FilterPassDiagnosticsEngine
 from analytics.holding_horizon_diagnostics_engine import HoldingHorizonDiagnosticsEngine
@@ -3406,6 +3407,69 @@ def command_hf_regime_filter_sim(args) -> None:
     print(f"Conclusion: {report.conclusion}")
 
 
+def command_extreme_market_discovery(args) -> None:
+    _config, _logger, database = build_context()
+    report = ExtremeMarketDiscoveryEngine(database).build_report(profile=args.profile)
+
+    print("=== Extreme Market Discovery ===")
+    print(f"Profile: {report.profile}")
+    print(f"Extreme events: {report.count}")
+    print("")
+    print("Duration:")
+    print(f"- average: {_format_discovery_seconds(report.average_duration_seconds)}")
+    print(f"- median: {_format_discovery_seconds(report.median_duration_seconds)}")
+    print(f"- longest: {_format_discovery_seconds(report.longest_duration_seconds)}")
+    print(f"- shortest: {_format_discovery_seconds(report.shortest_duration_seconds)}")
+    print("")
+    print("Recovery:")
+    print(f"- average: {_format_discovery_seconds(report.average_recovery_seconds)}")
+    print(f"- median: {_format_discovery_seconds(report.median_recovery_seconds)}")
+    print("")
+    print("Distributions:")
+    print(f"- amplitude: {_format_hf_regime_counter(report.by_amplitude)}")
+    print(f"- session: {_format_hf_regime_counter(report.by_session)}")
+    print(f"- hour: {_format_discovery_hour_counter(report.by_hour)}")
+    print(f"- clusters: {_format_hf_regime_counter(report.cluster_distribution)}")
+    print("")
+    print("Frequency:")
+    print(f"- average events/day: {report.average_events_per_day:.2f}")
+    print(f"- maximum/day: {report.maximum_events_per_day}")
+    print(f"- minimum/day: {report.minimum_events_per_day}")
+    print("")
+    print("Pre-extreme context averages:")
+    print(f"- price_velocity: {_format_hf_regime_float(report.average_pre_price_velocity)}")
+    print(f"- short_term_drift: {_format_hf_regime_float(report.average_pre_short_term_drift)}")
+    print(f"- flat_samples_count: {_format_hf_regime_float(report.average_pre_flat_samples_count)}")
+    print(f"- buffer_unique_values: {_format_hf_regime_float(report.average_pre_buffer_unique_values)}")
+    print(f"- short_center_distance: {_format_hf_regime_float(report.average_pre_short_center_distance)}")
+    print("")
+    print("Latest events:")
+    for event in report.events[-10:]:
+        print(
+            f"- db_id={event.db_id} start={event.start_timestamp} end={event.end_timestamp} "
+            f"duration={_format_discovery_seconds(event.duration_seconds)} "
+            f"session={event.session} close={event.close_price:.8f} "
+            f"amplitude={event.amplitude_class} "
+            f"max_short_distance={_format_hf_regime_float(event.maximum_short_center_distance)} "
+            f"recovery={_format_discovery_seconds(event.recovery_seconds)}"
+        )
+    print("")
+    print(f"Conclusion: {report.conclusion}")
+    print(f"Recommendation: {report.recommendation}")
+
+
+def _format_discovery_seconds(value: float | None) -> str:
+    if value is None:
+        return "N/A"
+    return f"{value:.0f}s"
+
+
+def _format_discovery_hour_counter(values: dict[int, int]) -> str:
+    if not values:
+        return "N/A"
+    return ", ".join(f"{hour:02d}:00={count}" for hour, count in sorted(values.items()))
+
+
 def _print_hf_run_regime_series(series) -> None:
     print("")
     print(f"--- {series.label} ---")
@@ -5641,6 +5705,17 @@ def build_parser() -> argparse.ArgumentParser:
         default=0.00002,
     )
     hf_regime_filter_sim_parser.set_defaults(func=command_hf_regime_filter_sim)
+
+    extreme_market_discovery_parser = subparsers.add_parser(
+        "extreme-market-discovery",
+        help="Discover and summarize extreme market events from HF data",
+    )
+    extreme_market_discovery_parser.add_argument(
+        "--profile",
+        choices=SUPPORTED_RUNTIME_STRATEGY_PROFILES,
+        default="mean_reversion_hf_micro_v1",
+    )
+    extreme_market_discovery_parser.set_defaults(func=command_extreme_market_discovery)
 
     notifications_parser = subparsers.add_parser("notifications", help="РџРѕРєР°Р·Р°С‚Рё РїРѕРІС–РґРѕРјР»РµРЅРЅСЏ")
     notifications_parser.add_argument("--limit", type=int, default=10)
