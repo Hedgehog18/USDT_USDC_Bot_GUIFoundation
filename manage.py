@@ -96,6 +96,10 @@ from analytics.hf_profit_audit_engine import HFProfitAuditEngine
 from analytics.hf_production_readiness_engine import HFProductionReadinessEngine
 from analytics.hf_real_blackbox_engine import HFRealBlackboxDiagnosticsEngine
 from analytics.hf_real_dry_run_engine import HFRealDryRunEngine
+from analytics.hf_real_entry_quality_engine import (
+    HFRealEntryGroupMetrics,
+    HFRealEntryQualityDiagnosticsEngine,
+)
 from analytics.hf_real_pilot_engine import HFRealPilotEngine, HFRealPilotSignalSnapshot
 from analytics.hf_real_vs_paper_diagnostics_engine import HFRealVsPaperDiagnosticsEngine
 from analytics.hf_regime_filter_sim_engine import HFRegimeFilterSimulationEngine
@@ -4474,6 +4478,98 @@ def command_hf_real_cycle_blackbox(args) -> None:
     print(f"Recommendation: {report.recommendation}")
 
 
+def command_hf_real_entry_quality_diagnostics(args) -> None:
+    _config, _logger, database = build_context()
+    report = HFRealEntryQualityDiagnosticsEngine(database).build_report(args.profile)
+
+    print("=== HF Real Entry Quality Diagnostics ===")
+    print(f"Profile: {report.profile}")
+    print(f"Total analyzed cycles: {report.total_analyzed_cycles}")
+    print(f"Cycles with blackbox: {report.cycles_with_blackbox}")
+    print(f"Cycles without blackbox: {report.cycles_without_blackbox}")
+    if not report.cycles:
+        print("No real cycles with blackbox snapshots found.")
+        print(f"Main issue: {report.main_issue}")
+        print(f"Recommendation: {report.recommendation}")
+        return
+
+    print("")
+    print("Cycles:")
+    for cycle in report.cycles:
+        print(
+            f"- db_id={cycle.db_id} | campaign={cycle.campaign_id} | {cycle.direction} | "
+            f"open={cycle.open_price:.8f} | target={cycle.target_price:.8f} | "
+            f"close={_format_optional_float(cycle.close_price)} | net={cycle.net_profit:+.8f} | "
+            f"reason={cycle.close_reason or 'N/A'} | "
+            f"target_touched={'yes' if cycle.target_touched else 'no'} | "
+            f"category={cycle.entry_quality_category}"
+        )
+        print(
+            "  path: "
+            f"MFE={_format_optional_float(cycle.max_favorable_excursion)} | "
+            f"MAE={_format_optional_float(cycle.max_adverse_excursion)} | "
+            f"nearest_target={_format_optional_float(cycle.nearest_target_distance)} | "
+            f"first_touch={_format_optional_seconds(cycle.first_target_touch_seconds)}"
+        )
+        print(
+            "  entry: "
+            f"market={_format_optional_float(cycle.entry_market_price)} | "
+            f"exec_gap={_format_optional_float(cycle.entry_execution_gap)} | "
+            f"spread={_format_optional_float(cycle.entry_spread)} | "
+            f"short_center={_format_optional_float(cycle.short_center_at_entry)} | "
+            f"distance_center={_format_optional_float(cycle.distance_from_short_center)} | "
+            f"candidate={_format_optional_bool(cycle.candidate_at_entry)} | "
+            f"block={cycle.block_reason_at_entry or 'N/A'}"
+        )
+        print(
+            "  movement: "
+            f"5s={_format_optional_float(cycle.movement_after_5s)} "
+            f"({_format_optional_bool(cycle.moved_expected_5s)}) | "
+            f"15s={_format_optional_float(cycle.movement_after_15s)} "
+            f"({_format_optional_bool(cycle.moved_expected_15s)}) | "
+            f"30s={_format_optional_float(cycle.movement_after_30s)} "
+            f"({_format_optional_bool(cycle.moved_expected_30s)}) | "
+            f"60s={_format_optional_float(cycle.movement_after_60s)} "
+            f"({_format_optional_bool(cycle.moved_expected_60s)})"
+        )
+
+    print("")
+    print("Target cycles metrics:")
+    _print_real_entry_group_metrics(report.target_metrics)
+    print("")
+    print("Timeout cycles metrics:")
+    _print_real_entry_group_metrics(report.timeout_metrics)
+    print("")
+    print("Summary:")
+    print(f"- target touched count: {report.target_touched_count}")
+    print(f"- timeout no-touch count: {report.timeout_no_touch_count}")
+    print(f"- timeout loss count: {report.timeout_loss_count}")
+    print(f"- breakeven count: {report.breakeven_count}")
+    print("- categories:")
+    if report.category_counts:
+        for category, count in sorted(report.category_counts.items()):
+            print(f"  - {category}: {count}")
+    else:
+        print("  - N/A")
+    print(f"- main issue: {report.main_issue}")
+    print(f"- recommendation: {report.recommendation}")
+
+
+def _print_real_entry_group_metrics(metrics: HFRealEntryGroupMetrics) -> None:
+    print(f"- count: {metrics.count}")
+    print(f"- avg distance from center: {_format_optional_float(metrics.average_distance_from_center)}")
+    print(f"- avg entry spread: {_format_optional_float(metrics.average_entry_spread)}")
+    print(f"- avg MFE: {_format_optional_float(metrics.average_mfe)}")
+    print(f"- avg MAE: {_format_optional_float(metrics.average_mae)}")
+    print(f"- avg movement 5s: {_format_optional_float(metrics.average_movement_5s)}")
+    print(f"- avg movement 15s: {_format_optional_float(metrics.average_movement_15s)}")
+    print(f"- avg movement 30s: {_format_optional_float(metrics.average_movement_30s)}")
+    print(f"- avg movement 60s: {_format_optional_float(metrics.average_movement_60s)}")
+    print(f"- target touch rate: {metrics.target_touch_rate:.2%}")
+    print(f"- timeout loss rate: {metrics.timeout_loss_rate:.2%}")
+    print(f"- BUY / SELL: {metrics.buy_count} / {metrics.sell_count}")
+
+
 def _format_optional_float(value) -> str:
     if value is None:
         return "N/A"
@@ -4484,6 +4580,12 @@ def _format_optional_seconds(value) -> str:
     if value is None:
         return "N/A"
     return f"{float(value):.2f}s"
+
+
+def _format_optional_bool(value) -> str:
+    if value is None:
+        return "N/A"
+    return "yes" if value else "no"
 
 
 def _format_decimal_optional(value) -> str:
@@ -6923,6 +7025,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     hf_real_cycle_blackbox_parser.add_argument("--real-cycle-id", type=_positive_int, required=True)
     hf_real_cycle_blackbox_parser.set_defaults(func=command_hf_real_cycle_blackbox)
+
+    hf_real_entry_quality_parser = subparsers.add_parser(
+        "hf-real-entry-quality-diagnostics",
+        help="Diagnostics-only HF real entry quality report from blackbox snapshots",
+    )
+    hf_real_entry_quality_parser.add_argument(
+        "--profile",
+        choices=SUPPORTED_RUNTIME_STRATEGY_PROFILES,
+        default="mean_reversion_hf_micro_v1",
+    )
+    hf_real_entry_quality_parser.set_defaults(func=command_hf_real_entry_quality_diagnostics)
 
     extreme_market_discovery_parser = subparsers.add_parser(
         "extreme-market-discovery",
