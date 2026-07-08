@@ -302,6 +302,7 @@ def test_manage_cli_accepts_hf_micro_profile_for_paper_workflow_commands():
         ["hf-small-real-pilot", "--profile", "mean_reversion_hf_micro_v1", "--pilot-stake", "6", "--confirm-real-pilot"],
         ["hf-small-real-pilot-watch", "--profile", "mean_reversion_hf_micro_v1", "--pilot-stake", "6", "--confirm-real-pilot", "--max-iterations", "5", "--interval", "1"],
         ["hf-real-pilot-status", "--profile", "mean_reversion_hf_micro_v1"],
+        ["hf-real-pilot-safety-reset", "--profile", "mean_reversion_hf_micro_v1", "--reason", "run new campaign with blackbox recorder", "--confirm-real-pilot"],
         ["hf-real-pilot-close-watch", "--profile", "mean_reversion_hf_micro_v1", "--confirm-real-pilot", "--max-iterations", "5", "--interval", "1"],
         ["hf-real-pilot-campaign", "--profile", "mean_reversion_hf_micro_v1", "--pilot-stake", "6", "--target-cycles", "2", "--confirm-real-pilot"],
         ["hf-real-vs-paper-diagnostics", "--profile", "mean_reversion_hf_micro_v1"],

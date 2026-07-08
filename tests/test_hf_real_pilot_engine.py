@@ -84,6 +84,27 @@ def _engine(tmp_path, test_config, client=None):
     ), database
 
 
+def _closed_real_loss(database: DatabaseManager, *, run_id: str, net_profit: float = -0.1) -> int:
+    cycle_id = database.save_real_pilot_cycle(
+        run_id=run_id,
+        strategy_profile=PROFILE,
+        symbol="USDCUSDT",
+        direction="BUY_USDC",
+        status="OPEN",
+        open_price=1.00068,
+        quantity=6,
+        stake_usdt=6,
+    )
+    database.close_real_pilot_cycle(
+        cycle_id,
+        close_price=1.00067,
+        gross_profit=net_profit,
+        net_profit=net_profit,
+        close_reason="max_holding_270s",
+    )
+    return cycle_id
+
+
 def test_real_pilot_refuses_without_explicit_confirmation(test_config, tmp_path):
     client = FakeRealPilotClient()
     engine, _database = _engine(tmp_path, test_config, client)
@@ -189,6 +210,115 @@ def test_real_pilot_max_consecutive_losses_stop(test_config, tmp_path):
 
     assert report.status == "NOT_READY"
     assert "max_consecutive_losses" in {check.name for check in report.failed_checks}
+
+
+def test_real_pilot_safety_reset_refuses_without_confirmation(test_config, tmp_path):
+    client = FakeRealPilotClient()
+    engine, _database = _engine(tmp_path, test_config, client)
+
+    report = engine.reset_safety(
+        profile=PROFILE,
+        reason="run new campaign with blackbox recorder",
+        confirmed=False,
+    )
+
+    assert report.status == "REFUSED"
+    assert report.reset_id is None
+    assert "explicit_confirmation" in {check.name for check in report.failed_checks}
+    assert client.orders_created == 0
+
+
+def test_real_pilot_safety_reset_refuses_without_reason(test_config, tmp_path):
+    client = FakeRealPilotClient()
+    engine, _database = _engine(tmp_path, test_config, client)
+
+    report = engine.reset_safety(profile=PROFILE, reason="   ", confirmed=True)
+
+    assert report.status == "REFUSED"
+    assert report.reset_id is None
+    assert "reason_present" in {check.name for check in report.failed_checks}
+    assert client.orders_created == 0
+
+
+def test_real_pilot_safety_reset_does_not_delete_cycles_or_orders(test_config, tmp_path):
+    client = FakeRealPilotClient()
+    engine, database = _engine(tmp_path, test_config, client)
+    _closed_real_loss(database, run_id="loss-run")
+    database.save_real_pilot_order_event(
+        run_id="loss-run",
+        strategy_profile=PROFILE,
+        symbol="USDCUSDT",
+        side="BUY",
+        quantity=6,
+        status="FILLED",
+        request_payload="{}",
+        response_payload="{}",
+    )
+
+    report = engine.reset_safety(
+        profile=PROFILE,
+        reason="run new campaign with blackbox recorder",
+        confirmed=True,
+    )
+    status = engine.build_status(PROFILE)
+
+    assert report.status == "SAFETY_RESET_RECORDED"
+    assert report.reset_id is not None
+    assert status.closed_cycles == 1
+    assert status.order_events == 1
+    assert status.net_profit == -0.1
+    assert status.latest_safety_reset_reason == "run new campaign with blackbox recorder"
+    assert client.orders_created == 0
+
+
+def test_real_pilot_consecutive_losses_counted_after_reset(test_config, tmp_path):
+    client = FakeRealPilotClient()
+    engine, database = _engine(tmp_path, test_config, client)
+    for index in range(3):
+        _closed_real_loss(database, run_id=f"loss-before-reset-{index}")
+
+    blocked = engine.run_once(profile=PROFILE, pilot_stake=Decimal("6"), confirmed=True)
+    reset = engine.reset_safety(
+        profile=PROFILE,
+        reason="run new campaign with blackbox recorder",
+        confirmed=True,
+    )
+    after_reset = engine.build_status(PROFILE)
+    allowed = engine.run_once(profile=PROFILE, pilot_stake=Decimal("6"), confirmed=True, entry_signal=None)
+
+    assert "max_consecutive_losses" in {check.name for check in blocked.failed_checks}
+    assert reset.status == "SAFETY_RESET_RECORDED"
+    assert after_reset.consecutive_losses_since_reset == 0
+    assert allowed.status == "ARMED_WAITING_FOR_SIGNAL"
+    assert "max_consecutive_losses" not in {check.name for check in allowed.failed_checks}
+
+
+def test_real_pilot_campaign_can_pass_consecutive_loss_gate_after_reset(test_config, tmp_path):
+    client = FakeRealPilotClient()
+    engine, database = _engine(tmp_path, test_config, client)
+    for index in range(3):
+        _closed_real_loss(database, run_id=f"loss-before-reset-{index}")
+    engine.reset_safety(
+        profile=PROFILE,
+        reason="run new campaign with blackbox recorder",
+        confirmed=True,
+    )
+
+    report = engine.run_campaign(
+        profile=PROFILE,
+        pilot_stake=Decimal("6"),
+        target_cycles=1,
+        confirmed=True,
+        signal_provider=lambda: _watch_signal(),
+        signal_max_iterations=1,
+        close_max_iterations=1,
+        interval_seconds=0,
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert report.stop_reason == "no_signal_before_limit"
+    assert not any(check.name == "max_consecutive_losses" and not check.ok for check in report.checks)
+    assert client.orders_created == 0
 
 
 def test_real_pilot_emergency_stop_blocks(test_config, tmp_path):

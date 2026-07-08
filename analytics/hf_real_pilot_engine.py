@@ -94,6 +94,9 @@ class HFRealPilotStatusReport:
     losing_cycles: int
     order_events: int
     emergency_stop: bool
+    latest_safety_reset_timestamp: str | None = None
+    latest_safety_reset_reason: str | None = None
+    consecutive_losses_since_reset: int = 0
     open_cycle_details: "HFRealPilotOpenCycleDetails | None" = None
     campaign_details: "HFRealPilotCampaignDetails | None" = None
     latest_closed_blackbox: "HFRealPilotLatestClosedCycleBlackbox | None" = None
@@ -234,6 +237,20 @@ class HFRealPilotCampaignReport:
     safety_interruptions: int
     recommendation: str
     updates: list[HFRealPilotCampaignUpdate]
+    checks: list[RealPilotCheck]
+
+    @property
+    def failed_checks(self) -> list[RealPilotCheck]:
+        return [check for check in self.checks if not check.ok]
+
+
+@dataclass(frozen=True)
+class HFRealPilotSafetyResetReport:
+    profile: str
+    status: str
+    reset_id: int | None
+    reason: str
+    message: str
     checks: list[RealPilotCheck]
 
     @property
@@ -811,6 +828,35 @@ class HFRealPilotEngine:
             checks=diagnostic_checks,
         )
 
+    def reset_safety(self, *, profile: str, reason: str, confirmed: bool) -> HFRealPilotSafetyResetReport:
+        normalized_reason = reason.strip()
+        checks = [
+            RealPilotCheck("profile_allowed", profile == HF_V1_BASELINE_PROFILE, f"profile={profile}"),
+            RealPilotCheck("explicit_confirmation", confirmed, "requires --confirm-real-pilot"),
+            RealPilotCheck("reason_present", bool(normalized_reason), "reason must be non-empty"),
+        ]
+        if not all(check.ok for check in checks):
+            return HFRealPilotSafetyResetReport(
+                profile=profile,
+                status=REAL_PILOT_REFUSED,
+                reset_id=None,
+                reason=normalized_reason,
+                message="Real pilot safety reset refused; explicit confirmation, HF v1 profile, and reason are required.",
+                checks=checks,
+            )
+        reset_id = self.database.save_real_pilot_safety_reset(
+            strategy_profile=profile,
+            reason=normalized_reason,
+        )
+        return HFRealPilotSafetyResetReport(
+            profile=profile,
+            status="SAFETY_RESET_RECORDED",
+            reset_id=reset_id,
+            reason=normalized_reason,
+            message="Safety reset recorded. Existing cycles, net profit, and order events were not modified.",
+            checks=checks,
+        )
+
     def build_status(self, profile: str) -> HFRealPilotStatusReport:
         stats = self.database.load_real_pilot_status(profile)
         blocked = self.emergency_stop_path.exists()
@@ -819,6 +865,8 @@ class HFRealPilotEngine:
             status = "OPEN_REAL_CYCLE"
         open_cycle_details = self._build_open_cycle_details(profile)
         campaign_details = self._build_campaign_details(profile)
+        reset = self.database.load_latest_real_pilot_safety_reset(profile)
+        _net, losses_since_reset = self._load_daily_risk(profile)
         return HFRealPilotStatusReport(
             profile=profile,
             status=status,
@@ -828,6 +876,9 @@ class HFRealPilotEngine:
             losing_cycles=int(stats["losing_cycles"]),
             order_events=int(stats["order_events"]),
             emergency_stop=blocked,
+            latest_safety_reset_timestamp=reset["timestamp"] if reset else None,
+            latest_safety_reset_reason=reset["reason"] if reset else None,
+            consecutive_losses_since_reset=losses_since_reset,
             open_cycle_details=open_cycle_details,
             campaign_details=campaign_details,
             latest_closed_blackbox=self._build_latest_closed_blackbox(profile),
@@ -1187,6 +1238,8 @@ class HFRealPilotEngine:
         ]
 
     def _load_daily_risk(self, profile: str) -> tuple[Decimal, int]:
+        reset = self.database.load_latest_real_pilot_safety_reset(profile)
+        reset_timestamp = str(reset["timestamp"]) if reset else "0000"
         with self.database.connect() as conn:
             row = conn.execute(
                 """
@@ -1204,10 +1257,11 @@ class HFRealPilotEngine:
                 FROM real_pilot_cycles
                 WHERE strategy_profile = ?
                   AND status IN ('CLOSED', 'HALTED')
+                  AND COALESCE(closed_at, timestamp) > ?
                 ORDER BY id DESC
                 LIMIT 50
                 """,
-                (profile,),
+                (profile, reset_timestamp),
             ).fetchall()
         consecutive_losses = 0
         for item in recent:

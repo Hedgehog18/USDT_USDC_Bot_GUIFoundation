@@ -4145,6 +4145,9 @@ def command_hf_real_pilot_status(args) -> None:
     print(f"Losing cycles: {report.losing_cycles}")
     print(f"Order events: {report.order_events}")
     print(f"Emergency stop: {'yes' if report.emergency_stop else 'no'}")
+    print(f"Latest safety reset timestamp: {report.latest_safety_reset_timestamp or 'N/A'}")
+    print(f"Latest safety reset reason: {report.latest_safety_reset_reason or 'N/A'}")
+    print(f"Consecutive losses since reset: {report.consecutive_losses_since_reset}")
     if report.open_cycle_details is not None:
         cycle = report.open_cycle_details
         print("")
@@ -4180,6 +4183,24 @@ def command_hf_real_pilot_status(args) -> None:
         print(f"- campaign_net: {campaign.net_profit:+.8f}")
         print(f"- runtime_seconds: {campaign.runtime_seconds:.2f}")
         print(f"- stop_reason: {campaign.stop_reason or 'N/A'}")
+
+
+def command_hf_real_pilot_safety_reset(args) -> None:
+    config, _logger, database = build_context()
+    report = HFRealPilotEngine(database, config).reset_safety(
+        profile=args.profile,
+        reason=args.reason,
+        confirmed=args.confirm_real_pilot,
+    )
+
+    print("=== HF v1 Real Pilot Safety Reset ===")
+    print("WARNING: This does not delete cycles, change PnL, change order events, or create orders.")
+    print(f"Profile: {report.profile}")
+    print(f"Status: {report.status}")
+    print(f"Reset ID: {report.reset_id or 'N/A'}")
+    print(f"Reason: {report.reason or 'N/A'}")
+    print(f"Message: {report.message}")
+    _print_real_pilot_checks(report.checks)
 
 
 def command_hf_real_pilot_close_watch(args) -> None:
@@ -6835,6 +6856,19 @@ def build_parser() -> argparse.ArgumentParser:
         default="mean_reversion_hf_micro_v1",
     )
     hf_real_pilot_status_parser.set_defaults(func=command_hf_real_pilot_status)
+
+    hf_real_pilot_safety_reset_parser = subparsers.add_parser(
+        "hf-real-pilot-safety-reset",
+        help="Record a manual HF v1 real pilot safety reset boundary without deleting real history",
+    )
+    hf_real_pilot_safety_reset_parser.add_argument(
+        "--profile",
+        choices=SUPPORTED_RUNTIME_STRATEGY_PROFILES,
+        default="mean_reversion_hf_micro_v1",
+    )
+    hf_real_pilot_safety_reset_parser.add_argument("--reason", required=True)
+    hf_real_pilot_safety_reset_parser.add_argument("--confirm-real-pilot", action="store_true")
+    hf_real_pilot_safety_reset_parser.set_defaults(func=command_hf_real_pilot_safety_reset)
 
     hf_real_pilot_close_watch_parser = subparsers.add_parser(
         "hf-real-pilot-close-watch",

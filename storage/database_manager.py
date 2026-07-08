@@ -496,11 +496,20 @@ class DatabaseManager:
                     raw_payload_json TEXT
                 )
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS real_pilot_safety_resets (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT NOT NULL,
+                    strategy_profile TEXT NOT NULL,
+                    reason TEXT NOT NULL
+                )
+            """)
             conn.execute("CREATE INDEX IF NOT EXISTS idx_real_pilot_cycles_profile_status ON real_pilot_cycles(strategy_profile, status)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_real_pilot_cycles_timestamp ON real_pilot_cycles(timestamp)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_real_pilot_campaigns_profile_status ON real_pilot_campaigns(strategy_profile, status)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_real_pilot_market_snapshots_cycle ON real_pilot_market_snapshots(real_cycle_id, timestamp)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_real_pilot_market_snapshots_campaign ON real_pilot_market_snapshots(campaign_id, timestamp)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_real_pilot_safety_resets_profile_timestamp ON real_pilot_safety_resets(strategy_profile, timestamp)")
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS system_events (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2459,6 +2468,40 @@ class DatabaseManager:
             "net_profit": float(row[2]) if row else 0.0,
             "losing_cycles": int(row[3]) if row else 0,
             "order_events": int(events[0]) if events else 0,
+        }
+
+    def save_real_pilot_safety_reset(self, *, strategy_profile: str, reason: str) -> int:
+        with self.connect() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO real_pilot_safety_resets (
+                    timestamp, strategy_profile, reason
+                ) VALUES (?, ?, ?)
+                """,
+                (datetime.utcnow().isoformat(), strategy_profile, reason),
+            )
+            conn.commit()
+            return int(cursor.lastrowid)
+
+    def load_latest_real_pilot_safety_reset(self, strategy_profile: str) -> dict | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT id, timestamp, strategy_profile, reason
+                FROM real_pilot_safety_resets
+                WHERE strategy_profile = ?
+                ORDER BY timestamp DESC, id DESC
+                LIMIT 1
+                """,
+                (strategy_profile,),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "id": int(row[0]),
+            "timestamp": row[1],
+            "strategy_profile": row[2],
+            "reason": row[3],
         }
 
     def save_real_pilot_market_snapshot(
