@@ -208,6 +208,79 @@ def test_profile_decision_engine_extreme_strategy_opens_on_confirmed_signal(test
     assert "extreme signal confirmed" in decision.reason
 
 
+def test_profile_decision_engine_extreme_strategy_blocks_known_extreme_price(test_config):
+    market_state = _state(price=0.99992000, work_position=50.0, micro_trend="NEUTRAL")
+    setattr(market_state, "extreme_price_guard", True)
+    setattr(market_state, "extreme_session_signal", True)
+    setattr(market_state, "extreme_velocity_spike_signal", True)
+    setattr(market_state, "extreme_compression_signal", True)
+    setattr(market_state, "extreme_signal_detected", True)
+    setattr(market_state, "extreme_entry_direction", "SELL_USDC")
+
+    decision = StrategyProfileDecisionEngine(test_config, "extreme_strategy_v1").make_decision(market_state)
+
+    assert decision.action == "WAIT"
+    assert "extreme_price_entry_blocked" in decision.reason
+
+
+def test_profile_decision_engine_extreme_strategy_blocks_excessive_velocity(test_config):
+    market_state = _state(price=0.99998000, work_position=50.0, micro_trend="NEUTRAL")
+    setattr(market_state, "extreme_excessive_velocity_guard", True)
+    setattr(market_state, "extreme_session_signal", True)
+    setattr(market_state, "extreme_velocity_spike_signal", True)
+    setattr(market_state, "extreme_compression_signal", True)
+    setattr(market_state, "extreme_signal_detected", True)
+    setattr(market_state, "extreme_entry_direction", "SELL_USDC")
+
+    decision = StrategyProfileDecisionEngine(test_config, "extreme_strategy_v1").make_decision(market_state)
+
+    assert decision.action == "WAIT"
+    assert "excessive_velocity_entry_blocked" in decision.reason
+
+
+def test_profile_decision_engine_extreme_strategy_blocks_too_far_from_center(test_config):
+    market_state = _state(price=0.99994000, work_position=50.0, micro_trend="NEUTRAL")
+    setattr(market_state, "extreme_too_far_from_center", True)
+    setattr(market_state, "extreme_session_signal", True)
+    setattr(market_state, "extreme_velocity_spike_signal", True)
+    setattr(market_state, "extreme_compression_signal", True)
+    setattr(market_state, "extreme_signal_detected", True)
+    setattr(market_state, "extreme_entry_direction", "SELL_USDC")
+
+    decision = StrategyProfileDecisionEngine(test_config, "extreme_strategy_v1").make_decision(market_state)
+
+    assert decision.action == "WAIT"
+    assert "too_far_from_center" in decision.reason
+
+
+def test_profile_decision_engine_extreme_strategy_blocks_post_extreme_rebound(test_config):
+    market_state = _state(price=1.00010000, work_position=50.0, micro_trend="NEUTRAL")
+    setattr(market_state, "extreme_post_rebound_risk", True)
+    setattr(market_state, "extreme_session_signal", True)
+    setattr(market_state, "extreme_velocity_spike_signal", True)
+    setattr(market_state, "extreme_compression_signal", True)
+    setattr(market_state, "extreme_signal_detected", True)
+    setattr(market_state, "extreme_entry_direction", "SELL_USDC")
+
+    decision = StrategyProfileDecisionEngine(test_config, "extreme_strategy_v1").make_decision(market_state)
+
+    assert decision.action == "WAIT"
+    assert "post_extreme_rebound_risk" in decision.reason
+
+
+def test_profile_decision_engine_hf_micro_ignores_extreme_guards(test_config):
+    market_state = _state(price=0.99999, short_center=1.0, work_position=50.0, micro_trend="NEUTRAL")
+    setattr(market_state, "extreme_price_guard", True)
+    setattr(market_state, "extreme_excessive_velocity_guard", True)
+    setattr(market_state, "extreme_too_far_from_center", True)
+    setattr(market_state, "extreme_post_rebound_risk", True)
+
+    decision = StrategyProfileDecisionEngine(test_config, "mean_reversion_hf_micro_v1").make_decision(market_state)
+
+    assert decision.action == "BUY_USDC"
+    assert "price below short_center" in decision.reason
+
+
 def test_profile_decision_engine_extreme_strategy_requires_session_signal(test_config):
     market_state = _state(price=0.999998, work_position=50.0, micro_trend="NEUTRAL")
     setattr(market_state, "extreme_session_signal", False)

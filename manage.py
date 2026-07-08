@@ -64,6 +64,7 @@ from analytics.exit_risk_diagnostics_engine import ExitRiskDiagnosticsEngine
 from analytics.exit_rule_optimizer_engine import ExitRuleOptimizerEngine
 from analytics.exit_rule_sim_engine import ExitRuleSimulationEngine
 from analytics.exit_tolerance_sim_engine import ExitToleranceSimulationEngine
+from analytics.extreme_late_entry_diagnostics_engine import ExtremeLateEntryDiagnosticsEngine
 from analytics.extreme_market_discovery_engine import ExtremeMarketDiscoveryEngine
 from analytics.extreme_paper_signal_diagnostics_engine import ExtremePaperSignalDiagnosticsEngine
 from analytics.extreme_replay_engine import ExtremeReplayEngine
@@ -3704,6 +3705,57 @@ def command_extreme_paper_signal_diagnostics(args) -> None:
         )
 
 
+def command_extreme_late_entry_diagnostics(args) -> None:
+    _config, _logger, database = build_context()
+    report = ExtremeLateEntryDiagnosticsEngine(database).build_report(profile=args.profile)
+
+    print("=== Extreme Late Entry Diagnostics ===")
+    print("Diagnostics only. HF v1, real trading, and real orders are unchanged.")
+    print(f"Profile: {report.profile}")
+    print(f"Total cycles: {report.total_cycles}")
+    print(f"Late-entry cycles: {len(report.late_entry_cycles)}")
+    print(f"Extreme-price entry cycles: {len(report.extreme_price_entry_cycles)}")
+    print(f"Total net: {report.total_net:+.8f}")
+    print(f"Late-entry loss contribution: {report.late_entry_loss_contribution:+.8f}")
+    print(f"Extreme-price entry loss contribution: {report.extreme_price_entry_loss_contribution:+.8f}")
+    print(f"Net without late-entry cycles: {report.net_without_late_entry_cycles:+.8f}")
+    print(f"Net without extreme-price entries: {report.net_without_extreme_price_entries:+.8f}")
+    if report.worst_cycle is not None:
+        print(
+            "Worst cycle: "
+            f"db_id={report.worst_cycle.db_id} "
+            f"direction={report.worst_cycle.direction} "
+            f"open={report.worst_cycle.open_price:.8f} "
+            f"close={report.worst_cycle.close_price:.8f} "
+            f"net={report.worst_cycle.net_profit:+.8f} "
+            f"reason={report.worst_cycle.close_reason}"
+        )
+    print(f"Recommendation: {report.recommendation}")
+
+    if report.late_entry_cycles:
+        print("--- Late-entry cycles ---")
+        for cycle in report.late_entry_cycles:
+            print(
+                f"db_id={cycle.db_id} direction={cycle.direction} "
+                f"open={cycle.open_price:.8f} close={cycle.close_price:.8f} "
+                f"net={cycle.net_profit:+.8f} reason={cycle.close_reason} "
+                f"lead_warning={cycle.lead_warning} "
+                f"extreme_price_entry={'yes' if cycle.opened_on_extreme_price else 'no'} "
+                f"velocity={_format_optional_float(cycle.velocity_value)}/"
+                f"{_format_optional_float(cycle.velocity_threshold)} "
+                f"compression={_format_optional_float(cycle.compression_score)}"
+            )
+
+    if report.extreme_price_entry_cycles:
+        print("--- Known extreme-price entries ---")
+        for cycle in report.extreme_price_entry_cycles:
+            print(
+                f"db_id={cycle.db_id} direction={cycle.direction} "
+                f"open={cycle.open_price:.8f} close={cycle.close_price:.8f} "
+                f"net={cycle.net_profit:+.8f} reason={cycle.close_reason}"
+            )
+
+
 def _format_discovery_seconds(value: float | None) -> str:
     if value is None:
         return "N/A"
@@ -5109,6 +5161,19 @@ def _apply_collection_extreme_signal_diagnostics(diagnostics: dict[str, str], ma
     diagnostics["compression_threshold"] = _format_collection_float(
         getattr(market_state, "extreme_compression_threshold", 60.0)
     )
+    diagnostics["extreme_price_guard"] = "yes" if bool(getattr(market_state, "extreme_price_guard", False)) else "no"
+    diagnostics["excessive_velocity_guard"] = (
+        "yes" if bool(getattr(market_state, "extreme_excessive_velocity_guard", False)) else "no"
+    )
+    diagnostics["distance_from_center"] = _format_collection_float(
+        getattr(market_state, "extreme_distance_from_center", None)
+    )
+    diagnostics["max_allowed_distance"] = _format_collection_float(
+        getattr(market_state, "extreme_max_allowed_distance", None)
+    )
+    diagnostics["post_extreme_rebound_risk"] = (
+        "yes" if bool(getattr(market_state, "extreme_post_rebound_risk", False)) else "no"
+    )
     diagnostics["short_center_samples"] = str(getattr(market_state, "extreme_samples", "N/A"))
     diagnostics["price_buffer_unique_values"] = str(getattr(market_state, "extreme_price_buffer_unique_values", "N/A"))
     diagnostics["flat_samples_count"] = str(getattr(market_state, "extreme_flat_samples_count", "N/A"))
@@ -5243,6 +5308,14 @@ def _collection_entry_block_reason(item: dict) -> str:
         return "velocity_spike_missing"
     if "compression_missing" in reason:
         return "compression_missing"
+    if "extreme_price_entry_blocked" in reason:
+        return "extreme_price_entry_blocked"
+    if "excessive_velocity_entry_blocked" in reason:
+        return "excessive_velocity_entry_blocked"
+    if "post_extreme_rebound_risk" in reason:
+        return "post_extreme_rebound_risk"
+    if "too_far_from_center" in reason:
+        return "too_far_from_center"
     if "no_extreme_signal" in reason or "no_signal_direction" in reason:
         return "no_signal"
     if "invalid_price" in reason:
@@ -6228,6 +6301,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     extreme_paper_signal_parser.add_argument("--limit", type=int, default=None)
     extreme_paper_signal_parser.set_defaults(func=command_extreme_paper_signal_diagnostics)
+
+    extreme_late_entry_parser = subparsers.add_parser(
+        "extreme-late-entry-diagnostics",
+        help="Analyze late-entry and extreme-price losses for Extreme paper profile",
+    )
+    extreme_late_entry_parser.add_argument(
+        "--profile",
+        choices=SUPPORTED_RUNTIME_STRATEGY_PROFILES,
+        default="extreme_strategy_v1",
+    )
+    extreme_late_entry_parser.set_defaults(func=command_extreme_late_entry_diagnostics)
 
     notifications_parser = subparsers.add_parser("notifications", help="РџРѕРєР°Р·Р°С‚Рё РїРѕРІС–РґРѕРјР»РµРЅРЅСЏ")
     notifications_parser.add_argument("--limit", type=int, default=10)

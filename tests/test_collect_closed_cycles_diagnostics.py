@@ -91,6 +91,11 @@ def test_collection_entry_diagnostics_reports_extreme_signal_fields():
         extreme_velocity_threshold=0.000001,
         extreme_compression_score=100.0,
         extreme_compression_threshold=60.0,
+        extreme_price_guard=True,
+        extreme_excessive_velocity_guard=False,
+        extreme_distance_from_center=0.00008,
+        extreme_max_allowed_distance=0.00005,
+        extreme_post_rebound_risk=True,
         extreme_samples=6,
         extreme_price_buffer_unique_values=2,
         extreme_flat_samples_count=5,
@@ -118,8 +123,30 @@ def test_collection_entry_diagnostics_reports_extreme_signal_fields():
     assert diagnostics["velocity_threshold"] == "0.00000100"
     assert diagnostics["compression_score"] == "100.00000000"
     assert diagnostics["compression_threshold"] == "60.00000000"
+    assert diagnostics["extreme_price_guard"] == "yes"
+    assert diagnostics["excessive_velocity_guard"] == "no"
+    assert diagnostics["distance_from_center"] == "0.00008000"
+    assert diagnostics["max_allowed_distance"] == "0.00005000"
+    assert diagnostics["post_extreme_rebound_risk"] == "yes"
     assert diagnostics["target_price"] != "N/A"
     assert diagnostics["max_holding"] == "60.00000000"
+
+
+def test_collection_entry_diagnostics_classifies_extreme_guard_reasons():
+    for reason, expected in (
+        ("extreme_strategy_v1: extreme_price_entry_blocked", "extreme_price_entry_blocked"),
+        ("extreme_strategy_v1: excessive_velocity_entry_blocked", "excessive_velocity_entry_blocked"),
+        ("extreme_strategy_v1: post_extreme_rebound_risk", "post_extreme_rebound_risk"),
+        ("extreme_strategy_v1: too_far_from_center", "too_far_from_center"),
+    ):
+        diagnostics = _collection_entry_diagnostics([{
+            "action": "WAIT",
+            "reason": reason,
+            "risk_allowed": False,
+            "order_attempted": False,
+        }])
+
+        assert diagnostics["entry_block_reason"] == expected
 
 
 def test_collection_progress_throttle_respects_interval():

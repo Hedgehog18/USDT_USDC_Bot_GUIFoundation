@@ -101,3 +101,35 @@ def test_extreme_signal_requires_compression():
 
     assert signal.extreme_signal_detected is False
     assert signal.extreme_compression_signal is False
+
+
+def test_extreme_signal_provider_flags_known_extreme_price_guard():
+    provider = ExtremeSignalMarketAnalyzer(ExtremeSequenceAnalyzer(([1.0000] * 5) + [0.99992000]))
+
+    for _ in range(5):
+        provider.analyze_market()
+    signal = provider.analyze_market()
+
+    assert signal.extreme_price_guard is True
+    assert signal.extreme_distance_from_center > signal.extreme_max_allowed_distance
+    assert signal.extreme_too_far_from_center is True
+
+
+def test_extreme_signal_provider_flags_excessive_velocity_guard():
+    provider = ExtremeSignalMarketAnalyzer(ExtremeSequenceAnalyzer(([1.0000] * 5) + [0.99997000]))
+
+    for _ in range(5):
+        provider.analyze_market()
+    signal = provider.analyze_market()
+
+    assert signal.extreme_excessive_velocity_guard is True
+
+
+def test_extreme_signal_provider_flags_post_extreme_rebound_risk():
+    provider = ExtremeSignalMarketAnalyzer(ExtremeSequenceAnalyzer(([1.0000] * 5) + [0.99992000, 1.00010000]))
+
+    for _ in range(6):
+        provider.analyze_market()
+    signal = provider.analyze_market()
+
+    assert signal.extreme_post_rebound_risk is True

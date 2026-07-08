@@ -207,6 +207,11 @@ def test_renderer_prints_extreme_open_signal_metrics(capsys):
         "compression_signal": "yes",
         "compression_score": "100.00000000",
         "compression_threshold": "60.00000000",
+        "extreme_price_guard": "yes",
+        "excessive_velocity_guard": "no",
+        "distance_from_center": "0.00008000",
+        "max_allowed_distance": "0.00005000",
+        "post_extreme_rebound_risk": "yes",
         "signal_strength": "100.00000000",
         "expected_direction": "SELL_USDC",
         "lead_time_warning": "yes",
@@ -227,6 +232,10 @@ def test_renderer_prints_extreme_open_signal_metrics(capsys):
     assert "Extreme: signal=yes" in output
     assert "velocity_value=-0.00000200/0.00000100" in output
     assert "compression_score=100.00000000/60.00000000" in output
+    assert "extreme_price_guard=yes" in output
+    assert "excessive_velocity_guard=no" in output
+    assert "distance_from_center=0.00008000/0.00005000" in output
+    assert "post_extreme_rebound_risk=yes" in output
 
 
 def test_renderer_prints_closed_cycle_details(capsys):

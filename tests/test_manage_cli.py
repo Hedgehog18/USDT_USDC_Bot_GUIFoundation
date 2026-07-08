@@ -305,6 +305,7 @@ def test_manage_cli_accepts_extreme_strategy_profile_for_paper_workflows():
         ["profile-performance-summary", "--profile", "extreme_strategy_v1"],
         ["exit-risk-diagnostics", "--profile", "extreme_strategy_v1"],
         ["extreme-paper-signal-diagnostics", "--profile", "extreme_strategy_v1"],
+        ["extreme-late-entry-diagnostics", "--profile", "extreme_strategy_v1"],
     ]
 
     for command in commands:

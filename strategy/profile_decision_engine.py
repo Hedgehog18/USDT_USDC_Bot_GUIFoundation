@@ -179,6 +179,18 @@ class StrategyProfileDecisionEngine:
         if market_state.volatility_regime == "EXTREME":
             return self._decision("SAFE_WAIT", f"{profile_name}: safety_filter extreme volatility", "LOW", 0.0)
 
+        if bool(getattr(market_state, "extreme_price_guard", False)):
+            return self._decision("WAIT", f"{profile_name}: extreme_price_entry_blocked", "LOW", 0.0)
+
+        if bool(getattr(market_state, "extreme_excessive_velocity_guard", False)):
+            return self._decision("WAIT", f"{profile_name}: excessive_velocity_entry_blocked", "LOW", 0.0)
+
+        if bool(getattr(market_state, "extreme_too_far_from_center", False)):
+            return self._decision("WAIT", f"{profile_name}: too_far_from_center", "LOW", 0.0)
+
+        if bool(getattr(market_state, "extreme_post_rebound_risk", False)):
+            return self._decision("WAIT", f"{profile_name}: post_extreme_rebound_risk", "LOW", 0.0)
+
         if not bool(getattr(market_state, "extreme_session_signal", False)):
             return self._decision("WAIT", f"{profile_name}: session_signal_missing", "LOW", 0.0)
 

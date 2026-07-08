@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import replace
 
+from analytics.hf_extreme_price import is_extreme_close_price
 from analytics.market_session_diagnostics_engine import MarketSessionDiagnosticsEngine
 
 
@@ -18,6 +19,8 @@ EXTREME_BUFFER_WINDOW = 60
 EXTREME_MIN_SAMPLES = 5
 EXTREME_EXPECTED_DIRECTION = "SELL_USDC"
 EXTREME_LEAD_TIME_SECONDS = 5.0
+EXTREME_EXCESSIVE_VELOCITY_THRESHOLD = 0.000020
+EXTREME_MAX_DISTANCE_FROM_CENTER = 0.000050
 
 
 class ExtremeSignalMarketAnalyzer:
@@ -53,6 +56,12 @@ class ExtremeSignalMarketAnalyzer:
         session = MarketSessionDiagnosticsEngine.classify_session(getattr(market_state, "created_at").hour)
         price_velocity = (price - previous_price) if previous_price is not None else 0.0
         velocity_direction = "DOWN" if price_velocity < 0 else "UP" if price_velocity > 0 else "FLAT"
+        center = self._entry_center(market_state, previous_price)
+        distance_from_center = abs(price - center) if center and price > 0.0 else 0.0
+        extreme_price_guard = is_extreme_close_price(price)
+        excessive_velocity_guard = abs(price_velocity) >= EXTREME_EXCESSIVE_VELOCITY_THRESHOLD
+        too_far_from_center = distance_from_center > EXTREME_MAX_DISTANCE_FROM_CENTER
+        post_extreme_rebound_risk = self._post_extreme_rebound_risk(price, previous_price)
         session_signal = session == self.required_session
         velocity_spike_signal = price_velocity <= -abs(self.velocity_threshold)
         compression_signal = (
@@ -83,6 +92,12 @@ class ExtremeSignalMarketAnalyzer:
         setattr(updated_state, "extreme_signal_strength", signal_strength)
         setattr(updated_state, "extreme_expected_direction", EXTREME_EXPECTED_DIRECTION)
         setattr(updated_state, "extreme_entry_direction", EXTREME_EXPECTED_DIRECTION if signal_detected else "N/A")
+        setattr(updated_state, "extreme_price_guard", extreme_price_guard)
+        setattr(updated_state, "extreme_excessive_velocity_guard", excessive_velocity_guard)
+        setattr(updated_state, "extreme_distance_from_center", distance_from_center)
+        setattr(updated_state, "extreme_max_allowed_distance", EXTREME_MAX_DISTANCE_FROM_CENTER)
+        setattr(updated_state, "extreme_too_far_from_center", too_far_from_center)
+        setattr(updated_state, "extreme_post_rebound_risk", post_extreme_rebound_risk)
         setattr(updated_state, "extreme_lead_time_warning", "yes")
         setattr(updated_state, "extreme_max_holding_seconds", EXTREME_MAX_HOLDING_SECONDS)
         setattr(updated_state, "extreme_samples", len(self._prices))
@@ -123,6 +138,20 @@ class ExtremeSignalMarketAnalyzer:
         unique_score = max(0.0, min(100.0, (EXTREME_COMPRESSION_MAX_UNIQUE_VALUES / unique_values) * 50.0))
         flat_score = max(0.0, min(50.0, (flat_samples / EXTREME_COMPRESSION_MIN_FLAT_SAMPLES) * 50.0))
         return min(100.0, unique_score + flat_score)
+
+    def _entry_center(self, market_state, previous_price: float | None) -> float:
+        short_center = float(getattr(market_state, "short_center", 0.0) or 0.0)
+        if short_center > 0.0:
+            return short_center
+        if self._prices:
+            return sum(self._prices) / len(self._prices)
+        return previous_price or float(getattr(market_state, "price", 0.0) or 0.0)
+
+    def _post_extreme_rebound_risk(self, price: float, previous_price: float | None) -> bool:
+        if previous_price is None:
+            return False
+        recent_extreme = any(is_extreme_close_price(item) for item in self._prices)
+        return recent_extreme and price > previous_price
 
     def _signal_strength(
         self,
