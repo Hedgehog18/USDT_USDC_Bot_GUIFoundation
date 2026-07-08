@@ -94,6 +94,7 @@ from analytics.hf_micro_grid_sim_engine import (
 from analytics.hf_extreme_move_diagnostics_engine import HFExtremeMoveDiagnosticsEngine
 from analytics.hf_profit_audit_engine import HFProfitAuditEngine
 from analytics.hf_production_readiness_engine import HFProductionReadinessEngine
+from analytics.hf_real_dry_run_engine import HFRealDryRunEngine
 from analytics.hf_regime_filter_sim_engine import HFRegimeFilterSimulationEngine
 from analytics.hf_run_regime_comparison_engine import HFRunRegimeComparisonEngine
 from analytics.hf_velocity_filter_sim_engine import HFVelocityFilterSimulationEngine
@@ -3973,6 +3974,50 @@ def command_hf_production_readiness(args) -> None:
             print(f"- {check.name}: {check.message}")
 
 
+def command_hf_real_dry_run(args) -> None:
+    config, _logger, _database = build_context()
+    report = HFRealDryRunEngine(config).build_report(profile=args.profile)
+
+    print("=== HF v1 Real Exchange Dry Run ===")
+    print("Diagnostics only. Real trading remains disabled; no orders are created.")
+    print(f"Profile: {report.profile}")
+    print(f"Overall status: {report.status}")
+    print("")
+    print("Checks:")
+    for check in report.checks:
+        status = "PASS" if check.ok else "FAIL"
+        suffix = f" | warning: {check.warning}" if check.warning else ""
+        print(f"- [{status}] {check.name}: {check.message}{suffix}")
+
+    print("")
+    print("Proposed sizing:")
+    print(f"- USDT balance: {_format_decimal_optional(report.usdt_balance)}")
+    print(f"- USDC balance: {_format_decimal_optional(report.usdc_balance)}")
+    print(f"- stake: {_format_decimal_optional(report.proposed_stake)}")
+    print(f"- quantity raw: {_format_decimal_optional(report.proposed_quantity)}")
+    print(f"- quantity rounded: {_format_decimal_optional(report.proposed_quantity_rounded)}")
+    print(f"- BUY target price: {_format_decimal_optional(report.buy_target_price)}")
+    print(f"- SELL target price: {_format_decimal_optional(report.sell_target_price)}")
+
+    if report.warnings:
+        print("")
+        print("Warnings:")
+        for warning in report.warnings:
+            print(f"- {warning}")
+
+    if report.failed_checks:
+        print("")
+        print("Blocking checks:")
+        for check in report.failed_checks:
+            print(f"- {check.name}: {check.message}")
+
+
+def _format_decimal_optional(value) -> str:
+    if value is None:
+        return "N/A"
+    return f"{value:.8f}"
+
+
 def command_notifications(args) -> None:
     _config, _logger, database = build_context()
     engine = NotificationEngine(database)
@@ -6275,6 +6320,17 @@ def build_parser() -> argparse.ArgumentParser:
         default="mean_reversion_hf_micro_v1",
     )
     hf_production_readiness_parser.set_defaults(func=command_hf_production_readiness)
+
+    hf_real_dry_run_parser = subparsers.add_parser(
+        "hf-real-dry-run",
+        help="Diagnostics-only real exchange dry-run for the frozen HF v1 baseline",
+    )
+    hf_real_dry_run_parser.add_argument(
+        "--profile",
+        choices=SUPPORTED_RUNTIME_STRATEGY_PROFILES,
+        default="mean_reversion_hf_micro_v1",
+    )
+    hf_real_dry_run_parser.set_defaults(func=command_hf_real_dry_run)
 
     extreme_market_discovery_parser = subparsers.add_parser(
         "extreme-market-discovery",

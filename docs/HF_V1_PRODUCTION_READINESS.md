@@ -10,6 +10,14 @@ python manage.py hf-production-readiness --profile mean_reversion_hf_micro_v1
 
 The command must report `READY_FOR_DRY_RUN` before any pilot planning continues. If it reports `NOT_READY`, fix the blocking diagnostics first.
 
+The next exchange-facing dry-run command is also diagnostics-only:
+
+```bash
+python manage.py hf-real-dry-run --profile mean_reversion_hf_micro_v1
+```
+
+It must report `READY_FOR_SMALL_REAL_PILOT` before a small real-capital pilot can even be considered.
+
 ## 1. Diagnostics
 
 Before any dry-run or pilot:
@@ -54,14 +62,76 @@ Suggested paper rehearsal:
 python manage.py collect-closed-cycles --profile mean_reversion_hf_micro_v1 --target-new 50 --interval 5 --require-binance --no-beep --print-every 10
 ```
 
+### Real Exchange Dry-Run Stage
+
+After paper rehearsal and `hf-production-readiness`, run:
+
+```bash
+python manage.py hf-real-dry-run --profile mean_reversion_hf_micro_v1
+```
+
+This command checks the real exchange environment without creating orders.
+
+It verifies:
+
+- Binance public API availability;
+- authenticated account balance readability;
+- USDT and USDC balances;
+- `USDCUSDT` symbol existence;
+- symbol status is `TRADING`;
+- base and quote precision;
+- `minQty`;
+- `stepSize`;
+- `minNotional`;
+- `tickSize`;
+- current price;
+- bid, ask, and spread;
+- proposed stake against `minNotional`;
+- proposed quantity against `stepSize`;
+- target price against `tickSize`;
+- `config.mode` is still not `REAL`;
+- no order endpoint is called.
+
+Authenticated balance checks require read-only Binance credentials in the environment:
+
+```bash
+BINANCE_API_KEY
+BINANCE_API_SECRET
+```
+
+Without these variables, the command must remain `NOT_READY` because USDT/USDC balances cannot be verified.
+
+It does not:
+
+- create Binance orders;
+- create paper cycles;
+- enable real trading;
+- change HF v1;
+- change config;
+- mutate balances;
+- run entry or close logic.
+
+If the command prints warnings, treat them as operator review items. If it prints `NOT_READY`, do not proceed.
+
 ## 3. Small Real Pilot
 
 Small real pilot is a future phase, not part of the current code state.
 
+Minimum criteria before a small real pilot:
+
+- `hf-production-readiness` reports `READY_FOR_DRY_RUN`;
+- `hf-real-dry-run` reports `READY_FOR_SMALL_REAL_PILOT`;
+- USDT and USDC balances are both sufficient for the proposed stake;
+- proposed stake is safely above `minNotional`;
+- proposed quantity survives `stepSize` rounding;
+- target prices survive `tickSize` rounding;
+- spread is within the configured threshold;
+- `config.mode` is still `DEMO` until a separate reviewed real-trading implementation exists;
+- operator has a tested stop and rollback procedure.
+
 Before any pilot exists, the project still needs:
 
 - explicit real-order implementation review;
-- authenticated Binance account/balance checks;
 - API-key storage and secret handling review;
 - hard position limits;
 - hard daily loss limit;
