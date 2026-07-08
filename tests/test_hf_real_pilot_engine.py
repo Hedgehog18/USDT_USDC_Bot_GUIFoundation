@@ -18,11 +18,17 @@ class FakeRealPilotClient:
         usdc: Decimal = Decimal("20"),
         order_status: str = "FILLED",
         permissions: dict | None = None,
+        bid: float = 1.00068,
+        ask: float = 1.00069,
+        order_avg_price: Decimal = Decimal("1.00069"),
     ) -> None:
         self.usdt = usdt
         self.usdc = usdc
         self.order_status = order_status
         self.orders_created = 0
+        self.bid = bid
+        self.ask = ask
+        self.order_avg_price = order_avg_price
         self.permissions = permissions or {
             "canTrade": True,
             "canWithdraw": False,
@@ -31,7 +37,7 @@ class FakeRealPilotClient:
         }
 
     def get_bid_ask(self, symbol: str) -> BidAsk:
-        return BidAsk(bid=1.00068, ask=1.00069)
+        return BidAsk(bid=self.bid, ask=self.ask)
 
     def get_symbol_rules(self, symbol: str) -> ExchangeSymbolRules:
         return ExchangeSymbolRules(
@@ -59,7 +65,7 @@ class FakeRealPilotClient:
             order_id="mock-order-1",
             status=self.order_status,
             executed_qty=quantity if self.order_status == "FILLED" else Decimal("0"),
-            avg_price=Decimal("1.00069") if self.order_status == "FILLED" else Decimal("0"),
+            avg_price=self.order_avg_price if self.order_status == "FILLED" else Decimal("0"),
             raw_response={"orderId": "mock-order-1", "status": self.order_status, "side": side},
         )
 
@@ -375,3 +381,132 @@ def test_real_pilot_watch_requires_dry_run_ready_before_order_attempt(test_confi
     assert report.status == "NOT_READY"
     assert report.iterations == 0
     assert client.orders_created == 0
+
+
+def test_real_pilot_close_watch_refuses_without_confirmation(test_config, tmp_path):
+    client = FakeRealPilotClient()
+    engine, database = _engine(tmp_path, test_config, client)
+    database.save_real_pilot_cycle(
+        run_id="open",
+        strategy_profile=PROFILE,
+        symbol="USDCUSDT",
+        direction="BUY_USDC",
+        status="OPEN",
+        open_price=1.00068,
+        quantity=6,
+        stake_usdt=6,
+    )
+
+    report = engine.close_watch(
+        profile=PROFILE,
+        confirmed=False,
+        max_iterations=3,
+        interval_seconds=0,
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert report.status == "REFUSED"
+    assert report.order_attempted is False
+    assert client.orders_created == 0
+
+
+def test_real_pilot_close_watch_refuses_if_no_open_cycle(test_config, tmp_path):
+    client = FakeRealPilotClient()
+    engine, _database = _engine(tmp_path, test_config, client)
+
+    report = engine.close_watch(
+        profile=PROFILE,
+        confirmed=True,
+        max_iterations=3,
+        interval_seconds=0,
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert report.status == "NO_OPEN_REAL_CYCLE"
+    assert report.order_attempted is False
+    assert client.orders_created == 0
+
+
+def test_real_pilot_close_watch_closes_target_hit(test_config, tmp_path):
+    client = FakeRealPilotClient(
+        bid=1.00069,
+        ask=1.00070,
+        order_avg_price=Decimal("1.00069"),
+    )
+    engine, database = _engine(tmp_path, test_config, client)
+    cycle_id = database.save_real_pilot_cycle(
+        run_id="open",
+        strategy_profile=PROFILE,
+        symbol="USDCUSDT",
+        direction="BUY_USDC",
+        status="OPEN",
+        open_price=1.00068,
+        quantity=6,
+        stake_usdt=6,
+    )
+
+    report = engine.close_watch(
+        profile=PROFILE,
+        confirmed=True,
+        max_iterations=3,
+        interval_seconds=0,
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert report.status == "CLOSE_ORDER_PLACED"
+    assert report.order_attempted is True
+    assert report.close_reason == "real_pilot_target"
+    assert report.real_cycle_id == cycle_id
+    assert client.orders_created == 1
+    with database.connect() as conn:
+        row = conn.execute(
+            "SELECT status, close_price, net_profit, close_reason FROM real_pilot_cycles WHERE id = ?",
+            (cycle_id,),
+        ).fetchone()
+        paper_count = conn.execute("SELECT COUNT(*) FROM paper_cycles").fetchone()[0]
+    assert row[0] == "CLOSED"
+    assert row[1] == 1.00069
+    assert row[2] > 0
+    assert row[3] == "real_pilot_target"
+    assert paper_count == 0
+
+
+def test_real_pilot_close_watch_does_not_open_new_entry(test_config, tmp_path):
+    client = FakeRealPilotClient()
+    engine, database = _engine(tmp_path, test_config, client)
+
+    report = engine.close_watch(
+        profile=PROFILE,
+        confirmed=True,
+        max_iterations=1,
+        interval_seconds=0,
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert report.status == "NO_OPEN_REAL_CYCLE"
+    assert client.orders_created == 0
+    assert database.count_open_real_pilot_cycles(PROFILE) == 0
+
+
+def test_real_pilot_status_shows_open_cycle_details(test_config, tmp_path):
+    client = FakeRealPilotClient(bid=1.00067, ask=1.00068)
+    engine, database = _engine(tmp_path, test_config, client)
+    cycle_id = database.save_real_pilot_cycle(
+        run_id="status",
+        strategy_profile=PROFILE,
+        symbol="USDCUSDT",
+        direction="SELL_USDC",
+        status="OPEN",
+        open_price=1.00068,
+        quantity=6,
+        stake_usdt=6,
+    )
+
+    report = engine.build_status(PROFILE)
+
+    assert report.open_cycle_details is not None
+    assert report.open_cycle_details.db_id == cycle_id
+    assert report.open_cycle_details.direction == "SELL_USDC"
+    assert report.open_cycle_details.quantity == Decimal("6.0")
+    assert report.open_cycle_details.target_price < Decimal("1.00068")
+    assert report.open_cycle_details.current_price == Decimal("1.00068")

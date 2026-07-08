@@ -2082,6 +2082,44 @@ class DatabaseManager:
             ).fetchone()
         return int(row[0]) if row else 0
 
+    def load_open_real_pilot_cycle(self, strategy_profile: str) -> dict | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT
+                    id, timestamp, strategy_profile, symbol, direction, status,
+                    open_price, close_price, quantity, stake_usdt,
+                    gross_profit, net_profit, opened_at, closed_at,
+                    close_reason, exchange_order_id, run_id
+                FROM real_pilot_cycles
+                WHERE strategy_profile = ? AND status = 'OPEN'
+                ORDER BY id ASC
+                LIMIT 1
+                """,
+                (strategy_profile,),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "id": int(row[0]),
+            "timestamp": row[1],
+            "strategy_profile": row[2],
+            "symbol": row[3],
+            "direction": row[4],
+            "status": row[5],
+            "open_price": float(row[6]),
+            "close_price": float(row[7]) if row[7] is not None else None,
+            "quantity": float(row[8]),
+            "stake_usdt": float(row[9]),
+            "gross_profit": float(row[10]),
+            "net_profit": float(row[11]),
+            "opened_at": row[12],
+            "closed_at": row[13],
+            "close_reason": row[14],
+            "exchange_order_id": row[15],
+            "run_id": row[16],
+        }
+
     def save_real_pilot_order_event(
         self,
         *,
@@ -2157,6 +2195,39 @@ class DatabaseManager:
             )
             conn.commit()
             return int(cursor.lastrowid)
+
+    def close_real_pilot_cycle(
+        self,
+        cycle_id: int,
+        *,
+        close_price: float,
+        gross_profit: float,
+        net_profit: float,
+        close_reason: str,
+    ) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                UPDATE real_pilot_cycles
+                SET
+                    status = 'CLOSED',
+                    close_price = ?,
+                    gross_profit = ?,
+                    net_profit = ?,
+                    closed_at = ?,
+                    close_reason = ?
+                WHERE id = ? AND status = 'OPEN'
+                """,
+                (
+                    close_price,
+                    gross_profit,
+                    net_profit,
+                    datetime.utcnow().isoformat(),
+                    close_reason,
+                    cycle_id,
+                ),
+            )
+            conn.commit()
 
     def load_real_pilot_status(self, strategy_profile: str) -> dict[str, float | int]:
         with self.connect() as conn:

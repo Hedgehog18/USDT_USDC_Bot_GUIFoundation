@@ -4132,6 +4132,66 @@ def command_hf_real_pilot_status(args) -> None:
     print(f"Losing cycles: {report.losing_cycles}")
     print(f"Order events: {report.order_events}")
     print(f"Emergency stop: {'yes' if report.emergency_stop else 'no'}")
+    if report.open_cycle_details is not None:
+        cycle = report.open_cycle_details
+        print("")
+        print("Open real cycle:")
+        print(f"- db_id: {cycle.db_id}")
+        print(f"- direction: {cycle.direction}")
+        print(f"- open_price: {_format_decimal_optional(cycle.open_price)}")
+        print(f"- target_price: {_format_decimal_optional(cycle.target_price)}")
+        print(f"- quantity: {_format_decimal_optional(cycle.quantity)}")
+        print(f"- opened_at: {cycle.opened_at}")
+        print(f"- age_seconds: {cycle.age_seconds:.2f}")
+        print(f"- current_price: {_format_decimal_optional(cycle.current_price)}")
+        print(f"- unrealized_pnl: {_format_decimal_optional(cycle.unrealized_pnl)}")
+        print(f"- distance_to_target: {_format_decimal_optional(cycle.distance_to_target)}")
+
+
+def command_hf_real_pilot_close_watch(args) -> None:
+    config, _logger, database = build_context()
+    pilot_engine = HFRealPilotEngine(database, config)
+
+    def print_update(update) -> None:
+        print(
+            f"[real-pilot-close-watch {update.update_number}] "
+            f"price={_format_decimal_optional(update.current_price)} | "
+            f"target={_format_decimal_optional(update.target_price)} | "
+            f"distance={_format_decimal_optional(update.distance_to_target)} | "
+            f"uPnL={_format_decimal_optional(update.unrealized_pnl)} | "
+            f"age={update.age_seconds:.2f}s | "
+            f"target_met={'yes' if update.close_condition_met else 'no'} | "
+            f"timeout_met={'yes' if update.timeout_condition_met else 'no'} | "
+            f"close_reason={update.close_reason or 'N/A'}"
+        )
+
+    print("=== HF v1 Real Pilot Close Watch ===")
+    print("WARNING: This command never opens entries; it may create at most one SPOT close order for an existing real cycle.")
+    print(f"Profile: {args.profile}")
+    print(f"Max iterations: {args.max_iterations}")
+    print(f"Interval seconds: {args.interval}")
+
+    report = pilot_engine.close_watch(
+        profile=args.profile,
+        confirmed=args.confirm_real_pilot,
+        max_iterations=args.max_iterations,
+        interval_seconds=args.interval,
+        update_callback=print_update,
+    )
+
+    print("")
+    print("=== HF v1 Real Pilot Close Watch Result ===")
+    print(f"Status: {report.status}")
+    print(f"Iterations: {report.iterations}")
+    print(f"Order attempted: {'yes' if report.order_attempted else 'no'}")
+    print(f"Order status: {report.order_status or 'N/A'}")
+    print(f"Real cycle db_id: {report.real_cycle_id or 'N/A'}")
+    print(f"Close reason: {report.close_reason or 'N/A'}")
+    print(f"Message: {report.message}")
+    if report.failed_checks:
+        print("Blocking checks:")
+        for check in report.failed_checks:
+            print(f"- {check.name}: {check.message}")
 
 
 def _format_decimal_optional(value) -> str:
@@ -6504,6 +6564,20 @@ def build_parser() -> argparse.ArgumentParser:
         default="mean_reversion_hf_micro_v1",
     )
     hf_real_pilot_status_parser.set_defaults(func=command_hf_real_pilot_status)
+
+    hf_real_pilot_close_watch_parser = subparsers.add_parser(
+        "hf-real-pilot-close-watch",
+        help="Watch an existing HF v1 real pilot cycle and place at most one confirmed close order",
+    )
+    hf_real_pilot_close_watch_parser.add_argument(
+        "--profile",
+        choices=SUPPORTED_RUNTIME_STRATEGY_PROFILES,
+        default="mean_reversion_hf_micro_v1",
+    )
+    hf_real_pilot_close_watch_parser.add_argument("--confirm-real-pilot", action="store_true")
+    hf_real_pilot_close_watch_parser.add_argument("--max-iterations", type=_positive_int, default=300)
+    hf_real_pilot_close_watch_parser.add_argument("--interval", type=_decimal_float, default=1.0)
+    hf_real_pilot_close_watch_parser.set_defaults(func=command_hf_real_pilot_close_watch)
 
     extreme_market_discovery_parser = subparsers.add_parser(
         "extreme-market-discovery",
