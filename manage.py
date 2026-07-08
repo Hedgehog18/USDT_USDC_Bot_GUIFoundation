@@ -4039,16 +4039,22 @@ def command_hf_small_real_pilot(args) -> None:
     print(f"Order status: {report.order_status or 'N/A'}")
     print(f"Real cycle db_id: {report.real_cycle_id or 'N/A'}")
     print(f"Message: {report.message}")
+    _print_real_pilot_checks(report.checks)
+
+
+def _print_real_pilot_checks(checks) -> None:
+    if not checks:
+        return
     print("")
     print("Checks:")
-    for check in report.checks:
+    for check in checks:
         status = "PASS" if check.ok else "FAIL"
         print(f"- [{status}] {check.name}: {check.message}")
-
-    if report.failed_checks:
+    failed = [check for check in checks if not check.ok]
+    if failed:
         print("")
         print("Blocking checks:")
-        for check in report.failed_checks:
+        for check in failed:
             print(f"- {check.name}: {check.message}")
 
 
@@ -4299,6 +4305,7 @@ def command_hf_real_pilot_campaign(args) -> None:
     print("Average Execution Delay: N/A")
     print(f"Safety interruptions: {report.safety_interruptions}")
     print(f"Recommendation: {report.recommendation}")
+    _print_real_pilot_checks(report.checks)
 
 
 def command_hf_real_vs_paper_diagnostics(args) -> None:

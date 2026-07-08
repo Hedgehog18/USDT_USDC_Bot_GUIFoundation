@@ -1,6 +1,7 @@
 import pytest
 
-from manage import build_parser
+from analytics.hf_real_pilot_engine import RealPilotCheck
+from manage import _print_real_pilot_checks, build_parser
 
 
 def test_manage_cli_has_run_command():
@@ -10,6 +11,21 @@ def test_manage_cli_has_run_command():
     assert args.command == "run"
     assert args.iterations == 2
     assert args.interval == 1
+
+
+def test_real_pilot_campaign_failure_prints_blocking_checks(capsys):
+    _print_real_pilot_checks([
+        RealPilotCheck("profile_allowed", True, "profile=mean_reversion_hf_micro_v1"),
+        RealPilotCheck("emergency_stop_clear", False, "path=EMERGENCY_STOP"),
+    ])
+
+    output = capsys.readouterr().out
+
+    assert "Checks:" in output
+    assert "- [PASS] profile_allowed: profile=mean_reversion_hf_micro_v1" in output
+    assert "- [FAIL] emergency_stop_clear: path=EMERGENCY_STOP" in output
+    assert "Blocking checks:" in output
+    assert "- emergency_stop_clear: path=EMERGENCY_STOP" in output
 
 
 def test_manage_cli_has_notifications_command():

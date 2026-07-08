@@ -657,6 +657,38 @@ def test_real_pilot_campaign_stops_on_emergency_stop(test_config, tmp_path):
     assert report.stop_reason == "safety_audit_failed"
     assert report.completed_cycles == 0
     assert client.orders_created == 0
+    assert report.failed_checks
+    assert any(check.name == "emergency_stop_clear" and not check.ok for check in report.checks)
+
+
+def test_real_pilot_campaign_diagnostics_match_small_pilot_failure(test_config, tmp_path):
+    client = FakeRealPilotClient()
+    stop_path = tmp_path / "EMERGENCY_STOP"
+    stop_path.write_text("stop", encoding="utf-8")
+    database = DatabaseManager(str(tmp_path / "bot.sqlite"))
+    engine = HFRealPilotEngine(database, _config(test_config), client, emergency_stop_path=stop_path)
+
+    campaign = engine.run_campaign(
+        profile=PROFILE,
+        pilot_stake=Decimal("6"),
+        target_cycles=2,
+        confirmed=True,
+        signal_provider=lambda: _watch_signal("BUY_USDC"),
+        signal_max_iterations=1,
+        close_max_iterations=1,
+        interval_seconds=0,
+        sleep_fn=lambda _seconds: None,
+    )
+    single = engine.run_once(
+        profile=PROFILE,
+        pilot_stake=Decimal("6"),
+        confirmed=True,
+        entry_signal=None,
+    )
+
+    campaign_diagnostics = [(check.name, check.ok, check.message) for check in campaign.checks]
+    single_diagnostics = [(check.name, check.ok, check.message) for check in single.checks]
+    assert campaign_diagnostics == single_diagnostics
 
 
 def test_real_pilot_campaign_stops_on_daily_loss(test_config, tmp_path):

@@ -234,6 +234,11 @@ class HFRealPilotCampaignReport:
     safety_interruptions: int
     recommendation: str
     updates: list[HFRealPilotCampaignUpdate]
+    checks: list[RealPilotCheck]
+
+    @property
+    def failed_checks(self) -> list[RealPilotCheck]:
+        return [check for check in self.checks if not check.ok]
 
 
 class BinanceRealPilotOrderClient(BinanceRealDryRunProvider):
@@ -630,6 +635,7 @@ class HFRealPilotEngine:
         completed = 0
         status = "RUNNING"
         stop_reason = "target_cycles_reached"
+        diagnostic_checks: list[RealPilotCheck] = []
         while completed < target_cycles:
             cycle_number = completed + 1
             emit(HFRealPilotCampaignUpdate(
@@ -668,6 +674,7 @@ class HFRealPilotEngine:
             if entry.status != REAL_PILOT_ORDER_PLACED:
                 status = "STOPPED"
                 stop_reason = self._campaign_stop_reason(entry.status)
+                diagnostic_checks = entry.final_pilot_report.checks if entry.final_pilot_report is not None else []
                 if entry.status in {REAL_PILOT_NOT_READY, REAL_PILOT_REFUSED, REAL_PILOT_HALTED}:
                     safety_interruptions += 1
                 emit(HFRealPilotCampaignUpdate(
@@ -717,6 +724,7 @@ class HFRealPilotEngine:
             if close.status != REAL_PILOT_CLOSE_ORDER_PLACED:
                 status = "STOPPED"
                 stop_reason = self._campaign_stop_reason(close.status)
+                diagnostic_checks = close.checks
                 safety_interruptions += 1
                 emit(HFRealPilotCampaignUpdate(
                     phase="EXIT",
@@ -765,6 +773,7 @@ class HFRealPilotEngine:
             if not audit_ok:
                 status = "STOPPED"
                 stop_reason = self._failed_audit_reason(audit_checks)
+                diagnostic_checks = audit_checks
                 safety_interruptions += 1
                 break
 
@@ -799,6 +808,7 @@ class HFRealPilotEngine:
             safety_interruptions=safety_interruptions,
             recommendation=self._campaign_recommendation(status, stop_reason, final_stats, target_cycles),
             updates=updates,
+            checks=diagnostic_checks,
         )
 
     def build_status(self, profile: str) -> HFRealPilotStatusReport:
