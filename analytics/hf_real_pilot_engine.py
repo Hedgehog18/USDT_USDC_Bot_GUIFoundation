@@ -322,15 +322,19 @@ class HFRealPilotEngine:
         try:
             account = self.order_client.get_account_permissions()
             can_trade = bool(account.get("canTrade", False))
-            can_withdraw = bool(account.get("canWithdraw", False))
+            account_can_withdraw = bool(account.get("canWithdraw", False))
             permissions = {str(item).upper() for item in account.get("permissions", [])}
             account_type = str(account.get("accountType", "")).upper()
             spot_ok = "SPOT" in permissions or account_type == "SPOT"
-            ok = can_trade and spot_ok and not can_withdraw
+            ok = can_trade and spot_ok
             return RealPilotCheck(
                 "api_permissions_spot_only",
                 ok,
-                f"canTrade={can_trade}, canWithdraw={can_withdraw}, accountType={account_type or 'N/A'}, permissions={','.join(sorted(permissions)) or 'N/A'}",
+                (
+                    f"canTrade={can_trade}, accountCanWithdraw={account_can_withdraw}, "
+                    f"accountType={account_type or 'N/A'}, permissions={','.join(sorted(permissions)) or 'N/A'}; "
+                    "accountCanWithdraw is account-level and is not used as an API-key withdrawal permission gate"
+                ),
             )
         except Exception as exc:
             return RealPilotCheck("api_permissions_spot_only", False, f"permissions unavailable: {exc}")

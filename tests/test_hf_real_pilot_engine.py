@@ -219,6 +219,24 @@ def test_real_pilot_order_client_mocked_and_no_paper_contamination(test_config, 
     assert paper_count == 0
 
 
+def test_real_pilot_does_not_block_on_account_level_can_withdraw(test_config, tmp_path):
+    client = FakeRealPilotClient(permissions={
+        "canTrade": True,
+        "canWithdraw": True,
+        "accountType": "SPOT",
+        "permissions": ["SPOT"],
+    })
+    engine, _database = _engine(tmp_path, test_config, client)
+
+    report = engine.run_once(profile=PROFILE, pilot_stake=Decimal("6"), confirmed=True)
+
+    permission_check = next(check for check in report.checks if check.name == "api_permissions_spot_only")
+    assert permission_check.ok is True
+    assert "account-level" in permission_check.message
+    assert report.status == "ARMED_WAITING_FOR_SIGNAL"
+    assert client.orders_created == 0
+
+
 def test_real_pilot_status_reads_isolated_real_tables(test_config, tmp_path):
     engine, database = _engine(tmp_path, test_config)
     database.save_real_pilot_cycle(

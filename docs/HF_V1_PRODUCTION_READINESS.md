@@ -101,6 +101,8 @@ BINANCE_API_SECRET
 
 Without these variables, the command must remain `NOT_READY` because USDT/USDC balances cannot be verified.
 
+Withdrawal permission must be reviewed in Binance API Management for the specific API key. The Binance account endpoint field `canWithdraw` is account-level metadata and does not prove that the current API key has withdrawal endpoint permission. The pilot readiness checks therefore do not block solely on `account.canWithdraw=True`; the operator must keep `Enable Withdrawals` disabled on the API key itself.
+
 It does not:
 
 - create Binance orders;
@@ -115,7 +117,13 @@ If the command prints warnings, treat them as operator review items. If it print
 
 ## 3. Small Real Pilot
 
-Small real pilot is a future phase, not part of the current code state.
+Small real pilot is implemented as an explicit, guarded command:
+
+```bash
+python manage.py hf-small-real-pilot --profile mean_reversion_hf_micro_v1 --pilot-stake 6 --confirm-real-pilot
+```
+
+Without `--confirm-real-pilot`, the command refuses before exchange dry-run checks or order attempts. The command is restricted to `mean_reversion_hf_micro_v1`, uses separate real-pilot tables, and does not create paper cycles.
 
 Minimum criteria before a small real pilot:
 
@@ -129,9 +137,9 @@ Minimum criteria before a small real pilot:
 - `config.mode` is still `DEMO` until a separate reviewed real-trading implementation exists;
 - operator has a tested stop and rollback procedure.
 
-Before any pilot exists, the project still needs:
+Before using the pilot with capital, the project still needs operator review of:
 
-- explicit real-order implementation review;
+- explicit real-order implementation;
 - API-key storage and secret handling review;
 - hard position limits;
 - hard daily loss limit;
