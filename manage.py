@@ -3976,7 +3976,10 @@ def command_hf_production_readiness(args) -> None:
 
 def command_hf_real_dry_run(args) -> None:
     config, _logger, _database = build_context()
-    report = HFRealDryRunEngine(config).build_report(profile=args.profile)
+    report = HFRealDryRunEngine(config).build_report_with_stake(
+        profile=args.profile,
+        pilot_stake=args.pilot_stake,
+    )
 
     print("=== HF v1 Real Exchange Dry Run ===")
     print("Diagnostics only. Real trading remains disabled; no orders are created.")
@@ -3991,6 +3994,7 @@ def command_hf_real_dry_run(args) -> None:
 
     print("")
     print("Proposed sizing:")
+    print(f"- stake source: {report.stake_source}")
     print(f"- USDT balance: {_format_decimal_optional(report.usdt_balance)}")
     print(f"- USDC balance: {_format_decimal_optional(report.usdc_balance)}")
     print(f"- stake: {_format_decimal_optional(report.proposed_stake)}")
@@ -6329,6 +6333,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--profile",
         choices=SUPPORTED_RUNTIME_STRATEGY_PROFILES,
         default="mean_reversion_hf_micro_v1",
+    )
+    hf_real_dry_run_parser.add_argument(
+        "--pilot-stake",
+        type=_positive_decimal_float,
+        default=None,
+        help="Manual proposed pilot stake for dry-run sizing only. Does not create orders.",
     )
     hf_real_dry_run_parser.set_defaults(func=command_hf_real_dry_run)
 

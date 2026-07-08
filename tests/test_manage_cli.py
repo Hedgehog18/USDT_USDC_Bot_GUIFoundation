@@ -282,7 +282,7 @@ def test_manage_cli_accepts_hf_micro_profile_for_paper_workflow_commands():
         ["hf-velocity-filter-sim", "--profile", "mean_reversion_hf_micro_v1", "--since-id", "1534", "--limit", "50"],
         ["hf-regime-filter-sim", "--profile", "mean_reversion_hf_micro_v1", "--since-id", "1534", "--limit", "50"],
         ["hf-production-readiness", "--profile", "mean_reversion_hf_micro_v1"],
-        ["hf-real-dry-run", "--profile", "mean_reversion_hf_micro_v1"],
+        ["hf-real-dry-run", "--profile", "mean_reversion_hf_micro_v1", "--pilot-stake", "6"],
         ["extreme-market-discovery", "--profile", "mean_reversion_hf_micro_v1"],
         ["extreme-replay", "--profile", "mean_reversion_hf_micro_v1"],
         ["extreme-replay-ranking", "--profile", "mean_reversion_hf_micro_v1"],

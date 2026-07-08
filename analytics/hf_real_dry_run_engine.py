@@ -62,6 +62,7 @@ class HFRealDryRunReport:
     status: str
     checks: list[HFRealDryRunCheck]
     warnings: list[str]
+    stake_source: str
     usdt_balance: Decimal | None
     usdc_balance: Decimal | None
     proposed_stake: Decimal | None
@@ -192,11 +193,21 @@ class HFRealDryRunEngine:
         self.provider = provider or BinanceRealDryRunProvider(base_url=config.binance_base_url)
 
     def build_report(self, profile: str = HF_V1_BASELINE_PROFILE) -> HFRealDryRunReport:
+        return self.build_report_with_stake(profile=profile, pilot_stake=None)
+
+    def build_report_with_stake(
+        self,
+        profile: str = HF_V1_BASELINE_PROFILE,
+        *,
+        pilot_stake: Decimal | float | str | None = None,
+    ) -> HFRealDryRunReport:
         checks: list[HFRealDryRunCheck] = [
             self._check_profile(profile),
             self._check_frozen_baseline(profile),
         ]
         warnings: list[str] = []
+        manual_stake = Decimal(str(pilot_stake)) if pilot_stake is not None else None
+        stake_source = "manual" if manual_stake is not None else "auto"
         balances: AccountBalances | None = None
         rules: ExchangeSymbolRules | None = None
         bid_ask: BidAsk | None = None
@@ -240,7 +251,12 @@ class HFRealDryRunEngine:
         buy_target = None
         sell_target = None
         if balances is not None and rules is not None and bid_ask is not None:
-            sizing_checks, sizing_warnings, proposed = self._sizing_checks(balances, rules, bid_ask)
+            sizing_checks, sizing_warnings, proposed = self._sizing_checks(
+                balances,
+                rules,
+                bid_ask,
+                manual_stake=manual_stake,
+            )
             checks.extend(sizing_checks)
             warnings.extend(sizing_warnings)
             proposed_stake, proposed_quantity, proposed_quantity_rounded, buy_target, sell_target = proposed
@@ -267,6 +283,7 @@ class HFRealDryRunEngine:
             status=status,
             checks=checks,
             warnings=warnings,
+            stake_source=stake_source,
             usdt_balance=balances.usdt if balances else None,
             usdc_balance=balances.usdc if balances else None,
             proposed_stake=proposed_stake,
@@ -314,16 +331,21 @@ class HFRealDryRunEngine:
         balances: AccountBalances,
         rules: ExchangeSymbolRules,
         bid_ask: BidAsk,
+        *,
+        manual_stake: Decimal | None,
     ) -> tuple[list[HFRealDryRunCheck], list[str], tuple[Decimal, Decimal, Decimal, Decimal, Decimal]]:
         warnings: list[str] = []
         checks: list[HFRealDryRunCheck] = []
         mid = Decimal(str(bid_ask.mid_price))
         usdc_value = balances.usdc * mid
         available_stake_base = min(balances.usdt, usdc_value)
-        proposed_stake = self._round_decimal(
-            available_stake_base * Decimal(str(self.config.trade_size_percent)),
-            Decimal("0.00000001"),
-        )
+        if manual_stake is None:
+            proposed_stake = self._round_decimal(
+                available_stake_base * Decimal(str(self.config.trade_size_percent)),
+                Decimal("0.00000001"),
+            )
+        else:
+            proposed_stake = self._round_decimal(manual_stake, Decimal("0.00000001"))
         proposed_quantity = proposed_stake / mid if mid > 0 else Decimal("0")
         proposed_quantity_rounded = self._round_decimal(proposed_quantity, rules.step_size)
         rounded_notional = proposed_quantity_rounded * mid
@@ -337,6 +359,10 @@ class HFRealDryRunEngine:
             warnings.append(f"USDT balance {balances.usdt:.8f} is below minNotional {rules.min_notional}")
         if usdc_value < rules.min_notional:
             warnings.append(f"USDC value {usdc_value:.8f} is below minNotional {rules.min_notional}")
+        if manual_stake is not None and proposed_stake > available_stake_base:
+            warnings.append(
+                f"manual pilot stake {proposed_stake:.8f} exceeds available balanced stake {available_stake_base:.8f}"
+            )
 
         checks.append(HFRealDryRunCheck(
             "usdt_balance",
@@ -349,6 +375,12 @@ class HFRealDryRunEngine:
             balances.usdc > 0,
             f"USDC={balances.usdc:.8f} value={usdc_value:.8f}",
             None if usdc_value >= rules.min_notional else "USDC value below minNotional",
+        ))
+        checks.append(HFRealDryRunCheck(
+            "pilot_stake_available_balance",
+            proposed_stake <= available_stake_base,
+            f"stake={proposed_stake:.8f}, available_balanced_stake={available_stake_base:.8f}",
+            None if proposed_stake <= available_stake_base else "manual stake exceeds available USDT/USDC balance",
         ))
         checks.append(HFRealDryRunCheck(
             "proposed_stake_min_notional",

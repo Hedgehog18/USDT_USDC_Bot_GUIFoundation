@@ -88,6 +88,31 @@ def test_hf_real_dry_run_fails_if_stake_below_min_notional(test_config):
     assert "proposed_stake_min_notional" in failed
 
 
+def test_hf_real_dry_run_manual_stake_passes_min_notional(test_config):
+    provider = FakeRealDryRunProvider(usdt=Decimal("10"), usdc=Decimal("10"), min_notional=Decimal("5"))
+    report = HFRealDryRunEngine(_config(test_config, trade_size_percent=0.10), provider).build_report_with_stake(
+        PROFILE,
+        pilot_stake=Decimal("6"),
+    )
+
+    assert report.status == "READY_FOR_SMALL_REAL_PILOT"
+    assert report.stake_source == "manual"
+    assert report.proposed_stake == Decimal("6.00000000")
+
+
+def test_hf_real_dry_run_manual_stake_fails_if_too_high(test_config):
+    provider = FakeRealDryRunProvider(usdt=Decimal("10"), usdc=Decimal("10"), min_notional=Decimal("5"))
+    report = HFRealDryRunEngine(_config(test_config), provider).build_report_with_stake(
+        PROFILE,
+        pilot_stake=Decimal("12"),
+    )
+
+    failed = {check.name for check in report.failed_checks}
+    assert report.status == "NOT_READY"
+    assert report.stake_source == "manual"
+    assert "pilot_stake_available_balance" in failed
+
+
 def test_hf_real_dry_run_confirms_no_order_creation(test_config):
     provider = FakeRealDryRunProvider()
     report = HFRealDryRunEngine(_config(test_config), provider).build_report(PROFILE)
