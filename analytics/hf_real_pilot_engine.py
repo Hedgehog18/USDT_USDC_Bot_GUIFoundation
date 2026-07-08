@@ -14,6 +14,7 @@ from urllib.parse import urlencode
 import requests
 
 from analytics.hf_production_readiness_engine import HF_V1_BASELINE_PROFILE
+from analytics.hf_real_blackbox_engine import HFRealBlackboxDiagnosticsEngine, HFRealBlackboxRecorder
 from analytics.hf_real_dry_run_engine import (
     BinanceRealDryRunProvider,
     HFRealDryRunEngine,
@@ -95,6 +96,7 @@ class HFRealPilotStatusReport:
     emergency_stop: bool
     open_cycle_details: "HFRealPilotOpenCycleDetails | None" = None
     campaign_details: "HFRealPilotCampaignDetails | None" = None
+    latest_closed_blackbox: "HFRealPilotLatestClosedCycleBlackbox | None" = None
 
 
 @dataclass(frozen=True)
@@ -109,6 +111,7 @@ class HFRealPilotOpenCycleDetails:
     current_price: Decimal | None
     unrealized_pnl: Decimal | None
     distance_to_target: Decimal | None
+    blackbox_snapshots_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -132,6 +135,12 @@ class HFRealPilotSignalSnapshot:
     candidate: bool
     entry_signal: str | None
     block_reason: str
+    bid: float | None = None
+    ask: float | None = None
+    mid: float | None = None
+    spread: float | None = None
+    source: str | None = None
+    raw_payload_json: str | None = None
 
 
 @dataclass(frozen=True)
@@ -165,6 +174,10 @@ class HFRealPilotCloseUpdate:
     distance_to_target: Decimal | None
     unrealized_pnl: Decimal | None
     order_attempted: bool
+    bid: Decimal | None = None
+    ask: Decimal | None = None
+    mid: Decimal | None = None
+    spread: Decimal | None = None
 
 
 @dataclass(frozen=True)
@@ -183,6 +196,13 @@ class HFRealPilotCloseWatchReport:
     @property
     def failed_checks(self) -> list[RealPilotCheck]:
         return [check for check in self.checks if not check.ok]
+
+
+@dataclass(frozen=True)
+class HFRealPilotLatestClosedCycleBlackbox:
+    db_id: int
+    snapshots_count: int
+    target_touched: bool | None
 
 
 @dataclass(frozen=True)
@@ -379,6 +399,7 @@ class HFRealPilotEngine:
         signal_provider: Callable[[], HFRealPilotSignalSnapshot],
         sleep_fn: Callable[[float], None] = time.sleep,
         update_callback: Callable[[HFRealPilotWatchUpdate], None] | None = None,
+        campaign_id: str | None = None,
     ) -> HFRealPilotWatchReport:
         if max_iterations <= 0:
             raise ValueError("max_iterations must be greater than 0.")
@@ -403,8 +424,15 @@ class HFRealPilotEngine:
 
         updates: list[HFRealPilotWatchUpdate] = []
         final_report: HFRealPilotReport | None = early
+        recorder = HFRealBlackboxRecorder(self.database, self.config.symbol)
         for index in range(1, max_iterations + 1):
             signal = signal_provider()
+            recorder.record_signal_snapshot(
+                phase="pre_entry",
+                signal=signal,
+                campaign_id=campaign_id,
+                open_real_cycles=self.database.count_open_real_pilot_cycles(profile),
+            )
             entry_signal = signal.entry_signal if signal.candidate else None
             final_report = self.run_once(
                 profile=profile,
@@ -424,6 +452,22 @@ class HFRealPilotEngine:
                 update_callback(update)
 
             if final_report.order_attempted:
+                if final_report.real_cycle_id is not None:
+                    recorder.attach_recent_pre_entry(
+                        real_cycle_id=final_report.real_cycle_id,
+                        campaign_id=campaign_id,
+                    )
+                    cycle = self.database.load_open_real_pilot_cycle(profile)
+                    target_price = float(self._target_price(cycle)) if cycle else None
+                    recorder.record_signal_snapshot(
+                        phase="entry",
+                        signal=signal,
+                        campaign_id=campaign_id,
+                        real_cycle_id=final_report.real_cycle_id,
+                        direction=entry_signal,
+                        target_price=target_price,
+                        open_real_cycles=self.database.count_open_real_pilot_cycles(profile),
+                    )
                 return HFRealPilotWatchReport(
                     profile=profile,
                     status=final_report.status,
@@ -462,6 +506,7 @@ class HFRealPilotEngine:
         interval_seconds: float,
         sleep_fn: Callable[[float], None] = time.sleep,
         update_callback: Callable[[HFRealPilotCloseUpdate], None] | None = None,
+        campaign_id: str | None = None,
     ) -> HFRealPilotCloseWatchReport:
         if max_iterations <= 0:
             raise ValueError("max_iterations must be greater than 0.")
@@ -490,6 +535,7 @@ class HFRealPilotEngine:
             )
 
         updates: list[HFRealPilotCloseUpdate] = []
+        recorder = HFRealBlackboxRecorder(self.database, self.config.symbol)
         for index in range(1, max_iterations + 1):
             cycle = self.database.load_open_real_pilot_cycle(profile)
             if cycle is None:
@@ -508,6 +554,14 @@ class HFRealPilotEngine:
 
             update = self._build_close_update(index, cycle)
             updates.append(update)
+            recorder.record_close_snapshot(
+                phase="exit" if update.close_reason is not None else "tracking",
+                update=update,
+                real_cycle_id=int(cycle["id"]),
+                campaign_id=campaign_id,
+                direction=str(cycle["direction"]),
+                open_real_cycles=self.database.count_open_real_pilot_cycles(profile),
+            )
             if update_callback is not None:
                 update_callback(update)
 
@@ -609,6 +663,7 @@ class HFRealPilotEngine:
                 signal_provider=signal_provider,
                 sleep_fn=sleep_fn,
                 update_callback=entry_update_callback,
+                campaign_id=campaign_id,
             )
             if entry.status != REAL_PILOT_ORDER_PLACED:
                 status = "STOPPED"
@@ -657,6 +712,7 @@ class HFRealPilotEngine:
                 interval_seconds=interval_seconds,
                 sleep_fn=sleep_fn,
                 update_callback=close_update_callback,
+                campaign_id=campaign_id,
             )
             if close.status != REAL_PILOT_CLOSE_ORDER_PLACED:
                 status = "STOPPED"
@@ -764,6 +820,7 @@ class HFRealPilotEngine:
             emergency_stop=blocked,
             open_cycle_details=open_cycle_details,
             campaign_details=campaign_details,
+            latest_closed_blackbox=self._build_latest_closed_blackbox(profile),
         )
 
     def _close_preflight_checks(self, *, profile: str, confirmed: bool) -> list[RealPilotCheck]:
@@ -905,6 +962,37 @@ class HFRealPilotEngine:
             current_price=current_price,
             unrealized_pnl=unrealized,
             distance_to_target=distance,
+            blackbox_snapshots_count=self.database.count_real_pilot_market_snapshots(int(cycle["id"])),
+        )
+
+    def _build_latest_closed_blackbox(self, profile: str) -> HFRealPilotLatestClosedCycleBlackbox | None:
+        with self.database.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT id
+                FROM real_pilot_cycles
+                WHERE strategy_profile = ?
+                  AND status IN ('CLOSED', 'HALTED')
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (profile,),
+            ).fetchone()
+        if row is None:
+            return None
+        cycle_id = int(row[0])
+        snapshots_count = self.database.count_real_pilot_market_snapshots(cycle_id)
+        target_touched = None
+        if snapshots_count:
+            report = HFRealBlackboxDiagnosticsEngine(self.database).build_report(
+                profile=profile,
+                real_cycle_id=cycle_id,
+            )
+            target_touched = report.metrics.target_touched if report.metrics else None
+        return HFRealPilotLatestClosedCycleBlackbox(
+            db_id=cycle_id,
+            snapshots_count=snapshots_count,
+            target_touched=target_touched,
         )
 
     def _build_close_update(self, update_number: int, cycle: dict) -> HFRealPilotCloseUpdate:
@@ -912,6 +1000,10 @@ class HFRealPilotEngine:
         age_seconds = self._cycle_age_seconds(cycle)
         try:
             bid_ask = self.order_client.get_bid_ask(self.config.symbol)
+            bid = Decimal(str(bid_ask.bid))
+            ask = Decimal(str(bid_ask.ask))
+            mid = (bid + ask) / Decimal("2")
+            spread = ask - bid
             current_price = self._executable_close_price(cycle["direction"], bid_ask)
             unrealized = self._profit_for_cycle(cycle, current_price)
             distance = self._distance_to_target(cycle["direction"], current_price, target_price)
@@ -921,6 +1013,10 @@ class HFRealPilotEngine:
             unrealized = None
             distance = None
             close_condition_met = False
+            bid = None
+            ask = None
+            mid = None
+            spread = None
 
         timeout_condition_met = age_seconds >= REAL_PILOT_MAX_HOLDING_SECONDS
         close_reason = None
@@ -943,6 +1039,10 @@ class HFRealPilotEngine:
             distance_to_target=distance,
             unrealized_pnl=unrealized,
             order_attempted=False,
+            bid=bid,
+            ask=ask,
+            mid=mid,
+            spread=spread,
         )
 
     def _place_close_order(

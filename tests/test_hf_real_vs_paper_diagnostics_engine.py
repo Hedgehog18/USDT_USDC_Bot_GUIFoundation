@@ -189,3 +189,67 @@ def test_real_vs_paper_execution_events_parsed_correctly(tmp_path):
     cycle = report.cycles[0]
     assert cycle.quote_amount == pytest.approx(10.00005)
     assert cycle.maker_taker_role == "TAKER"
+
+
+def test_real_vs_paper_uses_blackbox_snapshots_when_available(tmp_path):
+    database = DatabaseManager(str(tmp_path / "bot.sqlite"))
+    start = datetime(2026, 7, 8, 12, 0, 0)
+    _real_cycle(
+        database,
+        open_price=1.0,
+        close_price=0.99999,
+        net_profit=-0.0001,
+        close_reason="max_holding_270s",
+        opened_at=start,
+        closed_at=start + timedelta(seconds=270),
+    )
+    database.save_real_pilot_market_snapshot(
+        real_cycle_id=1,
+        campaign_id="campaign-1",
+        timestamp=start.isoformat(),
+        phase="entry",
+        symbol="USDCUSDT",
+        price=1.0,
+        bid=0.999995,
+        ask=1.000005,
+        mid=1.0,
+        spread=0.00001,
+        short_center=1.00001,
+        hf_entry_mode="short_center",
+        candidate=True,
+        block_reason="N/A",
+        direction="BUY_USDC",
+        target_price=1.000005,
+        distance_to_target=0.000005,
+        unrealized_pnl=0.0,
+        open_real_cycles=1,
+        source="TEST",
+    )
+    database.save_real_pilot_market_snapshot(
+        real_cycle_id=1,
+        campaign_id="campaign-1",
+        timestamp=(start + timedelta(seconds=15)).isoformat(),
+        phase="tracking",
+        symbol="USDCUSDT",
+        price=1.000006,
+        bid=1.000001,
+        ask=1.000011,
+        mid=1.000006,
+        spread=0.00001,
+        short_center=1.00001,
+        hf_entry_mode="short_center",
+        candidate=True,
+        block_reason="N/A",
+        direction="BUY_USDC",
+        target_price=1.000005,
+        distance_to_target=-0.000001,
+        unrealized_pnl=0.00006,
+        open_real_cycles=1,
+        source="TEST",
+    )
+
+    report = HFRealVsPaperDiagnosticsEngine(database).build_report(PROFILE)
+
+    assert report.cycles[0].target_touched is True
+    assert report.cycles[0].paper_target_hit is True
+    assert report.cycles[0].paper_equivalent_net > 0

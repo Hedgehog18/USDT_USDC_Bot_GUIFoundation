@@ -94,6 +94,7 @@ from analytics.hf_micro_grid_sim_engine import (
 from analytics.hf_extreme_move_diagnostics_engine import HFExtremeMoveDiagnosticsEngine
 from analytics.hf_profit_audit_engine import HFProfitAuditEngine
 from analytics.hf_production_readiness_engine import HFProductionReadinessEngine
+from analytics.hf_real_blackbox_engine import HFRealBlackboxDiagnosticsEngine
 from analytics.hf_real_dry_run_engine import HFRealDryRunEngine
 from analytics.hf_real_pilot_engine import HFRealPilotEngine, HFRealPilotSignalSnapshot
 from analytics.hf_real_vs_paper_diagnostics_engine import HFRealVsPaperDiagnosticsEngine
@@ -4071,6 +4072,11 @@ def command_hf_small_real_pilot_watch(args) -> None:
                 "action": decision.action,
                 "reason": decision.reason,
             }),
+            bid=float(getattr(market_state, "bid", 0.0) or 0.0),
+            ask=float(getattr(market_state, "ask", 0.0) or 0.0),
+            mid=float(getattr(market_state, "price", 0.0) or 0.0),
+            spread=float(getattr(market_state, "spread", 0.0) or 0.0),
+            source=str(getattr(bot.market_analyzer, "last_data_source", "UNKNOWN")),
         )
 
     def print_update(update) -> None:
@@ -4147,6 +4153,15 @@ def command_hf_real_pilot_status(args) -> None:
         print(f"- current_price: {_format_decimal_optional(cycle.current_price)}")
         print(f"- unrealized_pnl: {_format_decimal_optional(cycle.unrealized_pnl)}")
         print(f"- distance_to_target: {_format_decimal_optional(cycle.distance_to_target)}")
+        print(f"- blackbox_snapshots: {cycle.blackbox_snapshots_count}")
+    if report.latest_closed_blackbox is not None:
+        latest = report.latest_closed_blackbox
+        print("")
+        print("Latest closed blackbox:")
+        print(f"- db_id: {latest.db_id}")
+        print(f"- snapshots: {latest.snapshots_count}")
+        target_touched = "N/A" if latest.target_touched is None else ("yes" if latest.target_touched else "no")
+        print(f"- target_touched: {target_touched}")
     if report.campaign_details is not None:
         campaign = report.campaign_details
         print("")
@@ -4227,6 +4242,11 @@ def command_hf_real_pilot_campaign(args) -> None:
                 "action": decision.action,
                 "reason": decision.reason,
             }),
+            bid=float(getattr(market_state, "bid", 0.0) or 0.0),
+            ask=float(getattr(market_state, "ask", 0.0) or 0.0),
+            mid=float(getattr(market_state, "price", 0.0) or 0.0),
+            spread=float(getattr(market_state, "spread", 0.0) or 0.0),
+            source=str(getattr(bot.market_analyzer, "last_data_source", "UNKNOWN")),
         )
 
     def print_update(update) -> None:
@@ -4352,6 +4372,78 @@ def command_hf_real_vs_paper_diagnostics(args) -> None:
     print(f"- real minus paper delta: {report.real_minus_paper_delta:+.8f}")
     print(f"- main suspected issue: {report.main_suspected_issue}")
     print(f"- recommendation: {report.recommendation}")
+
+
+def command_hf_real_cycle_blackbox(args) -> None:
+    _config, _logger, database = build_context()
+    report = HFRealBlackboxDiagnosticsEngine(database).build_report(
+        profile=args.profile,
+        real_cycle_id=args.real_cycle_id,
+    )
+
+    print("=== HF Real Cycle Black Box ===")
+    print(f"Profile: {report.profile}")
+    print(f"Real cycle db_id: {report.real_cycle_id}")
+    if report.cycle is None:
+        print("Cycle: not found")
+        print(f"Recommendation: {report.recommendation}")
+        return
+
+    cycle = report.cycle
+    target_price = HFRealBlackboxDiagnosticsEngine.target_price(cycle["direction"], cycle["open_price"])
+    print("Cycle details:")
+    print(f"- direction: {cycle['direction']}")
+    print(f"- status: {cycle['status']}")
+    print(f"- open_price: {cycle['open_price']:.8f}")
+    print(f"- close_price: {_format_optional_float(cycle['close_price'])}")
+    print(f"- target_price: {target_price:.8f}")
+    print(f"- quantity: {cycle['quantity']:.8f}")
+    print(f"- opened_at: {cycle['opened_at']}")
+    print(f"- closed_at: {cycle['closed_at'] or 'N/A'}")
+    print(f"- close_reason: {cycle['close_reason'] or 'N/A'}")
+    print(f"- net_profit: {cycle['net_profit']:+.8f}")
+
+    if report.metrics is None:
+        print("")
+        print("Blackbox snapshots: 0")
+        print("MFE: N/A")
+        print("MAE: N/A")
+        print("Target touched: N/A")
+        print("Suspected reason: data_insufficient")
+        print(f"Recommendation: {report.recommendation}")
+        return
+
+    metrics = report.metrics
+    print("")
+    print("Snapshot counts:")
+    print(f"- total: {metrics.snapshots_count}")
+    print(f"- pre_entry: {metrics.pre_entry_count}")
+    print(f"- tracking: {metrics.tracking_count}")
+    print(f"- exit: {metrics.exit_count}")
+    print(f"- post_exit: {metrics.post_exit_count}")
+    print("")
+    print("Path metrics:")
+    print(f"- MFE: {_format_optional_float(metrics.max_favorable_excursion)}")
+    print(f"- MAE: {_format_optional_float(metrics.max_adverse_excursion)}")
+    print(f"- target_touched: {'yes' if metrics.target_touched else 'no'}")
+    print(f"- first_target_touch: {_format_optional_seconds(metrics.first_target_touch_seconds)}")
+    print(f"- nearest_target_distance: {_format_optional_float(metrics.nearest_target_distance)}")
+    print(f"- nearest_target_time: {_format_optional_seconds(metrics.nearest_target_seconds)}")
+    print(f"- max_favorable_price: {_format_optional_float(metrics.max_favorable_price)}")
+    print(f"- max_adverse_price: {_format_optional_float(metrics.max_adverse_price)}")
+    print(f"- min_price: {_format_optional_float(metrics.min_price)}")
+    print(f"- max_price: {_format_optional_float(metrics.max_price)}")
+    print("")
+    print("Spread / execution:")
+    print(f"- average_spread: {_format_optional_float(metrics.average_spread)}")
+    print(f"- max_spread: {_format_optional_float(metrics.max_spread)}")
+    print(f"- entry_market_price: {_format_optional_float(metrics.entry_market_price)}")
+    print(f"- exit_market_price: {_format_optional_float(metrics.exit_market_price)}")
+    print(f"- entry_execution_gap: {_format_optional_float(metrics.entry_execution_gap)}")
+    print(f"- close_execution_gap: {_format_optional_float(metrics.close_execution_gap)}")
+    print("")
+    print(f"Suspected reason: {metrics.suspected_reason}")
+    print(f"Recommendation: {report.recommendation}")
 
 
 def _format_optional_float(value) -> str:
@@ -6778,6 +6870,18 @@ def build_parser() -> argparse.ArgumentParser:
         default="mean_reversion_hf_micro_v1",
     )
     hf_real_vs_paper_diagnostics_parser.set_defaults(func=command_hf_real_vs_paper_diagnostics)
+
+    hf_real_cycle_blackbox_parser = subparsers.add_parser(
+        "hf-real-cycle-blackbox",
+        help="Diagnostics-only black box market path report for a closed or open HF real pilot cycle",
+    )
+    hf_real_cycle_blackbox_parser.add_argument(
+        "--profile",
+        choices=SUPPORTED_RUNTIME_STRATEGY_PROFILES,
+        default="mean_reversion_hf_micro_v1",
+    )
+    hf_real_cycle_blackbox_parser.add_argument("--real-cycle-id", type=_positive_int, required=True)
+    hf_real_cycle_blackbox_parser.set_defaults(func=command_hf_real_cycle_blackbox)
 
     extreme_market_discovery_parser = subparsers.add_parser(
         "extreme-market-discovery",

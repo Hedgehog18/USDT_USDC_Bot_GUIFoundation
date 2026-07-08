@@ -510,6 +510,98 @@ def test_real_pilot_status_shows_open_cycle_details(test_config, tmp_path):
     assert report.open_cycle_details.quantity == Decimal("6.0")
     assert report.open_cycle_details.target_price < Decimal("1.00068")
     assert report.open_cycle_details.current_price == Decimal("1.00068")
+    assert report.open_cycle_details.blackbox_snapshots_count == 0
+
+
+def test_real_pilot_status_shows_blackbox_count_for_open_cycle(test_config, tmp_path):
+    client = FakeRealPilotClient(bid=1.00067, ask=1.00068)
+    engine, database = _engine(tmp_path, test_config, client)
+    cycle_id = database.save_real_pilot_cycle(
+        run_id="status",
+        strategy_profile=PROFILE,
+        symbol="USDCUSDT",
+        direction="BUY_USDC",
+        status="OPEN",
+        open_price=1.00068,
+        quantity=6,
+        stake_usdt=6,
+    )
+    database.save_real_pilot_market_snapshot(
+        real_cycle_id=cycle_id,
+        campaign_id="campaign-1",
+        phase="tracking",
+        symbol="USDCUSDT",
+        price=1.00069,
+        bid=1.000685,
+        ask=1.000695,
+        mid=1.00069,
+        spread=0.00001,
+        short_center=1.00068,
+        hf_entry_mode="short_center",
+        candidate=True,
+        block_reason="N/A",
+        direction="BUY_USDC",
+        target_price=1.000685,
+        distance_to_target=-0.000005,
+        unrealized_pnl=0.00006,
+        open_real_cycles=1,
+        source="TEST",
+    )
+
+    report = engine.build_status(PROFILE)
+
+    assert report.open_cycle_details is not None
+    assert report.open_cycle_details.blackbox_snapshots_count == 1
+
+
+def test_real_pilot_status_shows_latest_closed_blackbox_target_touch(test_config, tmp_path):
+    client = FakeRealPilotClient()
+    engine, database = _engine(tmp_path, test_config, client)
+    cycle_id = database.save_real_pilot_cycle(
+        run_id="status",
+        strategy_profile=PROFILE,
+        symbol="USDCUSDT",
+        direction="BUY_USDC",
+        status="OPEN",
+        open_price=1.0,
+        quantity=10,
+        stake_usdt=10,
+    )
+    database.close_real_pilot_cycle(
+        cycle_id,
+        close_price=1.000006,
+        gross_profit=0.00006,
+        net_profit=0.00006,
+        close_reason="real_pilot_target",
+    )
+    database.save_real_pilot_market_snapshot(
+        real_cycle_id=cycle_id,
+        campaign_id="campaign-1",
+        phase="tracking",
+        symbol="USDCUSDT",
+        price=1.000006,
+        bid=1.000001,
+        ask=1.000011,
+        mid=1.000006,
+        spread=0.00001,
+        short_center=1.0,
+        hf_entry_mode="short_center",
+        candidate=True,
+        block_reason="N/A",
+        direction="BUY_USDC",
+        target_price=1.000005,
+        distance_to_target=-0.000001,
+        unrealized_pnl=0.00006,
+        open_real_cycles=0,
+        source="TEST",
+    )
+
+    report = engine.build_status(PROFILE)
+
+    assert report.latest_closed_blackbox is not None
+    assert report.latest_closed_blackbox.db_id == cycle_id
+    assert report.latest_closed_blackbox.snapshots_count == 1
+    assert report.latest_closed_blackbox.target_touched is True
 
 
 def test_real_pilot_campaign_completes_normally(test_config, tmp_path):

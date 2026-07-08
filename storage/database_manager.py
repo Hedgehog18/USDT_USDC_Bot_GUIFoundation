@@ -470,9 +470,37 @@ class DatabaseManager:
                     orders_filled INTEGER NOT NULL DEFAULT 0
                 )
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS real_pilot_market_snapshots (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    real_cycle_id INTEGER,
+                    campaign_id TEXT,
+                    timestamp TEXT NOT NULL,
+                    phase TEXT NOT NULL,
+                    symbol TEXT NOT NULL,
+                    price REAL,
+                    bid REAL,
+                    ask REAL,
+                    mid REAL,
+                    spread REAL,
+                    short_center REAL,
+                    hf_entry_mode TEXT,
+                    candidate INTEGER,
+                    block_reason TEXT,
+                    direction TEXT,
+                    target_price REAL,
+                    distance_to_target REAL,
+                    unrealized_pnl REAL,
+                    open_real_cycles INTEGER,
+                    source TEXT,
+                    raw_payload_json TEXT
+                )
+            """)
             conn.execute("CREATE INDEX IF NOT EXISTS idx_real_pilot_cycles_profile_status ON real_pilot_cycles(strategy_profile, status)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_real_pilot_cycles_timestamp ON real_pilot_cycles(timestamp)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_real_pilot_campaigns_profile_status ON real_pilot_campaigns(strategy_profile, status)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_real_pilot_market_snapshots_cycle ON real_pilot_market_snapshots(real_cycle_id, timestamp)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_real_pilot_market_snapshots_campaign ON real_pilot_market_snapshots(campaign_id, timestamp)")
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS system_events (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2431,6 +2459,187 @@ class DatabaseManager:
             "net_profit": float(row[2]) if row else 0.0,
             "losing_cycles": int(row[3]) if row else 0,
             "order_events": int(events[0]) if events else 0,
+        }
+
+    def save_real_pilot_market_snapshot(
+        self,
+        *,
+        real_cycle_id: int | None,
+        campaign_id: str | None,
+        phase: str,
+        symbol: str,
+        price: float | None,
+        bid: float | None,
+        ask: float | None,
+        mid: float | None,
+        spread: float | None,
+        short_center: float | None,
+        hf_entry_mode: str | None,
+        candidate: bool | None,
+        block_reason: str | None,
+        direction: str | None,
+        target_price: float | None,
+        distance_to_target: float | None,
+        unrealized_pnl: float | None,
+        open_real_cycles: int | None,
+        source: str | None,
+        raw_payload_json: str | None = None,
+        timestamp: str | None = None,
+    ) -> int:
+        with self.connect() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO real_pilot_market_snapshots (
+                    real_cycle_id, campaign_id, timestamp, phase, symbol,
+                    price, bid, ask, mid, spread, short_center, hf_entry_mode,
+                    candidate, block_reason, direction, target_price,
+                    distance_to_target, unrealized_pnl, open_real_cycles,
+                    source, raw_payload_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    real_cycle_id,
+                    campaign_id,
+                    timestamp or datetime.utcnow().isoformat(),
+                    phase,
+                    symbol,
+                    price,
+                    bid,
+                    ask,
+                    mid,
+                    spread,
+                    short_center,
+                    hf_entry_mode,
+                    None if candidate is None else int(candidate),
+                    block_reason,
+                    direction,
+                    target_price,
+                    distance_to_target,
+                    unrealized_pnl,
+                    open_real_cycles,
+                    source,
+                    raw_payload_json,
+                ),
+            )
+            conn.commit()
+            return int(cursor.lastrowid)
+
+    def attach_recent_real_pilot_market_snapshots(
+        self,
+        *,
+        real_cycle_id: int,
+        campaign_id: str | None,
+        since_timestamp: str,
+    ) -> int:
+        with self.connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE real_pilot_market_snapshots
+                SET real_cycle_id = ?
+                WHERE real_cycle_id IS NULL
+                  AND phase = 'pre_entry'
+                  AND timestamp >= ?
+                  AND (campaign_id = ? OR (? IS NULL AND campaign_id IS NULL))
+                """,
+                (real_cycle_id, since_timestamp, campaign_id, campaign_id),
+            )
+            conn.commit()
+            return int(cursor.rowcount)
+
+    def count_real_pilot_market_snapshots(self, real_cycle_id: int) -> int:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM real_pilot_market_snapshots WHERE real_cycle_id = ?",
+                (real_cycle_id,),
+            ).fetchone()
+        return int(row[0]) if row else 0
+
+    def count_real_pilot_market_snapshots_by_phase(self, real_cycle_id: int) -> dict[str, int]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT phase, COUNT(*)
+                FROM real_pilot_market_snapshots
+                WHERE real_cycle_id = ?
+                GROUP BY phase
+                """,
+                (real_cycle_id,),
+            ).fetchall()
+        return {str(row[0]): int(row[1]) for row in rows}
+
+    def load_real_pilot_market_snapshots(self, real_cycle_id: int) -> list[dict]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    id, real_cycle_id, campaign_id, timestamp, phase, symbol,
+                    price, bid, ask, mid, spread, short_center, hf_entry_mode,
+                    candidate, block_reason, direction, target_price,
+                    distance_to_target, unrealized_pnl, open_real_cycles,
+                    source, raw_payload_json
+                FROM real_pilot_market_snapshots
+                WHERE real_cycle_id = ?
+                ORDER BY timestamp ASC, id ASC
+                """,
+                (real_cycle_id,),
+            ).fetchall()
+        keys = [
+            "id", "real_cycle_id", "campaign_id", "timestamp", "phase", "symbol",
+            "price", "bid", "ask", "mid", "spread", "short_center", "hf_entry_mode",
+            "candidate", "block_reason", "direction", "target_price",
+            "distance_to_target", "unrealized_pnl", "open_real_cycles",
+            "source", "raw_payload_json",
+        ]
+        return [dict(zip(keys, row)) for row in rows]
+
+    def load_real_pilot_cycle_by_id(self, real_cycle_id: int, strategy_profile: str | None = None) -> dict | None:
+        with self.connect() as conn:
+            if strategy_profile:
+                row = conn.execute(
+                    """
+                    SELECT
+                        id, timestamp, strategy_profile, symbol, direction, status,
+                        open_price, close_price, quantity, stake_usdt,
+                        gross_profit, net_profit, opened_at, closed_at,
+                        close_reason, exchange_order_id, run_id
+                    FROM real_pilot_cycles
+                    WHERE id = ? AND strategy_profile = ?
+                    """,
+                    (real_cycle_id, strategy_profile),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    """
+                    SELECT
+                        id, timestamp, strategy_profile, symbol, direction, status,
+                        open_price, close_price, quantity, stake_usdt,
+                        gross_profit, net_profit, opened_at, closed_at,
+                        close_reason, exchange_order_id, run_id
+                    FROM real_pilot_cycles
+                    WHERE id = ?
+                    """,
+                    (real_cycle_id,),
+                ).fetchone()
+        if row is None:
+            return None
+        return {
+            "id": int(row[0]),
+            "timestamp": row[1],
+            "strategy_profile": row[2],
+            "symbol": row[3],
+            "direction": row[4],
+            "status": row[5],
+            "open_price": float(row[6]),
+            "close_price": float(row[7]) if row[7] is not None else None,
+            "quantity": float(row[8]),
+            "stake_usdt": float(row[9]),
+            "gross_profit": float(row[10]),
+            "net_profit": float(row[11]),
+            "opened_at": row[12],
+            "closed_at": row[13],
+            "close_reason": row[14],
+            "exchange_order_id": row[15],
+            "run_id": row[16],
         }
 
     def load_paper_cycle_collection_baseline(self, strategy_profile: str) -> dict[str, float | int]:

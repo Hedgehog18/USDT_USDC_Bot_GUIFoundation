@@ -99,7 +99,7 @@ class HFRealVsPaperDiagnosticsEngine:
         target_price = self._target_price(row["direction"], row["open_price"])
         opened_at = self._parse_time(row["opened_at"])
         closed_at = self._parse_time(row["closed_at"]) if row["closed_at"] else None
-        snapshots = self._load_hf_snapshots(row["opened_at"], row["closed_at"] or row["opened_at"])
+        snapshots = self._load_market_path(row, row["opened_at"], row["closed_at"] or row["opened_at"])
         entry_snapshot = self._nearest_snapshot(snapshots, opened_at) if opened_at else None
         close_snapshot = self._nearest_snapshot(snapshots, closed_at) if closed_at else None
         prices = [snapshot["price"] for snapshot in snapshots]
@@ -190,6 +190,32 @@ class HFRealVsPaperDiagnosticsEngine:
             "open_price", "close_price", "quantity", "stake_usdt", "net_profit",
             "opened_at", "closed_at", "close_reason", "exchange_order_id", "run_id",
             "campaign_id",
+        ]
+        return [dict(zip(keys, row)) for row in rows]
+
+    def _load_market_path(self, cycle: dict[str, Any], start: str, end: str) -> list[dict[str, Any]]:
+        blackbox = self._load_blackbox_snapshots(int(cycle["id"]))
+        if blackbox:
+            return blackbox
+        return self._load_hf_snapshots(start, end)
+
+    def _load_blackbox_snapshots(self, real_cycle_id: int) -> list[dict[str, Any]]:
+        with self.database.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT timestamp, price, bid, ask, mid, spread,
+                       short_center, candidate, block_reason
+                FROM real_pilot_market_snapshots
+                WHERE real_cycle_id = ?
+                  AND price IS NOT NULL
+                  AND phase IN ('entry', 'tracking', 'exit', 'post_exit')
+                ORDER BY timestamp ASC, id ASC
+                """,
+                (real_cycle_id,),
+            ).fetchall()
+        keys = [
+            "timestamp", "price", "bid", "ask", "mid_price", "spread",
+            "short_center", "would_open_cycle", "reason_if_not",
         ]
         return [dict(zip(keys, row)) for row in rows]
 
@@ -363,7 +389,10 @@ class HFRealVsPaperDiagnosticsEngine:
         if not snapshot:
             return False
         price = float(snapshot["price"])
-        short_center = price - float(snapshot.get("distance_to_short_center") or 0.0)
+        if snapshot.get("short_center") is not None:
+            short_center = float(snapshot["short_center"])
+        else:
+            short_center = price - float(snapshot.get("distance_to_short_center") or 0.0)
         if direction == "BUY_USDC":
             return price < short_center
         return price > short_center
@@ -419,6 +448,8 @@ class HFRealVsPaperDiagnosticsEngine:
     ) -> str:
         if not cycles:
             return "unknown"
+        if all(item.max_favorable_excursion is None and item.max_adverse_excursion is None for item in cycles):
+            return "data_insufficient"
         avg_spread = mean([item.spread_at_entry for item in cycles if item.spread_at_entry is not None] or [0.0])
         avg_target_distance = mean([abs(item.target_price - item.open_price) for item in cycles] or [0.0])
         if avg_spread >= avg_target_distance and timeout_loss_count > 0:
@@ -436,7 +467,9 @@ class HFRealVsPaperDiagnosticsEngine:
     @staticmethod
     def _recommendation(issue: str, total_cycles: int, real_net: float) -> str:
         if total_cycles < 10:
-            return "COMPARE_WITH_LIVE_PAPER"
+            return "RUN_NEW_CAMPAIGN_WITH_RECORDER" if issue == "data_insufficient" else "COMPARE_WITH_LIVE_PAPER"
+        if issue == "data_insufficient":
+            return "ENABLE_BLACK_BOX_RECORDER"
         if issue in {"target_too_tight_for_real_spread", "execution_spread_issue"}:
             return "TUNE_REAL_TARGET_OR_SPREAD"
         if real_net < 0:
