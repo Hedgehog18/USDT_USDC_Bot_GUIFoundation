@@ -93,6 +93,7 @@ from analytics.hf_micro_grid_sim_engine import (
 )
 from analytics.hf_extreme_move_diagnostics_engine import HFExtremeMoveDiagnosticsEngine
 from analytics.hf_profit_audit_engine import HFProfitAuditEngine
+from analytics.hf_production_readiness_engine import HFProductionReadinessEngine
 from analytics.hf_regime_filter_sim_engine import HFRegimeFilterSimulationEngine
 from analytics.hf_run_regime_comparison_engine import HFRunRegimeComparisonEngine
 from analytics.hf_velocity_filter_sim_engine import HFVelocityFilterSimulationEngine
@@ -3939,6 +3940,39 @@ def _print_metric_stats(label: str, stats) -> None:
     )
 
 
+def command_hf_production_readiness(args) -> None:
+    config, _logger, database = build_context()
+    report = HFProductionReadinessEngine(database, config).build_report(profile=args.profile)
+
+    print("=== HF v1 Production Readiness Audit ===")
+    print("Diagnostics only. Real trading remains disabled; no orders are created.")
+    print(f"Profile: {report.profile}")
+    print(f"Overall status: {report.status}")
+    print("")
+    print("Checks:")
+    for check in report.checks:
+        status = "PASS" if check.ok else "FAIL"
+        print(f"- [{status}] {check.name}: {check.message}")
+
+    if report.performance_summary is not None:
+        summary = report.performance_summary
+        print("")
+        print("Latest paper performance:")
+        print(f"- total cycles: {summary.total_profile_cycles}")
+        print(f"- automatic closed: {summary.automatic_closed_count}")
+        print(f"- manual closed: {summary.manual_closed_count}")
+        print(f"- open: {summary.open_count}")
+        print(f"- realized net: {summary.total_realized_net_profit:+.8f}")
+        print(f"- win rate: {summary.real_outcome_win_rate * 100:.2f}%")
+        print(f"- recommendation: {summary.recommendation}")
+
+    if report.failed_checks:
+        print("")
+        print("Blocking checks:")
+        for check in report.failed_checks:
+            print(f"- {check.name}: {check.message}")
+
+
 def command_notifications(args) -> None:
     _config, _logger, database = build_context()
     engine = NotificationEngine(database)
@@ -6230,6 +6264,17 @@ def build_parser() -> argparse.ArgumentParser:
         default=0.00002,
     )
     hf_regime_filter_sim_parser.set_defaults(func=command_hf_regime_filter_sim)
+
+    hf_production_readiness_parser = subparsers.add_parser(
+        "hf-production-readiness",
+        help="Diagnostics-only readiness audit for the frozen HF v1 baseline",
+    )
+    hf_production_readiness_parser.add_argument(
+        "--profile",
+        choices=SUPPORTED_RUNTIME_STRATEGY_PROFILES,
+        default="mean_reversion_hf_micro_v1",
+    )
+    hf_production_readiness_parser.set_defaults(func=command_hf_production_readiness)
 
     extreme_market_discovery_parser = subparsers.add_parser(
         "extreme-market-discovery",

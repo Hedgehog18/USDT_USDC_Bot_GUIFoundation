@@ -281,6 +281,7 @@ def test_manage_cli_accepts_hf_micro_profile_for_paper_workflow_commands():
         ["hf-run-regime-comparison", "--profile", "mean_reversion_hf_micro_v1", "--run-a-since-id", "100", "--run-b-since-id", "200", "--limit", "50"],
         ["hf-velocity-filter-sim", "--profile", "mean_reversion_hf_micro_v1", "--since-id", "1534", "--limit", "50"],
         ["hf-regime-filter-sim", "--profile", "mean_reversion_hf_micro_v1", "--since-id", "1534", "--limit", "50"],
+        ["hf-production-readiness", "--profile", "mean_reversion_hf_micro_v1"],
         ["extreme-market-discovery", "--profile", "mean_reversion_hf_micro_v1"],
         ["extreme-replay", "--profile", "mean_reversion_hf_micro_v1"],
         ["extreme-replay-ranking", "--profile", "mean_reversion_hf_micro_v1"],
