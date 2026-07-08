@@ -96,6 +96,7 @@ from analytics.hf_profit_audit_engine import HFProfitAuditEngine
 from analytics.hf_production_readiness_engine import HFProductionReadinessEngine
 from analytics.hf_real_dry_run_engine import HFRealDryRunEngine
 from analytics.hf_real_pilot_engine import HFRealPilotEngine, HFRealPilotSignalSnapshot
+from analytics.hf_real_vs_paper_diagnostics_engine import HFRealVsPaperDiagnosticsEngine
 from analytics.hf_regime_filter_sim_engine import HFRegimeFilterSimulationEngine
 from analytics.hf_run_regime_comparison_engine import HFRunRegimeComparisonEngine
 from analytics.hf_velocity_filter_sim_engine import HFVelocityFilterSimulationEngine
@@ -4280,6 +4281,91 @@ def command_hf_real_pilot_campaign(args) -> None:
     print(f"Recommendation: {report.recommendation}")
 
 
+def command_hf_real_vs_paper_diagnostics(args) -> None:
+    _config, _logger, database = build_context()
+    report = HFRealVsPaperDiagnosticsEngine(database).build_report(args.profile)
+
+    print("=== HF Real vs Paper Execution Diagnostics ===")
+    print(f"Profile: {report.profile}")
+    print(f"Total real cycles: {report.total_real_cycles}")
+    if not report.cycles:
+        print("No closed real pilot cycles found.")
+        print("Recommendation: KEEP_REAL_PAUSED")
+        return
+
+    print("")
+    print("Real cycles:")
+    for cycle in report.cycles:
+        print(
+            f"- db_id={cycle.db_id} | campaign={cycle.campaign_id} | {cycle.direction} | "
+            f"open={cycle.open_price:.8f} | close={_format_optional_float(cycle.close_price)} | "
+            f"target={cycle.target_price:.8f} | qty={cycle.quantity:.8f} | "
+            f"opened={cycle.opened_at} | closed={cycle.closed_at or 'N/A'} | "
+            f"hold={_format_optional_float(cycle.holding_seconds)}s | "
+            f"reason={cycle.close_reason or 'N/A'} | net={cycle.net_profit:+.8f}"
+        )
+        print(
+            "  path: "
+            f"5s={_format_optional_float(cycle.price_after_5s)} | "
+            f"15s={_format_optional_float(cycle.price_after_15s)} | "
+            f"30s={_format_optional_float(cycle.price_after_30s)} | "
+            f"60s={_format_optional_float(cycle.price_after_60s)} | "
+            f"120s={_format_optional_float(cycle.price_after_120s)} | "
+            f"270s={_format_optional_float(cycle.price_after_270s)}"
+        )
+        print(
+            "  excursion: "
+            f"MFE={_format_optional_float(cycle.max_favorable_excursion)} | "
+            f"MAE={_format_optional_float(cycle.max_adverse_excursion)} | "
+            f"target_touched={'yes' if cycle.target_touched else 'no'} | "
+            f"nearest_target_at={_format_optional_seconds(cycle.nearest_target_seconds)} | "
+            f"missed_distance={_format_optional_float(cycle.missed_target_distance)}"
+        )
+        print(
+            "  paper: "
+            f"would_open={'yes' if cycle.paper_would_open else 'no'} | "
+            f"target_hit={'yes' if cycle.paper_target_hit else 'no'} | "
+            f"timeout={'yes' if cycle.paper_timeout else 'no'} | "
+            f"paper_net={cycle.paper_equivalent_net:+.8f} | "
+            f"real_minus_paper={cycle.real_minus_paper_delta:+.8f}"
+        )
+        print(
+            "  execution: "
+            f"entry_slippage={_format_optional_float(cycle.entry_slippage)} | "
+            f"close_slippage={_format_optional_float(cycle.close_slippage)} | "
+            f"spread_entry={_format_optional_float(cycle.spread_at_entry)} | "
+            f"spread_close={_format_optional_float(cycle.spread_at_close)} | "
+            f"delay={_format_optional_seconds(cycle.execution_delay_seconds)} | "
+            f"filled_qty={_format_optional_float(cycle.filled_quantity)} | "
+            f"quote_amount={_format_optional_float(cycle.quote_amount)} | "
+            f"commission={_format_optional_float(cycle.commission)} | "
+            f"role={cycle.maker_taker_role}"
+        )
+
+    print("")
+    print("Summary:")
+    print(f"- target closes: {report.target_closes}")
+    print(f"- timeout closes: {report.timeout_closes}")
+    print(f"- timeout losses: {report.timeout_loss_count}")
+    print(f"- real net: {report.real_net:+.8f}")
+    print(f"- estimated paper-equivalent net: {report.estimated_paper_equivalent_net:+.8f}")
+    print(f"- real minus paper delta: {report.real_minus_paper_delta:+.8f}")
+    print(f"- main suspected issue: {report.main_suspected_issue}")
+    print(f"- recommendation: {report.recommendation}")
+
+
+def _format_optional_float(value) -> str:
+    if value is None:
+        return "N/A"
+    return f"{float(value):.8f}"
+
+
+def _format_optional_seconds(value) -> str:
+    if value is None:
+        return "N/A"
+    return f"{float(value):.2f}s"
+
+
 def _format_decimal_optional(value) -> str:
     if value is None:
         return "N/A"
@@ -6681,6 +6767,17 @@ def build_parser() -> argparse.ArgumentParser:
     hf_real_pilot_campaign_parser.add_argument("--close-max-iterations", type=_positive_int, default=300)
     hf_real_pilot_campaign_parser.add_argument("--interval", type=_decimal_float, default=1.0)
     hf_real_pilot_campaign_parser.set_defaults(func=command_hf_real_pilot_campaign)
+
+    hf_real_vs_paper_diagnostics_parser = subparsers.add_parser(
+        "hf-real-vs-paper-diagnostics",
+        help="Diagnostics-only comparison of HF real pilot execution versus paper-equivalent behavior",
+    )
+    hf_real_vs_paper_diagnostics_parser.add_argument(
+        "--profile",
+        choices=SUPPORTED_RUNTIME_STRATEGY_PROFILES,
+        default="mean_reversion_hf_micro_v1",
+    )
+    hf_real_vs_paper_diagnostics_parser.set_defaults(func=command_hf_real_vs_paper_diagnostics)
 
     extreme_market_discovery_parser = subparsers.add_parser(
         "extreme-market-discovery",
