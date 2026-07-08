@@ -95,6 +95,7 @@ from analytics.hf_extreme_move_diagnostics_engine import HFExtremeMoveDiagnostic
 from analytics.hf_profit_audit_engine import HFProfitAuditEngine
 from analytics.hf_production_readiness_engine import HFProductionReadinessEngine
 from analytics.hf_real_dry_run_engine import HFRealDryRunEngine
+from analytics.hf_real_pilot_engine import HFRealPilotEngine
 from analytics.hf_regime_filter_sim_engine import HFRegimeFilterSimulationEngine
 from analytics.hf_run_regime_comparison_engine import HFRunRegimeComparisonEngine
 from analytics.hf_velocity_filter_sim_engine import HFVelocityFilterSimulationEngine
@@ -4016,6 +4017,54 @@ def command_hf_real_dry_run(args) -> None:
             print(f"- {check.name}: {check.message}")
 
 
+def command_hf_small_real_pilot(args) -> None:
+    config, _logger, database = build_context()
+    report = HFRealPilotEngine(database, config).run_once(
+        profile=args.profile,
+        pilot_stake=Decimal(str(args.pilot_stake)),
+        confirmed=args.confirm_real_pilot,
+        max_cycles_per_run=args.max_cycles_per_run,
+    )
+
+    print("=== HF v1 Small Real Pilot ===")
+    print("WARNING: This is the only command path allowed to create HF v1 real pilot spot orders.")
+    print("Safety gates run before any order attempt.")
+    print(f"Profile: {report.profile}")
+    print(f"Run ID: {report.run_id}")
+    print(f"Overall status: {report.status}")
+    print(f"Dry-run status: {report.dry_run_status or 'N/A'}")
+    print(f"Order attempted: {'yes' if report.order_attempted else 'no'}")
+    print(f"Order status: {report.order_status or 'N/A'}")
+    print(f"Real cycle db_id: {report.real_cycle_id or 'N/A'}")
+    print(f"Message: {report.message}")
+    print("")
+    print("Checks:")
+    for check in report.checks:
+        status = "PASS" if check.ok else "FAIL"
+        print(f"- [{status}] {check.name}: {check.message}")
+
+    if report.failed_checks:
+        print("")
+        print("Blocking checks:")
+        for check in report.failed_checks:
+            print(f"- {check.name}: {check.message}")
+
+
+def command_hf_real_pilot_status(args) -> None:
+    config, _logger, database = build_context()
+    report = HFRealPilotEngine(database, config).build_status(args.profile)
+
+    print("=== HF v1 Real Pilot Status ===")
+    print(f"Profile: {report.profile}")
+    print(f"Status: {report.status}")
+    print(f"Open real cycles: {report.open_cycles}")
+    print(f"Closed real cycles: {report.closed_cycles}")
+    print(f"Net profit: {report.net_profit:+.8f}")
+    print(f"Losing cycles: {report.losing_cycles}")
+    print(f"Order events: {report.order_events}")
+    print(f"Emergency stop: {'yes' if report.emergency_stop else 'no'}")
+
+
 def _format_decimal_optional(value) -> str:
     if value is None:
         return "N/A"
@@ -6341,6 +6390,36 @@ def build_parser() -> argparse.ArgumentParser:
         help="Manual proposed pilot stake for dry-run sizing only. Does not create orders.",
     )
     hf_real_dry_run_parser.set_defaults(func=command_hf_real_dry_run)
+
+    hf_small_real_pilot_parser = subparsers.add_parser(
+        "hf-small-real-pilot",
+        help="Explicitly confirmed small real SPOT pilot for frozen HF v1 only",
+    )
+    hf_small_real_pilot_parser.add_argument(
+        "--profile",
+        choices=SUPPORTED_RUNTIME_STRATEGY_PROFILES,
+        default="mean_reversion_hf_micro_v1",
+    )
+    hf_small_real_pilot_parser.add_argument("--pilot-stake", type=_positive_decimal_float, required=True)
+    hf_small_real_pilot_parser.add_argument("--confirm-real-pilot", action="store_true")
+    hf_small_real_pilot_parser.add_argument(
+        "--max-cycles-per-run",
+        type=_positive_int,
+        default=1,
+        help="Hard cap for this pilot run; values above 1 are refused by safety gates.",
+    )
+    hf_small_real_pilot_parser.set_defaults(func=command_hf_small_real_pilot)
+
+    hf_real_pilot_status_parser = subparsers.add_parser(
+        "hf-real-pilot-status",
+        help="Show isolated HF v1 real pilot status and safety state",
+    )
+    hf_real_pilot_status_parser.add_argument(
+        "--profile",
+        choices=SUPPORTED_RUNTIME_STRATEGY_PROFILES,
+        default="mean_reversion_hf_micro_v1",
+    )
+    hf_real_pilot_status_parser.set_defaults(func=command_hf_real_pilot_status)
 
     extreme_market_discovery_parser = subparsers.add_parser(
         "extreme-market-discovery",

@@ -419,6 +419,44 @@ class DatabaseManager:
                 )
             """)
             conn.execute("""
+                CREATE TABLE IF NOT EXISTS real_pilot_cycles (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT NOT NULL,
+                    strategy_profile TEXT NOT NULL,
+                    symbol TEXT NOT NULL,
+                    direction TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    open_price REAL NOT NULL,
+                    close_price REAL,
+                    quantity REAL NOT NULL,
+                    stake_usdt REAL NOT NULL,
+                    gross_profit REAL NOT NULL DEFAULT 0,
+                    net_profit REAL NOT NULL DEFAULT 0,
+                    opened_at TEXT NOT NULL,
+                    closed_at TEXT,
+                    close_reason TEXT,
+                    exchange_order_id TEXT,
+                    run_id TEXT NOT NULL
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS real_pilot_order_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT NOT NULL,
+                    run_id TEXT NOT NULL,
+                    strategy_profile TEXT NOT NULL,
+                    symbol TEXT NOT NULL,
+                    side TEXT NOT NULL,
+                    quantity REAL NOT NULL,
+                    status TEXT NOT NULL,
+                    request_payload TEXT NOT NULL,
+                    response_payload TEXT NOT NULL,
+                    error TEXT
+                )
+            """)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_real_pilot_cycles_profile_status ON real_pilot_cycles(strategy_profile, status)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_real_pilot_cycles_timestamp ON real_pilot_cycles(timestamp)")
+            conn.execute("""
                 CREATE TABLE IF NOT EXISTS system_events (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     timestamp TEXT NOT NULL,
@@ -2030,6 +2068,124 @@ class DatabaseManager:
             "average_missed_pnl": float(row[26]),
             "worst_adverse_move": float(row[27]),
             "win_rate": (winning_cycles / closed_cycles) if closed_cycles else 0.0,
+        }
+
+    def count_open_real_pilot_cycles(self, strategy_profile: str) -> int:
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT COUNT(*)
+                FROM real_pilot_cycles
+                WHERE strategy_profile = ? AND status = 'OPEN'
+                """,
+                (strategy_profile,),
+            ).fetchone()
+        return int(row[0]) if row else 0
+
+    def save_real_pilot_order_event(
+        self,
+        *,
+        run_id: str,
+        strategy_profile: str,
+        symbol: str,
+        side: str,
+        quantity: float,
+        status: str,
+        request_payload: str,
+        response_payload: str,
+        error: str | None = None,
+    ) -> int:
+        with self.connect() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO real_pilot_order_events (
+                    timestamp, run_id, strategy_profile, symbol, side, quantity,
+                    status, request_payload, response_payload, error
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    datetime.utcnow().isoformat(),
+                    run_id,
+                    strategy_profile,
+                    symbol,
+                    side,
+                    quantity,
+                    status,
+                    request_payload,
+                    response_payload,
+                    error,
+                ),
+            )
+            conn.commit()
+            return int(cursor.lastrowid)
+
+    def save_real_pilot_cycle(
+        self,
+        *,
+        run_id: str,
+        strategy_profile: str,
+        symbol: str,
+        direction: str,
+        status: str,
+        open_price: float,
+        quantity: float,
+        stake_usdt: float,
+        exchange_order_id: str | None = None,
+    ) -> int:
+        now = datetime.utcnow().isoformat()
+        with self.connect() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO real_pilot_cycles (
+                    timestamp, strategy_profile, symbol, direction, status,
+                    open_price, quantity, stake_usdt, opened_at, exchange_order_id, run_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    now,
+                    strategy_profile,
+                    symbol,
+                    direction,
+                    status,
+                    open_price,
+                    quantity,
+                    stake_usdt,
+                    now,
+                    exchange_order_id,
+                    run_id,
+                ),
+            )
+            conn.commit()
+            return int(cursor.lastrowid)
+
+    def load_real_pilot_status(self, strategy_profile: str) -> dict[str, float | int]:
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT
+                    COALESCE(SUM(CASE WHEN status = 'OPEN' THEN 1 ELSE 0 END), 0) AS open_cycles,
+                    COALESCE(SUM(CASE WHEN status IN ('CLOSED', 'HALTED') THEN 1 ELSE 0 END), 0) AS closed_cycles,
+                    COALESCE(SUM(CASE WHEN status IN ('CLOSED', 'HALTED') THEN net_profit ELSE 0 END), 0) AS net_profit,
+                    COALESCE(SUM(CASE WHEN status IN ('CLOSED', 'HALTED') AND net_profit < 0 THEN 1 ELSE 0 END), 0) AS losing_cycles
+                FROM real_pilot_cycles
+                WHERE strategy_profile = ?
+                """,
+                (strategy_profile,),
+            ).fetchone()
+            events = conn.execute(
+                """
+                SELECT COUNT(*)
+                FROM real_pilot_order_events
+                WHERE strategy_profile = ?
+                """,
+                (strategy_profile,),
+            ).fetchone()
+        return {
+            "open_cycles": int(row[0]) if row else 0,
+            "closed_cycles": int(row[1]) if row else 0,
+            "net_profit": float(row[2]) if row else 0.0,
+            "losing_cycles": int(row[3]) if row else 0,
+            "order_events": int(events[0]) if events else 0,
         }
 
     def load_paper_cycle_collection_baseline(self, strategy_profile: str) -> dict[str, float | int]:
