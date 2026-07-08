@@ -287,6 +287,7 @@ def test_manage_cli_accepts_hf_micro_profile_for_paper_workflow_commands():
         ["hf-small-real-pilot-watch", "--profile", "mean_reversion_hf_micro_v1", "--pilot-stake", "6", "--confirm-real-pilot", "--max-iterations", "5", "--interval", "1"],
         ["hf-real-pilot-status", "--profile", "mean_reversion_hf_micro_v1"],
         ["hf-real-pilot-close-watch", "--profile", "mean_reversion_hf_micro_v1", "--confirm-real-pilot", "--max-iterations", "5", "--interval", "1"],
+        ["hf-real-pilot-campaign", "--profile", "mean_reversion_hf_micro_v1", "--pilot-stake", "6", "--target-cycles", "2", "--confirm-real-pilot"],
         ["extreme-market-discovery", "--profile", "mean_reversion_hf_micro_v1"],
         ["extreme-replay", "--profile", "mean_reversion_hf_micro_v1"],
         ["extreme-replay-ranking", "--profile", "mean_reversion_hf_micro_v1"],

@@ -454,8 +454,25 @@ class DatabaseManager:
                     error TEXT
                 )
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS real_pilot_campaigns (
+                    campaign_id TEXT PRIMARY KEY,
+                    started_at TEXT NOT NULL,
+                    finished_at TEXT,
+                    strategy_profile TEXT NOT NULL,
+                    target_cycles INTEGER NOT NULL,
+                    completed_cycles INTEGER NOT NULL DEFAULT 0,
+                    status TEXT NOT NULL,
+                    net_profit REAL NOT NULL DEFAULT 0,
+                    stop_reason TEXT,
+                    baseline_cycle_id INTEGER NOT NULL DEFAULT 0,
+                    orders_sent INTEGER NOT NULL DEFAULT 0,
+                    orders_filled INTEGER NOT NULL DEFAULT 0
+                )
+            """)
             conn.execute("CREATE INDEX IF NOT EXISTS idx_real_pilot_cycles_profile_status ON real_pilot_cycles(strategy_profile, status)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_real_pilot_cycles_timestamp ON real_pilot_cycles(timestamp)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_real_pilot_campaigns_profile_status ON real_pilot_campaigns(strategy_profile, status)")
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS system_events (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2228,6 +2245,163 @@ class DatabaseManager:
                 ),
             )
             conn.commit()
+
+    def max_real_pilot_cycle_id(self, strategy_profile: str) -> int:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT COALESCE(MAX(id), 0) FROM real_pilot_cycles WHERE strategy_profile = ?",
+                (strategy_profile,),
+            ).fetchone()
+        return int(row[0]) if row else 0
+
+    def create_real_pilot_campaign(
+        self,
+        *,
+        campaign_id: str,
+        strategy_profile: str,
+        target_cycles: int,
+        baseline_cycle_id: int,
+    ) -> None:
+        now = datetime.utcnow().isoformat()
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO real_pilot_campaigns (
+                    campaign_id, started_at, strategy_profile, target_cycles,
+                    completed_cycles, status, net_profit, baseline_cycle_id,
+                    orders_sent, orders_filled
+                ) VALUES (?, ?, ?, ?, 0, 'RUNNING', 0, ?, 0, 0)
+                """,
+                (campaign_id, now, strategy_profile, target_cycles, baseline_cycle_id),
+            )
+            conn.commit()
+
+    def update_real_pilot_campaign(
+        self,
+        campaign_id: str,
+        *,
+        status: str,
+        completed_cycles: int,
+        net_profit: float,
+        stop_reason: str,
+        orders_sent: int,
+        orders_filled: int,
+        finished: bool,
+    ) -> None:
+        finished_at = datetime.utcnow().isoformat() if finished else None
+        with self.connect() as conn:
+            conn.execute(
+                """
+                UPDATE real_pilot_campaigns
+                SET
+                    status = ?,
+                    completed_cycles = ?,
+                    net_profit = ?,
+                    stop_reason = ?,
+                    orders_sent = ?,
+                    orders_filled = ?,
+                    finished_at = COALESCE(?, finished_at)
+                WHERE campaign_id = ?
+                """,
+                (
+                    status,
+                    completed_cycles,
+                    net_profit,
+                    stop_reason,
+                    orders_sent,
+                    orders_filled,
+                    finished_at,
+                    campaign_id,
+                ),
+            )
+            conn.commit()
+
+    def load_current_real_pilot_campaign(self, strategy_profile: str) -> dict | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT
+                    campaign_id, started_at, finished_at, strategy_profile,
+                    target_cycles, completed_cycles, status, net_profit,
+                    stop_reason, baseline_cycle_id, orders_sent, orders_filled
+                FROM real_pilot_campaigns
+                WHERE strategy_profile = ?
+                ORDER BY started_at DESC
+                LIMIT 1
+                """,
+                (strategy_profile,),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "campaign_id": row[0],
+            "started_at": row[1],
+            "finished_at": row[2],
+            "strategy_profile": row[3],
+            "target_cycles": int(row[4]),
+            "completed_cycles": int(row[5]),
+            "status": row[6],
+            "net_profit": float(row[7]),
+            "stop_reason": row[8],
+            "baseline_cycle_id": int(row[9]),
+            "orders_sent": int(row[10]),
+            "orders_filled": int(row[11]),
+        }
+
+    def load_real_pilot_campaign_cycle_stats(self, strategy_profile: str, baseline_cycle_id: int) -> dict:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, direction, status, open_price, close_price, quantity,
+                       net_profit, opened_at, closed_at, close_reason
+                FROM real_pilot_cycles
+                WHERE strategy_profile = ?
+                  AND id > ?
+                  AND status IN ('CLOSED', 'HALTED')
+                ORDER BY id ASC
+                """,
+                (strategy_profile, baseline_cycle_id),
+            ).fetchall()
+            order_events = conn.execute(
+                """
+                SELECT status
+                FROM real_pilot_order_events
+                WHERE strategy_profile = ?
+                  AND timestamp >= COALESCE((
+                      SELECT started_at FROM real_pilot_campaigns
+                      WHERE strategy_profile = ?
+                      ORDER BY started_at DESC LIMIT 1
+                  ), '0000')
+                """,
+                (strategy_profile, strategy_profile),
+            ).fetchall()
+
+        net_profit = sum(float(row[6] or 0.0) for row in rows)
+        wins = sum(1 for row in rows if float(row[6] or 0.0) > 0)
+        target_closes = sum(1 for row in rows if str(row[9] or "") == "real_pilot_target")
+        timeout_closes = sum(1 for row in rows if "holding" in str(row[9] or "") or "timeout" in str(row[9] or ""))
+        holding_seconds: list[float] = []
+        for row in rows:
+            if row[7] and row[8]:
+                try:
+                    opened = datetime.fromisoformat(str(row[7]))
+                    closed = datetime.fromisoformat(str(row[8]))
+                    holding_seconds.append(max(0.0, (closed - opened).total_seconds()))
+                except ValueError:
+                    pass
+        orders_sent = sum(1 for row in order_events if str(row[0]).startswith("ATTEMPTED"))
+        orders_filled = sum(1 for row in order_events if str(row[0]) == "FILLED")
+        return {
+            "completed_cycles": len(rows),
+            "net_profit": net_profit,
+            "winning_cycles": wins,
+            "win_rate": (wins / len(rows)) if rows else 0.0,
+            "target_closes": target_closes,
+            "timeout_closes": timeout_closes,
+            "average_holding_seconds": (sum(holding_seconds) / len(holding_seconds)) if holding_seconds else 0.0,
+            "orders_sent": orders_sent,
+            "orders_filled": orders_filled,
+        }
 
     def load_real_pilot_status(self, strategy_profile: str) -> dict[str, float | int]:
         with self.connect() as conn:

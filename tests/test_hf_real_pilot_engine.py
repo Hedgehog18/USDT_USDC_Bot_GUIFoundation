@@ -510,3 +510,147 @@ def test_real_pilot_status_shows_open_cycle_details(test_config, tmp_path):
     assert report.open_cycle_details.quantity == Decimal("6.0")
     assert report.open_cycle_details.target_price < Decimal("1.00068")
     assert report.open_cycle_details.current_price == Decimal("1.00068")
+
+
+def test_real_pilot_campaign_completes_normally(test_config, tmp_path):
+    client = FakeRealPilotClient(
+        bid=1.00070,
+        ask=1.00071,
+        order_avg_price=Decimal("1.00069"),
+    )
+    engine, database = _engine(tmp_path, test_config, client)
+
+    report = engine.run_campaign(
+        profile=PROFILE,
+        pilot_stake=Decimal("6"),
+        target_cycles=2,
+        confirmed=True,
+        signal_provider=lambda: _watch_signal("BUY_USDC"),
+        signal_max_iterations=1,
+        close_max_iterations=1,
+        interval_seconds=0,
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert report.status == "COMPLETED"
+    assert report.completed_cycles == 2
+    assert report.orders_sent == 4
+    assert report.orders_filled == 4
+    assert report.target_closes == 2
+    assert report.net_profit >= 0
+    assert client.orders_created == 4
+    assert database.count_open_real_pilot_cycles(PROFILE) == 0
+
+
+def test_real_pilot_campaign_stops_on_emergency_stop(test_config, tmp_path):
+    client = FakeRealPilotClient()
+    stop_path = tmp_path / "EMERGENCY_STOP"
+    stop_path.write_text("stop", encoding="utf-8")
+    database = DatabaseManager(str(tmp_path / "bot.sqlite"))
+    engine = HFRealPilotEngine(database, _config(test_config), client, emergency_stop_path=stop_path)
+
+    report = engine.run_campaign(
+        profile=PROFILE,
+        pilot_stake=Decimal("6"),
+        target_cycles=2,
+        confirmed=True,
+        signal_provider=lambda: _watch_signal("BUY_USDC"),
+        signal_max_iterations=1,
+        close_max_iterations=1,
+        interval_seconds=0,
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert report.status == "STOPPED"
+    assert report.stop_reason == "safety_audit_failed"
+    assert report.completed_cycles == 0
+    assert client.orders_created == 0
+
+
+def test_real_pilot_campaign_stops_on_daily_loss(test_config, tmp_path):
+    client = FakeRealPilotClient()
+    engine, database = _engine(tmp_path, test_config, client)
+    cycle_id = database.save_real_pilot_cycle(
+        run_id="loss-run",
+        strategy_profile=PROFILE,
+        symbol="USDCUSDT",
+        direction="BUY_USDC",
+        status="OPEN",
+        open_price=1.00068,
+        quantity=6,
+        stake_usdt=6,
+    )
+    with database.connect() as conn:
+        conn.execute(
+            "UPDATE real_pilot_cycles SET status = 'CLOSED', net_profit = -2.0 WHERE id = ?",
+            (cycle_id,),
+        )
+        conn.commit()
+
+    report = engine.run_campaign(
+        profile=PROFILE,
+        pilot_stake=Decimal("6"),
+        target_cycles=2,
+        confirmed=True,
+        signal_provider=lambda: _watch_signal("BUY_USDC"),
+        signal_max_iterations=1,
+        close_max_iterations=1,
+        interval_seconds=0,
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert report.status == "STOPPED"
+    assert report.stop_reason == "safety_audit_failed"
+    assert report.completed_cycles == 0
+    assert client.orders_created == 0
+
+
+def test_real_pilot_campaign_stops_on_partial_order(test_config, tmp_path):
+    client = FakeRealPilotClient(order_status="PARTIALLY_FILLED")
+    engine, _database = _engine(tmp_path, test_config, client)
+
+    report = engine.run_campaign(
+        profile=PROFILE,
+        pilot_stake=Decimal("6"),
+        target_cycles=2,
+        confirmed=True,
+        signal_provider=lambda: _watch_signal("BUY_USDC"),
+        signal_max_iterations=1,
+        close_max_iterations=1,
+        interval_seconds=0,
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert report.status == "STOPPED"
+    assert report.stop_reason == "order_failed_or_unknown"
+    assert report.completed_cycles == 0
+    assert report.orders_sent == 1
+    assert report.orders_filled == 0
+    assert client.orders_created == 1
+
+
+def test_real_pilot_campaign_status_shows_current_campaign(test_config, tmp_path):
+    client = FakeRealPilotClient(
+        bid=1.00070,
+        ask=1.00071,
+        order_avg_price=Decimal("1.00069"),
+    )
+    engine, _database = _engine(tmp_path, test_config, client)
+
+    campaign = engine.run_campaign(
+        profile=PROFILE,
+        pilot_stake=Decimal("6"),
+        target_cycles=1,
+        confirmed=True,
+        signal_provider=lambda: _watch_signal("BUY_USDC"),
+        signal_max_iterations=1,
+        close_max_iterations=1,
+        interval_seconds=0,
+        sleep_fn=lambda _seconds: None,
+    )
+    status = engine.build_status(PROFILE)
+
+    assert status.campaign_details is not None
+    assert status.campaign_details.campaign_id == campaign.campaign_id
+    assert status.campaign_details.completed_cycles == 1
+    assert status.campaign_details.remaining_cycles == 0

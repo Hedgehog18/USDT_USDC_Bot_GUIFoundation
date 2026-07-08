@@ -4146,6 +4146,18 @@ def command_hf_real_pilot_status(args) -> None:
         print(f"- current_price: {_format_decimal_optional(cycle.current_price)}")
         print(f"- unrealized_pnl: {_format_decimal_optional(cycle.unrealized_pnl)}")
         print(f"- distance_to_target: {_format_decimal_optional(cycle.distance_to_target)}")
+    if report.campaign_details is not None:
+        campaign = report.campaign_details
+        print("")
+        print("Current Campaign:")
+        print(f"- campaign_id: {campaign.campaign_id}")
+        print(f"- state: {campaign.status}")
+        print(f"- current_cycle: {campaign.completed_cycles + 1 if campaign.remaining_cycles else campaign.completed_cycles}")
+        print(f"- completed: {campaign.completed_cycles}")
+        print(f"- remaining: {campaign.remaining_cycles}")
+        print(f"- campaign_net: {campaign.net_profit:+.8f}")
+        print(f"- runtime_seconds: {campaign.runtime_seconds:.2f}")
+        print(f"- stop_reason: {campaign.stop_reason or 'N/A'}")
 
 
 def command_hf_real_pilot_close_watch(args) -> None:
@@ -4192,6 +4204,80 @@ def command_hf_real_pilot_close_watch(args) -> None:
         print("Blocking checks:")
         for check in report.failed_checks:
             print(f"- {check.name}: {check.message}")
+
+
+def command_hf_real_pilot_campaign(args) -> None:
+    config, _logger, database = build_context()
+    profile = args.profile
+    bot = _apply_profile_to_bot(BotEngine(), profile)
+    pilot_engine = HFRealPilotEngine(database, config)
+
+    def signal_provider() -> HFRealPilotSignalSnapshot:
+        market_state = bot.market_analyzer.analyze_market()
+        decision = bot.decision_engine.make_decision(market_state)
+        candidate = decision.action in {"BUY_USDC", "SELL_USDC"}
+        return HFRealPilotSignalSnapshot(
+            price=float(getattr(market_state, "price", 0.0) or 0.0),
+            short_center=float(getattr(market_state, "short_center", 0.0) or 0.0),
+            hf_entry_mode=str(getattr(market_state, "hf_entry_mode", "N/A")),
+            candidate=candidate,
+            entry_signal=decision.action if candidate else None,
+            block_reason="N/A" if candidate else _collection_entry_block_reason({
+                "action": decision.action,
+                "reason": decision.reason,
+            }),
+        )
+
+    def print_update(update) -> None:
+        signal = update.current_signal
+        price = _format_collection_float(signal.price) if signal else "N/A"
+        candidate = "yes" if signal and signal.candidate else "no"
+        block = signal.block_reason if signal else "N/A"
+        print(
+            f"[real-campaign] cycle={update.cycle_number}/{update.target_cycles} | "
+            f"phase={update.phase} | status={update.status} | "
+            f"price={price} | candidate={candidate} | block={block} | "
+            f"safety={update.safety_status or 'N/A'} | {update.message}"
+        )
+
+    print("=== HF v1 Real Pilot Campaign ===")
+    print("WARNING: This command may create multiple real SPOT orders across a bounded campaign.")
+    print("Safety audit runs after every completed cycle before the next signal wait.")
+    print(f"Profile: {profile}")
+    print(f"Pilot stake: {args.pilot_stake:.8f}")
+    print(f"Target cycles: {args.target_cycles}")
+
+    report = pilot_engine.run_campaign(
+        profile=profile,
+        pilot_stake=Decimal(str(args.pilot_stake)),
+        target_cycles=args.target_cycles,
+        confirmed=args.confirm_real_pilot,
+        signal_provider=signal_provider,
+        signal_max_iterations=args.signal_max_iterations,
+        close_max_iterations=args.close_max_iterations,
+        interval_seconds=args.interval,
+        update_callback=print_update,
+    )
+
+    print("")
+    print("=== HF v1 Real Pilot Campaign Summary ===")
+    print(f"Campaign ID: {report.campaign_id}")
+    print(f"Status: {report.status}")
+    print(f"Stop reason: {report.stop_reason}")
+    print(f"Cycles completed: {report.completed_cycles}")
+    print(f"Cycles requested: {report.target_cycles}")
+    print(f"Orders sent: {report.orders_sent}")
+    print(f"Orders filled: {report.orders_filled}")
+    print(f"Target closes: {report.target_closes}")
+    print(f"Timeout closes: {report.timeout_closes}")
+    print(f"Net Profit: {report.net_profit:+.8f}")
+    print(f"Win Rate: {report.win_rate:.2%}")
+    print(f"Average Holding: {report.average_holding_seconds:.2f}s")
+    print("Average Slippage: N/A")
+    print("Average Spread: N/A")
+    print("Average Execution Delay: N/A")
+    print(f"Safety interruptions: {report.safety_interruptions}")
+    print(f"Recommendation: {report.recommendation}")
 
 
 def _format_decimal_optional(value) -> str:
@@ -6578,6 +6664,23 @@ def build_parser() -> argparse.ArgumentParser:
     hf_real_pilot_close_watch_parser.add_argument("--max-iterations", type=_positive_int, default=300)
     hf_real_pilot_close_watch_parser.add_argument("--interval", type=_decimal_float, default=1.0)
     hf_real_pilot_close_watch_parser.set_defaults(func=command_hf_real_pilot_close_watch)
+
+    hf_real_pilot_campaign_parser = subparsers.add_parser(
+        "hf-real-pilot-campaign",
+        help="Run a bounded HF v1 real pilot campaign with safety audit after every cycle",
+    )
+    hf_real_pilot_campaign_parser.add_argument(
+        "--profile",
+        choices=SUPPORTED_RUNTIME_STRATEGY_PROFILES,
+        default="mean_reversion_hf_micro_v1",
+    )
+    hf_real_pilot_campaign_parser.add_argument("--pilot-stake", type=_positive_decimal_float, required=True)
+    hf_real_pilot_campaign_parser.add_argument("--target-cycles", type=_positive_int, required=True)
+    hf_real_pilot_campaign_parser.add_argument("--confirm-real-pilot", action="store_true")
+    hf_real_pilot_campaign_parser.add_argument("--signal-max-iterations", type=_positive_int, default=300)
+    hf_real_pilot_campaign_parser.add_argument("--close-max-iterations", type=_positive_int, default=300)
+    hf_real_pilot_campaign_parser.add_argument("--interval", type=_decimal_float, default=1.0)
+    hf_real_pilot_campaign_parser.set_defaults(func=command_hf_real_pilot_campaign)
 
     extreme_market_discovery_parser = subparsers.add_parser(
         "extreme-market-discovery",

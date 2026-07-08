@@ -94,6 +94,7 @@ class HFRealPilotStatusReport:
     order_events: int
     emergency_stop: bool
     open_cycle_details: "HFRealPilotOpenCycleDetails | None" = None
+    campaign_details: "HFRealPilotCampaignDetails | None" = None
 
 
 @dataclass(frozen=True)
@@ -108,6 +109,19 @@ class HFRealPilotOpenCycleDetails:
     current_price: Decimal | None
     unrealized_pnl: Decimal | None
     distance_to_target: Decimal | None
+
+
+@dataclass(frozen=True)
+class HFRealPilotCampaignDetails:
+    campaign_id: str
+    status: str
+    target_cycles: int
+    completed_cycles: int
+    remaining_cycles: int
+    net_profit: float
+    started_at: str
+    runtime_seconds: float
+    stop_reason: str | None
 
 
 @dataclass(frozen=True)
@@ -169,6 +183,37 @@ class HFRealPilotCloseWatchReport:
     @property
     def failed_checks(self) -> list[RealPilotCheck]:
         return [check for check in self.checks if not check.ok]
+
+
+@dataclass(frozen=True)
+class HFRealPilotCampaignUpdate:
+    phase: str
+    cycle_number: int
+    target_cycles: int
+    status: str
+    message: str
+    current_signal: HFRealPilotSignalSnapshot | None = None
+    safety_status: str | None = None
+
+
+@dataclass(frozen=True)
+class HFRealPilotCampaignReport:
+    campaign_id: str
+    profile: str
+    status: str
+    stop_reason: str
+    target_cycles: int
+    completed_cycles: int
+    orders_sent: int
+    orders_filled: int
+    target_closes: int
+    timeout_closes: int
+    net_profit: float
+    win_rate: float
+    average_holding_seconds: float
+    safety_interruptions: int
+    recommendation: str
+    updates: list[HFRealPilotCampaignUpdate]
 
 
 class BinanceRealPilotOrderClient(BinanceRealDryRunProvider):
@@ -490,6 +535,216 @@ class HFRealPilotEngine:
             updates=updates,
         )
 
+    def run_campaign(
+        self,
+        *,
+        profile: str,
+        pilot_stake: Decimal,
+        target_cycles: int,
+        confirmed: bool,
+        signal_provider: Callable[[], HFRealPilotSignalSnapshot],
+        signal_max_iterations: int = 300,
+        close_max_iterations: int = 300,
+        interval_seconds: float = 1.0,
+        sleep_fn: Callable[[float], None] = time.sleep,
+        update_callback: Callable[[HFRealPilotCampaignUpdate], None] | None = None,
+    ) -> HFRealPilotCampaignReport:
+        if target_cycles <= 0:
+            raise ValueError("target_cycles must be greater than 0.")
+        if signal_max_iterations <= 0 or close_max_iterations <= 0:
+            raise ValueError("campaign phase max iterations must be greater than 0.")
+        if interval_seconds < 0:
+            raise ValueError("interval_seconds must be 0 or greater.")
+
+        campaign_id = datetime.now(timezone.utc).strftime("real-campaign-%Y%m%d%H%M%S%f")
+        baseline_cycle_id = self.database.max_real_pilot_cycle_id(profile)
+        self.database.create_real_pilot_campaign(
+            campaign_id=campaign_id,
+            strategy_profile=profile,
+            target_cycles=target_cycles,
+            baseline_cycle_id=baseline_cycle_id,
+        )
+
+        updates: list[HFRealPilotCampaignUpdate] = []
+        safety_interruptions = 0
+
+        def emit(update: HFRealPilotCampaignUpdate) -> None:
+            updates.append(update)
+            if update_callback is not None:
+                update_callback(update)
+
+        completed = 0
+        status = "RUNNING"
+        stop_reason = "target_cycles_reached"
+        while completed < target_cycles:
+            cycle_number = completed + 1
+            emit(HFRealPilotCampaignUpdate(
+                phase="WAIT_SIGNAL",
+                cycle_number=cycle_number,
+                target_cycles=target_cycles,
+                status=status,
+                message="Waiting for HF v1 signal.",
+            ))
+            last_signal: HFRealPilotSignalSnapshot | None = None
+
+            def entry_update_callback(update: HFRealPilotWatchUpdate) -> None:
+                nonlocal last_signal
+                last_signal = update.signal
+                emit(HFRealPilotCampaignUpdate(
+                    phase="WAIT_SIGNAL",
+                    cycle_number=cycle_number,
+                    target_cycles=target_cycles,
+                    status=update.safety_status,
+                    message=f"candidate={'yes' if update.signal.candidate else 'no'} block={update.signal.block_reason}",
+                    current_signal=update.signal,
+                    safety_status=update.safety_status,
+                ))
+
+            entry = self.watch(
+                profile=profile,
+                pilot_stake=pilot_stake,
+                confirmed=confirmed,
+                max_iterations=signal_max_iterations,
+                interval_seconds=interval_seconds,
+                signal_provider=signal_provider,
+                sleep_fn=sleep_fn,
+                update_callback=entry_update_callback,
+            )
+            if entry.status != REAL_PILOT_ORDER_PLACED:
+                status = "STOPPED"
+                stop_reason = self._campaign_stop_reason(entry.status)
+                if entry.status in {REAL_PILOT_NOT_READY, REAL_PILOT_REFUSED, REAL_PILOT_HALTED}:
+                    safety_interruptions += 1
+                emit(HFRealPilotCampaignUpdate(
+                    phase="ENTRY",
+                    cycle_number=cycle_number,
+                    target_cycles=target_cycles,
+                    status=entry.status,
+                    message=entry.final_pilot_report.message if entry.final_pilot_report else "Entry did not complete.",
+                    current_signal=last_signal,
+                    safety_status=entry.status,
+                ))
+                break
+
+            emit(HFRealPilotCampaignUpdate(
+                phase="ENTRY",
+                cycle_number=cycle_number,
+                target_cycles=target_cycles,
+                status=entry.status,
+                message=f"Entry order placed for real_cycle_id={entry.final_pilot_report.real_cycle_id if entry.final_pilot_report else 'N/A'}.",
+                current_signal=last_signal,
+                safety_status=entry.status,
+            ))
+
+            def close_update_callback(update: HFRealPilotCloseUpdate) -> None:
+                emit(HFRealPilotCampaignUpdate(
+                    phase="TRACKING",
+                    cycle_number=cycle_number,
+                    target_cycles=target_cycles,
+                    status=update.close_reason or REAL_PILOT_CLOSE_ARMED_NO_CONDITION,
+                    message=(
+                        f"price={update.current_price} target={update.target_price} "
+                        f"target_met={update.close_condition_met} timeout_met={update.timeout_condition_met}"
+                    ),
+                    current_signal=last_signal,
+                    safety_status=update.close_reason or REAL_PILOT_CLOSE_ARMED_NO_CONDITION,
+                ))
+
+            close = self.close_watch(
+                profile=profile,
+                confirmed=confirmed,
+                max_iterations=close_max_iterations,
+                interval_seconds=interval_seconds,
+                sleep_fn=sleep_fn,
+                update_callback=close_update_callback,
+            )
+            if close.status != REAL_PILOT_CLOSE_ORDER_PLACED:
+                status = "STOPPED"
+                stop_reason = self._campaign_stop_reason(close.status)
+                safety_interruptions += 1
+                emit(HFRealPilotCampaignUpdate(
+                    phase="EXIT",
+                    cycle_number=cycle_number,
+                    target_cycles=target_cycles,
+                    status=close.status,
+                    message=close.message,
+                    current_signal=last_signal,
+                    safety_status=close.status,
+                ))
+                break
+
+            completed += 1
+            emit(HFRealPilotCampaignUpdate(
+                phase="EXIT",
+                cycle_number=cycle_number,
+                target_cycles=target_cycles,
+                status=close.status,
+                message=f"Closed real_cycle_id={close.real_cycle_id} reason={close.close_reason}.",
+                current_signal=last_signal,
+                safety_status=close.status,
+            ))
+
+            audit_checks = self._campaign_audit_checks(profile=profile, pilot_stake=pilot_stake)
+            audit_ok = all(check.ok for check in audit_checks)
+            emit(HFRealPilotCampaignUpdate(
+                phase="AUDIT",
+                cycle_number=cycle_number,
+                target_cycles=target_cycles,
+                status="PASS" if audit_ok else "FAIL",
+                message="; ".join(f"{check.name}={'PASS' if check.ok else 'FAIL'}" for check in audit_checks),
+                current_signal=last_signal,
+                safety_status="PASS" if audit_ok else "FAIL",
+            ))
+            stats = self.database.load_real_pilot_campaign_cycle_stats(profile, baseline_cycle_id)
+            self.database.update_real_pilot_campaign(
+                campaign_id,
+                status="RUNNING" if audit_ok and completed < target_cycles else "COMPLETED",
+                completed_cycles=completed,
+                net_profit=float(stats["net_profit"]),
+                stop_reason="target_cycles_reached" if completed >= target_cycles else "running",
+                orders_sent=int(stats["orders_sent"]),
+                orders_filled=int(stats["orders_filled"]),
+                finished=completed >= target_cycles,
+            )
+            if not audit_ok:
+                status = "STOPPED"
+                stop_reason = self._failed_audit_reason(audit_checks)
+                safety_interruptions += 1
+                break
+
+        final_stats = self.database.load_real_pilot_campaign_cycle_stats(profile, baseline_cycle_id)
+        if completed >= target_cycles:
+            status = "COMPLETED"
+            stop_reason = "target_cycles_reached"
+        self.database.update_real_pilot_campaign(
+            campaign_id,
+            status=status,
+            completed_cycles=int(final_stats["completed_cycles"]),
+            net_profit=float(final_stats["net_profit"]),
+            stop_reason=stop_reason,
+            orders_sent=int(final_stats["orders_sent"]),
+            orders_filled=int(final_stats["orders_filled"]),
+            finished=True,
+        )
+        return HFRealPilotCampaignReport(
+            campaign_id=campaign_id,
+            profile=profile,
+            status=status,
+            stop_reason=stop_reason,
+            target_cycles=target_cycles,
+            completed_cycles=int(final_stats["completed_cycles"]),
+            orders_sent=int(final_stats["orders_sent"]),
+            orders_filled=int(final_stats["orders_filled"]),
+            target_closes=int(final_stats["target_closes"]),
+            timeout_closes=int(final_stats["timeout_closes"]),
+            net_profit=float(final_stats["net_profit"]),
+            win_rate=float(final_stats["win_rate"]),
+            average_holding_seconds=float(final_stats["average_holding_seconds"]),
+            safety_interruptions=safety_interruptions,
+            recommendation=self._campaign_recommendation(status, stop_reason, final_stats, target_cycles),
+            updates=updates,
+        )
+
     def build_status(self, profile: str) -> HFRealPilotStatusReport:
         stats = self.database.load_real_pilot_status(profile)
         blocked = self.emergency_stop_path.exists()
@@ -497,6 +752,7 @@ class HFRealPilotEngine:
         if int(stats["open_cycles"]) > 0:
             status = "OPEN_REAL_CYCLE"
         open_cycle_details = self._build_open_cycle_details(profile)
+        campaign_details = self._build_campaign_details(profile)
         return HFRealPilotStatusReport(
             profile=profile,
             status=status,
@@ -507,6 +763,7 @@ class HFRealPilotEngine:
             order_events=int(stats["order_events"]),
             emergency_stop=blocked,
             open_cycle_details=open_cycle_details,
+            campaign_details=campaign_details,
         )
 
     def _close_preflight_checks(self, *, profile: str, confirmed: bool) -> list[RealPilotCheck]:
@@ -527,6 +784,102 @@ class HFRealPilotEngine:
                 f"hf-real-dry-run status={dry_run_status}",
             ))
         return checks
+
+    def _campaign_audit_checks(self, *, profile: str, pilot_stake: Decimal) -> list[RealPilotCheck]:
+        open_cycles = self.database.count_open_real_pilot_cycles(profile)
+        checks = [
+            RealPilotCheck("emergency_stop_clear", not self.emergency_stop_path.exists(), f"path={self.emergency_stop_path}"),
+            RealPilotCheck("open_real_cycles_clear", open_cycles == 0, f"open_real_cycles={open_cycles}"),
+            self._permissions_check(),
+        ]
+        checks.extend(self._risk_checks(profile))
+        dry_run_status = self._dry_run_status(profile, pilot_stake)
+        checks.append(RealPilotCheck(
+            "dry_run_ready",
+            dry_run_status == "READY_FOR_SMALL_REAL_PILOT",
+            f"hf-real-dry-run status={dry_run_status}",
+        ))
+        checks.append(RealPilotCheck("database_consistency", open_cycles == 0, "real pilot cycle state is consistent after close"))
+        return checks
+
+    def _build_campaign_details(self, profile: str) -> HFRealPilotCampaignDetails | None:
+        row = self.database.load_current_real_pilot_campaign(profile)
+        if row is None:
+            return None
+        try:
+            started = datetime.fromisoformat(str(row["started_at"]))
+            if started.tzinfo is None:
+                started = started.replace(tzinfo=timezone.utc)
+            runtime_seconds = max(0.0, (datetime.now(timezone.utc) - started.astimezone(timezone.utc)).total_seconds())
+        except ValueError:
+            runtime_seconds = 0.0
+        target_cycles = int(row["target_cycles"])
+        completed = int(row["completed_cycles"])
+        return HFRealPilotCampaignDetails(
+            campaign_id=str(row["campaign_id"]),
+            status=str(row["status"]),
+            target_cycles=target_cycles,
+            completed_cycles=completed,
+            remaining_cycles=max(0, target_cycles - completed),
+            net_profit=float(row["net_profit"]),
+            started_at=str(row["started_at"]),
+            runtime_seconds=runtime_seconds,
+            stop_reason=row["stop_reason"],
+        )
+
+    @staticmethod
+    def _campaign_stop_reason(status: str) -> str:
+        mapping = {
+            REAL_PILOT_REFUSED: "operator_or_profile_refused",
+            REAL_PILOT_NOT_READY: "safety_audit_failed",
+            REAL_PILOT_HALTED: "order_failed_or_unknown",
+            REAL_PILOT_ARMED_NO_SIGNAL: "no_signal_before_limit",
+            REAL_PILOT_NO_OPEN_CYCLE: "no_open_cycle_for_close",
+        }
+        return mapping.get(status, status.lower())
+
+    @staticmethod
+    def _failed_audit_reason(checks: list[RealPilotCheck]) -> str:
+        for check in checks:
+            if not check.ok:
+                if check.name == "daily_loss_limit":
+                    return "daily_loss_limit"
+                if check.name == "max_consecutive_losses":
+                    return "max_consecutive_losses"
+                if check.name == "emergency_stop_clear":
+                    return "emergency_stop"
+                if check.name == "api_permissions_spot_only":
+                    return "api_permission_changed"
+                if check.name == "dry_run_ready":
+                    return "balance_or_exchange_readiness_failed"
+                if check.name == "open_real_cycles_clear":
+                    return "database_inconsistency"
+                return check.name
+        return "audit_failed"
+
+    @staticmethod
+    def _campaign_recommendation(
+        status: str,
+        stop_reason: str,
+        stats: dict,
+        target_cycles: int,
+    ) -> str:
+        if status != "COMPLETED":
+            return "STOP_REAL_TRADING"
+        completed = int(stats["completed_cycles"])
+        net_profit = float(stats["net_profit"])
+        win_rate = float(stats["win_rate"])
+        if completed < target_cycles:
+            return "KEEP_CURRENT_STAKE"
+        if net_profit < 0:
+            return "STOP_REAL_TRADING"
+        if completed >= 30 and net_profit > 0 and win_rate >= 0.55:
+            return "READY_FOR_LONG_CAMPAIGN"
+        if completed >= 10 and net_profit > 0:
+            return "KEEP_CURRENT_STAKE"
+        if stop_reason == "target_cycles_reached" and net_profit >= 0:
+            return "KEEP_CURRENT_STAKE"
+        return "STOP_REAL_TRADING"
 
     def _build_open_cycle_details(self, profile: str) -> HFRealPilotOpenCycleDetails | None:
         cycle = self.database.load_open_real_pilot_cycle(profile)
