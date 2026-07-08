@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 from urllib.parse import urlencode
 
 import requests
@@ -30,6 +30,7 @@ REAL_PILOT_NOT_READY = "NOT_READY"
 REAL_PILOT_ARMED_WAITING = "ARMED_WAITING_FOR_SIGNAL"
 REAL_PILOT_ORDER_PLACED = "ORDER_PLACED"
 REAL_PILOT_HALTED = "HALTED"
+REAL_PILOT_ARMED_NO_SIGNAL = "ARMED_NO_SIGNAL"
 
 REAL_PILOT_DAILY_LOSS_LIMIT = Decimal("-1.00")
 REAL_PILOT_MAX_CONSECUTIVE_LOSSES = 3
@@ -87,6 +88,35 @@ class HFRealPilotStatusReport:
     losing_cycles: int
     order_events: int
     emergency_stop: bool
+
+
+@dataclass(frozen=True)
+class HFRealPilotSignalSnapshot:
+    price: float | None
+    short_center: float | None
+    hf_entry_mode: str
+    candidate: bool
+    entry_signal: str | None
+    block_reason: str
+
+
+@dataclass(frozen=True)
+class HFRealPilotWatchUpdate:
+    update_number: int
+    signal: HFRealPilotSignalSnapshot
+    safety_status: str
+    open_real_cycles: int
+    order_attempted: bool
+
+
+@dataclass(frozen=True)
+class HFRealPilotWatchReport:
+    profile: str
+    status: str
+    iterations: int
+    order_attempted: bool
+    final_pilot_report: HFRealPilotReport | None
+    updates: list[HFRealPilotWatchUpdate]
 
 
 class BinanceRealPilotOrderClient(BinanceRealDryRunProvider):
@@ -239,6 +269,91 @@ class HFRealPilotEngine:
             direction=entry_signal,
             checks=checks,
             dry_run_status=dry_run_status,
+        )
+
+    def watch(
+        self,
+        *,
+        profile: str,
+        pilot_stake: Decimal,
+        confirmed: bool,
+        max_iterations: int,
+        interval_seconds: float,
+        signal_provider: Callable[[], HFRealPilotSignalSnapshot],
+        sleep_fn: Callable[[float], None] = time.sleep,
+        update_callback: Callable[[HFRealPilotWatchUpdate], None] | None = None,
+    ) -> HFRealPilotWatchReport:
+        if max_iterations <= 0:
+            raise ValueError("max_iterations must be greater than 0.")
+        if interval_seconds < 0:
+            raise ValueError("interval_seconds must be 0 or greater.")
+
+        early = self.run_once(
+            profile=profile,
+            pilot_stake=pilot_stake,
+            confirmed=confirmed,
+            entry_signal=None,
+        )
+        if early.status in {REAL_PILOT_REFUSED, REAL_PILOT_NOT_READY}:
+            return HFRealPilotWatchReport(
+                profile=profile,
+                status=early.status,
+                iterations=0,
+                order_attempted=False,
+                final_pilot_report=early,
+                updates=[],
+            )
+
+        updates: list[HFRealPilotWatchUpdate] = []
+        final_report: HFRealPilotReport | None = early
+        for index in range(1, max_iterations + 1):
+            signal = signal_provider()
+            entry_signal = signal.entry_signal if signal.candidate else None
+            final_report = self.run_once(
+                profile=profile,
+                pilot_stake=pilot_stake,
+                confirmed=confirmed,
+                entry_signal=entry_signal,
+            )
+            update = HFRealPilotWatchUpdate(
+                update_number=index,
+                signal=signal,
+                safety_status=final_report.status,
+                open_real_cycles=self.database.count_open_real_pilot_cycles(profile),
+                order_attempted=final_report.order_attempted,
+            )
+            updates.append(update)
+            if update_callback is not None:
+                update_callback(update)
+
+            if final_report.order_attempted:
+                return HFRealPilotWatchReport(
+                    profile=profile,
+                    status=final_report.status,
+                    iterations=index,
+                    order_attempted=True,
+                    final_pilot_report=final_report,
+                    updates=updates,
+                )
+            if final_report.status in {REAL_PILOT_REFUSED, REAL_PILOT_NOT_READY, REAL_PILOT_HALTED}:
+                return HFRealPilotWatchReport(
+                    profile=profile,
+                    status=final_report.status,
+                    iterations=index,
+                    order_attempted=final_report.order_attempted,
+                    final_pilot_report=final_report,
+                    updates=updates,
+                )
+            if index < max_iterations:
+                sleep_fn(interval_seconds)
+
+        return HFRealPilotWatchReport(
+            profile=profile,
+            status=REAL_PILOT_ARMED_NO_SIGNAL,
+            iterations=max_iterations,
+            order_attempted=False,
+            final_pilot_report=final_report,
+            updates=updates,
         )
 
     def build_status(self, profile: str) -> HFRealPilotStatusReport:

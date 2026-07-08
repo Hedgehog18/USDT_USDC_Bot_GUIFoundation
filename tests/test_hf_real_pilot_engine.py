@@ -2,7 +2,7 @@ from dataclasses import replace
 from decimal import Decimal
 
 from analytics.hf_real_dry_run_engine import AccountBalances, ExchangeSymbolRules
-from analytics.hf_real_pilot_engine import HFRealPilotEngine, RealOrderResult
+from analytics.hf_real_pilot_engine import HFRealPilotEngine, HFRealPilotSignalSnapshot, RealOrderResult
 from market.binance_market_data_provider import BidAsk
 from storage.database_manager import DatabaseManager
 
@@ -254,3 +254,124 @@ def test_real_pilot_status_reads_isolated_real_tables(test_config, tmp_path):
 
     assert report.status == "OPEN_REAL_CYCLE"
     assert report.open_cycles == 1
+
+
+def _watch_signal(entry_signal: str | None = None) -> HFRealPilotSignalSnapshot:
+    return HFRealPilotSignalSnapshot(
+        price=1.00068,
+        short_center=1.00070,
+        hf_entry_mode="short_center",
+        candidate=entry_signal is not None,
+        entry_signal=entry_signal,
+        block_reason="no_signal" if entry_signal is None else "N/A",
+    )
+
+
+def test_real_pilot_watch_refuses_without_confirmation(test_config, tmp_path):
+    client = FakeRealPilotClient()
+    engine, _database = _engine(tmp_path, test_config, client)
+
+    report = engine.watch(
+        profile=PROFILE,
+        pilot_stake=Decimal("6"),
+        confirmed=False,
+        max_iterations=5,
+        interval_seconds=0,
+        signal_provider=lambda: _watch_signal("BUY_USDC"),
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert report.status == "REFUSED"
+    assert report.iterations == 0
+    assert client.orders_created == 0
+
+
+def test_real_pilot_watch_exits_armed_no_signal_after_max_iterations(test_config, tmp_path):
+    client = FakeRealPilotClient()
+    engine, _database = _engine(tmp_path, test_config, client)
+
+    report = engine.watch(
+        profile=PROFILE,
+        pilot_stake=Decimal("6"),
+        confirmed=True,
+        max_iterations=3,
+        interval_seconds=0,
+        signal_provider=lambda: _watch_signal(),
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert report.status == "ARMED_NO_SIGNAL"
+    assert report.iterations == 3
+    assert report.order_attempted is False
+    assert client.orders_created == 0
+    assert len(report.updates) == 3
+
+
+def test_real_pilot_watch_stops_after_first_order_attempt(test_config, tmp_path):
+    client = FakeRealPilotClient()
+    engine, database = _engine(tmp_path, test_config, client)
+    signals = iter([_watch_signal(), _watch_signal("BUY_USDC"), _watch_signal("SELL_USDC")])
+
+    report = engine.watch(
+        profile=PROFILE,
+        pilot_stake=Decimal("6"),
+        confirmed=True,
+        max_iterations=5,
+        interval_seconds=0,
+        signal_provider=lambda: next(signals),
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert report.status == "ORDER_PLACED"
+    assert report.iterations == 2
+    assert report.order_attempted is True
+    assert client.orders_created == 1
+    assert database.count_open_real_pilot_cycles(PROFILE) == 1
+
+
+def test_real_pilot_watch_refuses_if_open_real_cycle_exists(test_config, tmp_path):
+    client = FakeRealPilotClient()
+    engine, database = _engine(tmp_path, test_config, client)
+    database.save_real_pilot_cycle(
+        run_id="existing",
+        strategy_profile=PROFILE,
+        symbol="USDCUSDT",
+        direction="BUY_USDC",
+        status="OPEN",
+        open_price=1.00068,
+        quantity=6,
+        stake_usdt=6,
+    )
+
+    report = engine.watch(
+        profile=PROFILE,
+        pilot_stake=Decimal("6"),
+        confirmed=True,
+        max_iterations=5,
+        interval_seconds=0,
+        signal_provider=lambda: _watch_signal("BUY_USDC"),
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert report.status == "NOT_READY"
+    assert report.iterations == 0
+    assert client.orders_created == 0
+
+
+def test_real_pilot_watch_requires_dry_run_ready_before_order_attempt(test_config, tmp_path):
+    client = FakeRealPilotClient(usdt=Decimal("3"), usdc=Decimal("3"))
+    engine, _database = _engine(tmp_path, test_config, client)
+
+    report = engine.watch(
+        profile=PROFILE,
+        pilot_stake=Decimal("6"),
+        confirmed=True,
+        max_iterations=5,
+        interval_seconds=0,
+        signal_provider=lambda: _watch_signal("BUY_USDC"),
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert report.status == "NOT_READY"
+    assert report.iterations == 0
+    assert client.orders_created == 0

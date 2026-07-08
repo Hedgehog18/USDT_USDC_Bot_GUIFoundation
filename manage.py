@@ -95,7 +95,7 @@ from analytics.hf_extreme_move_diagnostics_engine import HFExtremeMoveDiagnostic
 from analytics.hf_profit_audit_engine import HFProfitAuditEngine
 from analytics.hf_production_readiness_engine import HFProductionReadinessEngine
 from analytics.hf_real_dry_run_engine import HFRealDryRunEngine
-from analytics.hf_real_pilot_engine import HFRealPilotEngine
+from analytics.hf_real_pilot_engine import HFRealPilotEngine, HFRealPilotSignalSnapshot
 from analytics.hf_regime_filter_sim_engine import HFRegimeFilterSimulationEngine
 from analytics.hf_run_regime_comparison_engine import HFRunRegimeComparisonEngine
 from analytics.hf_velocity_filter_sim_engine import HFVelocityFilterSimulationEngine
@@ -4050,6 +4050,75 @@ def command_hf_small_real_pilot(args) -> None:
             print(f"- {check.name}: {check.message}")
 
 
+def command_hf_small_real_pilot_watch(args) -> None:
+    config, _logger, database = build_context()
+    profile = args.profile
+    bot = _apply_profile_to_bot(BotEngine(), profile)
+    pilot_engine = HFRealPilotEngine(database, config)
+
+    def signal_provider() -> HFRealPilotSignalSnapshot:
+        market_state = bot.market_analyzer.analyze_market()
+        decision = bot.decision_engine.make_decision(market_state)
+        candidate = decision.action in {"BUY_USDC", "SELL_USDC"}
+        return HFRealPilotSignalSnapshot(
+            price=float(getattr(market_state, "price", 0.0) or 0.0),
+            short_center=float(getattr(market_state, "short_center", 0.0) or 0.0),
+            hf_entry_mode=str(getattr(market_state, "hf_entry_mode", "N/A")),
+            candidate=candidate,
+            entry_signal=decision.action if candidate else None,
+            block_reason="N/A" if candidate else _collection_entry_block_reason({
+                "action": decision.action,
+                "reason": decision.reason,
+            }),
+        )
+
+    def print_update(update) -> None:
+        signal = update.signal
+        print(
+            f"[real-pilot-watch {update.update_number}] "
+            f"price={_format_collection_float(signal.price)} | "
+            f"short_center={_format_collection_float(signal.short_center)} | "
+            f"hf_entry_mode={signal.hf_entry_mode} | "
+            f"candidate={'yes' if signal.candidate else 'no'} | "
+            f"block={signal.block_reason} | "
+            f"open_real={update.open_real_cycles} | "
+            f"safety={update.safety_status}"
+        )
+
+    print("=== HF v1 Small Real Pilot Watch ===")
+    print("WARNING: This command may create at most one SPOT real pilot order after explicit confirmation and safety gates.")
+    print(f"Profile: {profile}")
+    print(f"Pilot stake: {args.pilot_stake:.8f}")
+    print(f"Max iterations: {args.max_iterations}")
+    print(f"Interval seconds: {args.interval}")
+
+    report = pilot_engine.watch(
+        profile=profile,
+        pilot_stake=Decimal(str(args.pilot_stake)),
+        confirmed=args.confirm_real_pilot,
+        max_iterations=args.max_iterations,
+        interval_seconds=args.interval,
+        signal_provider=signal_provider,
+        update_callback=print_update,
+    )
+
+    print("")
+    print("=== HF v1 Small Real Pilot Watch Result ===")
+    print(f"Status: {report.status}")
+    print(f"Iterations: {report.iterations}")
+    print(f"Order attempted: {'yes' if report.order_attempted else 'no'}")
+    if report.final_pilot_report is not None:
+        final = report.final_pilot_report
+        print(f"Final dry-run status: {final.dry_run_status or 'N/A'}")
+        print(f"Final order status: {final.order_status or 'N/A'}")
+        print(f"Final real cycle db_id: {final.real_cycle_id or 'N/A'}")
+        print(f"Message: {final.message}")
+        if final.failed_checks:
+            print("Blocking checks:")
+            for check in final.failed_checks:
+                print(f"- {check.name}: {check.message}")
+
+
 def command_hf_real_pilot_status(args) -> None:
     config, _logger, database = build_context()
     report = HFRealPilotEngine(database, config).build_status(args.profile)
@@ -6409,6 +6478,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="Hard cap for this pilot run; values above 1 are refused by safety gates.",
     )
     hf_small_real_pilot_parser.set_defaults(func=command_hf_small_real_pilot)
+
+    hf_small_real_pilot_watch_parser = subparsers.add_parser(
+        "hf-small-real-pilot-watch",
+        help="Watch live HF v1 signal and place at most one confirmed small real pilot order",
+    )
+    hf_small_real_pilot_watch_parser.add_argument(
+        "--profile",
+        choices=SUPPORTED_RUNTIME_STRATEGY_PROFILES,
+        default="mean_reversion_hf_micro_v1",
+    )
+    hf_small_real_pilot_watch_parser.add_argument("--pilot-stake", type=_positive_decimal_float, required=True)
+    hf_small_real_pilot_watch_parser.add_argument("--confirm-real-pilot", action="store_true")
+    hf_small_real_pilot_watch_parser.add_argument("--max-iterations", type=_positive_int, default=300)
+    hf_small_real_pilot_watch_parser.add_argument("--interval", type=_decimal_float, default=1.0)
+    hf_small_real_pilot_watch_parser.set_defaults(func=command_hf_small_real_pilot_watch)
 
     hf_real_pilot_status_parser = subparsers.add_parser(
         "hf-real-pilot-status",
