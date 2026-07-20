@@ -70,17 +70,28 @@ class FakeRealPilotClient:
         )
 
 
+class FakePostExitObserverLauncher:
+    def __init__(self, *, started: bool = True) -> None:
+        self.started = started
+        self.calls: list[tuple[str, int]] = []
+
+    def start(self, *, profile: str, real_cycle_id: int) -> bool:
+        self.calls.append((profile, real_cycle_id))
+        return self.started
+
+
 def _config(test_config):
     return replace(test_config, symbol="USDCUSDT", mode="DEMO", max_allowed_spread=0.0002)
 
 
-def _engine(tmp_path, test_config, client=None):
+def _engine(tmp_path, test_config, client=None, post_exit_launcher=None):
     database = DatabaseManager(str(tmp_path / "bot.sqlite"))
     return HFRealPilotEngine(
         database,
         _config(test_config),
         client or FakeRealPilotClient(),
         emergency_stop_path=tmp_path / "EMERGENCY_STOP",
+        post_exit_observer_launcher=post_exit_launcher or FakePostExitObserverLauncher(),
     ), database
 
 
@@ -563,7 +574,8 @@ def test_real_pilot_close_watch_closes_target_hit(test_config, tmp_path):
         ask=1.00070,
         order_avg_price=Decimal("1.00069"),
     )
-    engine, database = _engine(tmp_path, test_config, client)
+    post_exit_launcher = FakePostExitObserverLauncher()
+    engine, database = _engine(tmp_path, test_config, client, post_exit_launcher)
     cycle_id = database.save_real_pilot_cycle(
         run_id="open",
         strategy_profile=PROFILE,
@@ -599,6 +611,8 @@ def test_real_pilot_close_watch_closes_target_hit(test_config, tmp_path):
     assert row[2] > 0
     assert row[3] == "real_pilot_target"
     assert paper_count == 0
+    assert post_exit_launcher.calls == [(PROFILE, cycle_id)]
+    assert "Post exit observer started." in report.message
 
 
 def test_real_pilot_close_watch_does_not_open_new_entry(test_config, tmp_path):

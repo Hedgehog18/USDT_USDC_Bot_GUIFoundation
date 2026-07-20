@@ -6,6 +6,19 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 
+try:
+    from rich import box
+    from rich.console import Console
+    from rich.panel import Panel
+    from rich.table import Table
+    from rich.text import Text
+except Exception:  # pragma: no cover - rich is an optional presentation layer.
+    box = None
+    Console = None
+    Panel = None
+    Table = None
+    Text = None
+
 from backtest.backtest_comparison_engine import BacktestComparisonEngine
 from backtest.backtest_comparison_exporter import BacktestComparisonExporter
 from backtest.backtest_engine import BacktestEngine
@@ -100,6 +113,8 @@ from analytics.hf_real_entry_quality_engine import (
     HFRealEntryGroupMetrics,
     HFRealEntryQualityDiagnosticsEngine,
 )
+from analytics.hf_post_exit_observer import HFPostExitObserver
+from analytics.hf_post_exit_observer_statistics_engine import HFPostExitObserverStatisticsEngine
 from analytics.hf_real_pilot_engine import HFRealPilotEngine, HFRealPilotSignalSnapshot
 from analytics.hf_real_vs_paper_diagnostics_engine import HFRealVsPaperDiagnosticsEngine
 from analytics.hf_regime_filter_sim_engine import HFRegimeFilterSimulationEngine
@@ -4062,6 +4077,830 @@ def _print_real_pilot_checks(checks) -> None:
             print(f"- {check.name}: {check.message}")
 
 
+def _rich_console():
+    if Console is None:
+        return None
+    return Console(width=160)
+
+
+ANSI_RESET = "\033[0m"
+ANSI_STYLES = {
+    "dim": "\033[2m",
+    "bold": "\033[1m",
+    "cyan": "\033[36m",
+    "green": "\033[32m",
+    "yellow": "\033[33m",
+    "red": "\033[31m",
+    "white": "\033[37m",
+    "bold cyan": "\033[1;36m",
+    "bold green": "\033[1;32m",
+    "bold yellow": "\033[1;33m",
+    "bold red": "\033[1;31m",
+}
+
+
+def _ansi(text, style: str | None = None) -> str:
+    code = ANSI_STYLES.get(style or "")
+    if not code:
+        return str(text)
+    return f"{code}{text}{ANSI_RESET}"
+
+
+def _ansi_title(title: str, subtitle: str | None = None, *, style: str = "bold cyan") -> None:
+    print("")
+    print(_ansi("=" * 96, "dim"))
+    print(_ansi(title, style))
+    if subtitle:
+        print(_ansi(subtitle, "dim"))
+    print(_ansi("=" * 96, "dim"))
+
+
+def _ansi_kv_table(title: str, rows: list[tuple[str, object, str | None]]) -> None:
+    print("")
+    print(_ansi(title, "bold cyan"))
+    print(_ansi("-" * 96, "dim"))
+    label_width = max([len(label) for label, _value, _style in rows] + [6])
+    for label, value, style in rows:
+        print(f"  {_ansi(label.ljust(label_width), 'cyan')}  {_ansi(value, style)}")
+
+
+def _ansi_table(title: str, headers: list[str], rows: list[list[tuple[object, str | None]]]) -> None:
+    print("")
+    print(_ansi(title, "bold cyan"))
+    print(_ansi("-" * 160, "dim"))
+    widths = [len(header) for header in headers]
+    for row in rows:
+        for index, (value, _style) in enumerate(row):
+            widths[index] = max(widths[index], min(len(str(value)), 32))
+    header = " | ".join(_ansi(headers[index].ljust(widths[index]), "cyan") for index in range(len(headers)))
+    print(f"  {header}")
+    print(_ansi("  " + "-+-".join("-" * width for width in widths), "dim"))
+    for row in rows:
+        cells = []
+        for index, (value, style) in enumerate(row):
+            text = str(value)
+            if len(text) > 32:
+                text = text[:29] + "..."
+            cells.append(_ansi(text.ljust(widths[index]), style))
+        print("  " + " | ".join(cells))
+
+
+def _rich_cell(value, style: str | None = None):
+    text = str(value)
+    if Text is None:
+        return text
+    return Text(text, style=style or "")
+
+
+def _rich_status_style(value: str | None) -> str:
+    text = str(value or "").upper()
+    if any(token in text for token in ("READY", "PASS", "FILLED", "COMPLETED", "TARGET")):
+        return "bold green"
+    if any(token in text for token in ("STOP", "FAIL", "LOSS", "NOT_READY", "HALTED", "BLOCK")):
+        return "bold red"
+    if any(token in text for token in ("ARMED", "WAIT", "TIMEOUT", "WARNING", "TUNE", "REVIEW")):
+        return "bold yellow"
+    return "white"
+
+
+def _rich_pnl_style(value: float | Decimal | None) -> str:
+    if value is None:
+        return "dim"
+    numeric = float(value)
+    if numeric > 0:
+        return "bold green"
+    if numeric < 0:
+        return "bold red"
+    return "yellow"
+
+
+def _rich_bool_style(value: bool | None) -> str:
+    if value is None:
+        return "dim"
+    return "green" if value else "yellow"
+
+
+def _rich_table(title: str, columns: list[tuple[str, str]] | None = None):
+    table = Table(title=title, box=box.SIMPLE_HEAVY if box is not None else None, show_lines=False)
+    if columns is None:
+        columns = [("Metric", "cyan"), ("Value", "white")]
+    for name, style in columns:
+        table.add_column(name, style=style, no_wrap=False)
+    return table
+
+
+def _render_hf_real_pilot_status_rich(report) -> bool:
+    console = _rich_console()
+    if console is None:
+        _render_hf_real_pilot_status_ansi(report)
+        return True
+
+    console.print(Panel.fit(
+        f"[bold cyan]HF v1 Real Pilot Status[/bold cyan]\n[dim]{report.profile}[/dim]",
+        border_style=_rich_status_style(report.status),
+    ))
+    overview = _rich_table("Overview")
+    overview.add_row("Status", _rich_cell(report.status, _rich_status_style(report.status)))
+    overview.add_row("Open real cycles", _rich_cell(report.open_cycles, "bold yellow" if report.open_cycles else "green"))
+    overview.add_row("Closed real cycles", str(report.closed_cycles))
+    overview.add_row("Net profit", _rich_cell(f"{report.net_profit:+.8f}", _rich_pnl_style(report.net_profit)))
+    overview.add_row("Losing cycles", _rich_cell(report.losing_cycles, "red" if report.losing_cycles else "green"))
+    overview.add_row("Order events", str(report.order_events))
+    overview.add_row("Emergency stop", _rich_cell("yes" if report.emergency_stop else "no", "bold red" if report.emergency_stop else "green"))
+    overview.add_row("Consecutive losses since reset", _rich_cell(report.consecutive_losses_since_reset, "yellow" if report.consecutive_losses_since_reset else "green"))
+    overview.add_row("Latest safety reset", report.latest_safety_reset_timestamp or "N/A")
+    overview.add_row("Latest reset reason", report.latest_safety_reset_reason or "N/A")
+    console.print(overview)
+
+    if report.open_cycle_details is not None:
+        cycle = report.open_cycle_details
+        open_table = _rich_table("Open Real Cycle")
+        open_table.add_row("DB ID", str(cycle.db_id))
+        open_table.add_row("Direction", cycle.direction)
+        open_table.add_row("Open price", _format_decimal_optional(cycle.open_price))
+        open_table.add_row("Target price", _format_decimal_optional(cycle.target_price))
+        open_table.add_row("Quantity", _format_decimal_optional(cycle.quantity))
+        open_table.add_row("Age", f"{cycle.age_seconds:.2f}s")
+        open_table.add_row("Current price", _format_decimal_optional(cycle.current_price))
+        open_table.add_row("Unrealized PnL", _rich_cell(_format_decimal_optional(cycle.unrealized_pnl), _rich_pnl_style(cycle.unrealized_pnl)))
+        open_table.add_row("Distance to target", _format_decimal_optional(cycle.distance_to_target))
+        open_table.add_row("Blackbox snapshots", str(cycle.blackbox_snapshots_count))
+        console.print(open_table)
+
+    if report.latest_closed_blackbox is not None:
+        latest = report.latest_closed_blackbox
+        target_touched = None if latest.target_touched is None else bool(latest.target_touched)
+        latest_table = _rich_table("Latest Closed Blackbox")
+        latest_table.add_row("DB ID", str(latest.db_id))
+        latest_table.add_row("Snapshots", str(latest.snapshots_count))
+        latest_table.add_row("Target touched", _rich_cell(_format_optional_bool(target_touched), _rich_bool_style(target_touched)))
+        console.print(latest_table)
+
+    if report.campaign_details is not None:
+        campaign = report.campaign_details
+        campaign_table = _rich_table("Current Campaign")
+        campaign_table.add_row("Campaign ID", campaign.campaign_id)
+        campaign_table.add_row("State", _rich_cell(campaign.status, _rich_status_style(campaign.status)))
+        campaign_table.add_row("Current cycle", str(campaign.completed_cycles + 1 if campaign.remaining_cycles else campaign.completed_cycles))
+        campaign_table.add_row("Completed", str(campaign.completed_cycles))
+        campaign_table.add_row("Remaining", str(campaign.remaining_cycles))
+        campaign_table.add_row("Campaign net", _rich_cell(f"{campaign.net_profit:+.8f}", _rich_pnl_style(campaign.net_profit)))
+        campaign_table.add_row("Runtime", f"{campaign.runtime_seconds:.2f}s")
+        campaign_table.add_row("Stop reason", campaign.stop_reason or "N/A")
+        console.print(campaign_table)
+    return True
+
+
+def _render_hf_real_pilot_status_ansi(report) -> None:
+    _ansi_title("HF v1 Real Pilot Status", report.profile, style=_rich_status_style(report.status))
+    _ansi_kv_table("Overview", [
+        ("Status", report.status, _rich_status_style(report.status)),
+        ("Open real cycles", report.open_cycles, "bold yellow" if report.open_cycles else "green"),
+        ("Closed real cycles", report.closed_cycles, None),
+        ("Net profit", f"{report.net_profit:+.8f}", _rich_pnl_style(report.net_profit)),
+        ("Losing cycles", report.losing_cycles, "red" if report.losing_cycles else "green"),
+        ("Order events", report.order_events, None),
+        ("Emergency stop", "yes" if report.emergency_stop else "no", "bold red" if report.emergency_stop else "green"),
+        ("Consecutive losses since reset", report.consecutive_losses_since_reset, "yellow" if report.consecutive_losses_since_reset else "green"),
+        ("Latest safety reset", report.latest_safety_reset_timestamp or "N/A", None),
+        ("Latest reset reason", report.latest_safety_reset_reason or "N/A", None),
+    ])
+    if report.open_cycle_details is not None:
+        cycle = report.open_cycle_details
+        _ansi_kv_table("Open Real Cycle", [
+            ("DB ID", cycle.db_id, None),
+            ("Direction", cycle.direction, None),
+            ("Open price", _format_decimal_optional(cycle.open_price), None),
+            ("Target price", _format_decimal_optional(cycle.target_price), None),
+            ("Quantity", _format_decimal_optional(cycle.quantity), None),
+            ("Age", f"{cycle.age_seconds:.2f}s", None),
+            ("Current price", _format_decimal_optional(cycle.current_price), None),
+            ("Unrealized PnL", _format_decimal_optional(cycle.unrealized_pnl), _rich_pnl_style(cycle.unrealized_pnl)),
+            ("Distance to target", _format_decimal_optional(cycle.distance_to_target), None),
+            ("Blackbox snapshots", cycle.blackbox_snapshots_count, None),
+        ])
+    if report.latest_closed_blackbox is not None:
+        latest = report.latest_closed_blackbox
+        target_touched = None if latest.target_touched is None else bool(latest.target_touched)
+        _ansi_kv_table("Latest Closed Blackbox", [
+            ("DB ID", latest.db_id, None),
+            ("Snapshots", latest.snapshots_count, None),
+            ("Target touched", _format_optional_bool(target_touched), _rich_bool_style(target_touched)),
+        ])
+    if report.campaign_details is not None:
+        campaign = report.campaign_details
+        _ansi_kv_table("Current Campaign", [
+            ("Campaign ID", campaign.campaign_id, None),
+            ("State", campaign.status, _rich_status_style(campaign.status)),
+            ("Current cycle", campaign.completed_cycles + 1 if campaign.remaining_cycles else campaign.completed_cycles, None),
+            ("Completed", campaign.completed_cycles, None),
+            ("Remaining", campaign.remaining_cycles, None),
+            ("Campaign net", f"{campaign.net_profit:+.8f}", _rich_pnl_style(campaign.net_profit)),
+            ("Runtime", f"{campaign.runtime_seconds:.2f}s", None),
+            ("Stop reason", campaign.stop_reason or "N/A", None),
+        ])
+
+
+def _render_hf_real_vs_paper_rich(report) -> bool:
+    console = _rich_console()
+    if console is None:
+        _render_hf_real_vs_paper_ansi(report)
+        return True
+
+    console.print(Panel.fit(
+        f"[bold cyan]HF Real vs Paper Execution Diagnostics[/bold cyan]\n[dim]{report.profile}[/dim]",
+        border_style=_rich_status_style(report.recommendation),
+    ))
+    if not report.cycles:
+        console.print("[yellow]No closed real pilot cycles found.[/yellow]")
+        console.print(_rich_cell("Recommendation: KEEP_REAL_PAUSED", "bold yellow"))
+        return True
+
+    summary = _rich_table("Summary")
+    summary.add_row("Total real cycles", str(report.total_real_cycles))
+    summary.add_row("Target closes", _rich_cell(report.target_closes, "green"))
+    summary.add_row("Timeout closes", _rich_cell(report.timeout_closes, "yellow"))
+    summary.add_row("Timeout losses", _rich_cell(report.timeout_loss_count, "red" if report.timeout_loss_count else "green"))
+    summary.add_row("Real net", _rich_cell(f"{report.real_net:+.8f}", _rich_pnl_style(report.real_net)))
+    summary.add_row("Paper-equivalent net", _rich_cell(f"{report.estimated_paper_equivalent_net:+.8f}", _rich_pnl_style(report.estimated_paper_equivalent_net)))
+    summary.add_row("Real minus paper delta", _rich_cell(f"{report.real_minus_paper_delta:+.8f}", _rich_pnl_style(report.real_minus_paper_delta)))
+    summary.add_row("Main suspected issue", _rich_cell(report.main_suspected_issue, _rich_status_style(report.main_suspected_issue)))
+    summary.add_row("Recommendation", _rich_cell(report.recommendation, _rich_status_style(report.recommendation)))
+    console.print(summary)
+
+    cycles = _rich_table("Real Cycles", [
+        ("ID", "cyan"),
+        ("Dir", "white"),
+        ("Open", "white"),
+        ("Close", "white"),
+        ("Target", "white"),
+        ("Reason", "yellow"),
+        ("Net", "white"),
+        ("Touched", "white"),
+        ("Paper delta", "white"),
+    ])
+    for cycle in report.cycles:
+        cycles.add_row(
+            str(cycle.db_id),
+            cycle.direction,
+            f"{cycle.open_price:.8f}",
+            _format_optional_float(cycle.close_price),
+            f"{cycle.target_price:.8f}",
+            cycle.close_reason or "N/A",
+            _rich_cell(f"{cycle.net_profit:+.8f}", _rich_pnl_style(cycle.net_profit)),
+            _rich_cell("yes" if cycle.target_touched else "no", _rich_bool_style(cycle.target_touched)),
+            _rich_cell(f"{cycle.real_minus_paper_delta:+.8f}", _rich_pnl_style(cycle.real_minus_paper_delta)),
+        )
+    console.print(cycles)
+
+    path = _rich_table("Path / Execution", [
+        ("ID", "cyan"),
+        ("MFE", "green"),
+        ("MAE", "red"),
+        ("5s", "white"),
+        ("15s", "white"),
+        ("60s", "white"),
+        ("270s", "white"),
+        ("Spread entry", "white"),
+        ("Spread close", "white"),
+        ("Commission", "white"),
+    ])
+    for cycle in report.cycles:
+        path.add_row(
+            str(cycle.db_id),
+            _format_optional_float(cycle.max_favorable_excursion),
+            _format_optional_float(cycle.max_adverse_excursion),
+            _format_optional_float(cycle.price_after_5s),
+            _format_optional_float(cycle.price_after_15s),
+            _format_optional_float(cycle.price_after_60s),
+            _format_optional_float(cycle.price_after_270s),
+            _format_optional_float(cycle.spread_at_entry),
+            _format_optional_float(cycle.spread_at_close),
+            _format_optional_float(cycle.commission),
+        )
+    console.print(path)
+    return True
+
+
+def _render_hf_real_vs_paper_ansi(report) -> None:
+    _ansi_title("HF Real vs Paper Execution Diagnostics", report.profile, style=_rich_status_style(report.recommendation))
+    if not report.cycles:
+        print(_ansi("No closed real pilot cycles found.", "yellow"))
+        print(_ansi("Recommendation: KEEP_REAL_PAUSED", "bold yellow"))
+        return
+    _ansi_kv_table("Summary", [
+        ("Total real cycles", report.total_real_cycles, None),
+        ("Target closes", report.target_closes, "green"),
+        ("Timeout closes", report.timeout_closes, "yellow"),
+        ("Timeout losses", report.timeout_loss_count, "red" if report.timeout_loss_count else "green"),
+        ("Real net", f"{report.real_net:+.8f}", _rich_pnl_style(report.real_net)),
+        ("Paper-equivalent net", f"{report.estimated_paper_equivalent_net:+.8f}", _rich_pnl_style(report.estimated_paper_equivalent_net)),
+        ("Real minus paper delta", f"{report.real_minus_paper_delta:+.8f}", _rich_pnl_style(report.real_minus_paper_delta)),
+        ("Main suspected issue", report.main_suspected_issue, _rich_status_style(report.main_suspected_issue)),
+        ("Recommendation", report.recommendation, _rich_status_style(report.recommendation)),
+    ])
+    _ansi_table("Real Cycles", [
+        "ID", "Dir", "Open", "Close", "Target", "Reason", "Net", "Touched", "Paper delta",
+    ], [[
+        (cycle.db_id, None),
+        (cycle.direction, None),
+        (f"{cycle.open_price:.8f}", None),
+        (_format_optional_float(cycle.close_price), None),
+        (f"{cycle.target_price:.8f}", None),
+        (cycle.close_reason or "N/A", "yellow"),
+        (f"{cycle.net_profit:+.8f}", _rich_pnl_style(cycle.net_profit)),
+        ("yes" if cycle.target_touched else "no", _rich_bool_style(cycle.target_touched)),
+        (f"{cycle.real_minus_paper_delta:+.8f}", _rich_pnl_style(cycle.real_minus_paper_delta)),
+    ] for cycle in report.cycles])
+    _ansi_table("Path / Execution", [
+        "ID", "MFE", "MAE", "5s", "15s", "60s", "270s", "Spread entry", "Spread close", "Commission",
+    ], [[
+        (cycle.db_id, None),
+        (_format_optional_float(cycle.max_favorable_excursion), "green"),
+        (_format_optional_float(cycle.max_adverse_excursion), "red"),
+        (_format_optional_float(cycle.price_after_5s), None),
+        (_format_optional_float(cycle.price_after_15s), None),
+        (_format_optional_float(cycle.price_after_60s), None),
+        (_format_optional_float(cycle.price_after_270s), None),
+        (_format_optional_float(cycle.spread_at_entry), None),
+        (_format_optional_float(cycle.spread_at_close), None),
+        (_format_optional_float(cycle.commission), None),
+    ] for cycle in report.cycles])
+
+
+def _render_hf_real_entry_quality_rich(report) -> bool:
+    console = _rich_console()
+    if console is None:
+        _render_hf_real_entry_quality_ansi(report)
+        return True
+
+    console.print(Panel.fit(
+        f"[bold cyan]HF Real Entry Quality Diagnostics[/bold cyan]\n[dim]{report.profile}[/dim]",
+        border_style=_rich_status_style(report.recommendation),
+    ))
+    summary = _rich_table("Summary")
+    summary.add_row("Total analyzed cycles", str(report.total_analyzed_cycles))
+    summary.add_row("Cycles with blackbox", str(report.cycles_with_blackbox))
+    summary.add_row("Cycles without blackbox", str(report.cycles_without_blackbox))
+    summary.add_row("Target touched count", _rich_cell(report.target_touched_count, "green" if report.target_touched_count else "yellow"))
+    summary.add_row("Timeout no-touch count", _rich_cell(report.timeout_no_touch_count, "red" if report.timeout_no_touch_count else "green"))
+    summary.add_row("Timeout loss count", _rich_cell(report.timeout_loss_count, "red" if report.timeout_loss_count else "green"))
+    summary.add_row("Breakeven count", str(report.breakeven_count))
+    summary.add_row("Main issue", _rich_cell(report.main_issue, _rich_status_style(report.main_issue)))
+    summary.add_row("Recommendation", _rich_cell(report.recommendation, _rich_status_style(report.recommendation)))
+    console.print(summary)
+    if not report.cycles:
+        return True
+
+    cycles = _rich_table("Entry Quality By Cycle", [
+        ("ID", "cyan"),
+        ("Dir", "white"),
+        ("Open", "white"),
+        ("Target", "white"),
+        ("Close", "white"),
+        ("Net", "white"),
+        ("Touched", "white"),
+        ("Category", "yellow"),
+        ("MFE", "green"),
+        ("MAE", "red"),
+    ])
+    for cycle in report.cycles:
+        cycles.add_row(
+            str(cycle.db_id),
+            cycle.direction,
+            f"{cycle.open_price:.8f}",
+            f"{cycle.target_price:.8f}",
+            _format_optional_float(cycle.close_price),
+            _rich_cell(f"{cycle.net_profit:+.8f}", _rich_pnl_style(cycle.net_profit)),
+            _rich_cell("yes" if cycle.target_touched else "no", _rich_bool_style(cycle.target_touched)),
+            cycle.entry_quality_category,
+            _format_optional_float(cycle.max_favorable_excursion),
+            _format_optional_float(cycle.max_adverse_excursion),
+        )
+    console.print(cycles)
+
+    movement = _rich_table("Entry Movement", [
+        ("ID", "cyan"),
+        ("Spread", "white"),
+        ("Short center", "white"),
+        ("Distance center", "white"),
+        ("5s", "white"),
+        ("15s", "white"),
+        ("30s", "white"),
+        ("60s", "white"),
+        ("Candidate", "white"),
+        ("Block", "yellow"),
+    ])
+    for cycle in report.cycles:
+        movement.add_row(
+            str(cycle.db_id),
+            _format_optional_float(cycle.entry_spread),
+            _format_optional_float(cycle.short_center_at_entry),
+            _format_optional_float(cycle.distance_from_short_center),
+            _format_optional_float(cycle.movement_after_5s),
+            _format_optional_float(cycle.movement_after_15s),
+            _format_optional_float(cycle.movement_after_30s),
+            _format_optional_float(cycle.movement_after_60s),
+            _format_optional_bool(cycle.candidate_at_entry),
+            cycle.block_reason_at_entry or "N/A",
+        )
+    console.print(movement)
+    return True
+
+
+def _render_hf_real_entry_quality_ansi(report) -> None:
+    _ansi_title("HF Real Entry Quality Diagnostics", report.profile, style=_rich_status_style(report.recommendation))
+    _ansi_kv_table("Summary", [
+        ("Total analyzed cycles", report.total_analyzed_cycles, None),
+        ("Cycles with blackbox", report.cycles_with_blackbox, None),
+        ("Cycles without blackbox", report.cycles_without_blackbox, None),
+        ("Target touched count", report.target_touched_count, "green" if report.target_touched_count else "yellow"),
+        ("Timeout no-touch count", report.timeout_no_touch_count, "red" if report.timeout_no_touch_count else "green"),
+        ("Timeout loss count", report.timeout_loss_count, "red" if report.timeout_loss_count else "green"),
+        ("Breakeven count", report.breakeven_count, None),
+        ("Main issue", report.main_issue, _rich_status_style(report.main_issue)),
+        ("Recommendation", report.recommendation, _rich_status_style(report.recommendation)),
+    ])
+    if not report.cycles:
+        return
+    _ansi_table("Entry Quality By Cycle", [
+        "ID", "Dir", "Open", "Target", "Close", "Net", "Touched", "Category", "MFE", "MAE",
+    ], [[
+        (cycle.db_id, None),
+        (cycle.direction, None),
+        (f"{cycle.open_price:.8f}", None),
+        (f"{cycle.target_price:.8f}", None),
+        (_format_optional_float(cycle.close_price), None),
+        (f"{cycle.net_profit:+.8f}", _rich_pnl_style(cycle.net_profit)),
+        ("yes" if cycle.target_touched else "no", _rich_bool_style(cycle.target_touched)),
+        (cycle.entry_quality_category, "yellow"),
+        (_format_optional_float(cycle.max_favorable_excursion), "green"),
+        (_format_optional_float(cycle.max_adverse_excursion), "red"),
+    ] for cycle in report.cycles])
+    _ansi_table("Entry Movement", [
+        "ID", "Spread", "Short center", "Distance center", "5s", "15s", "30s", "60s", "Candidate", "Block",
+    ], [[
+        (cycle.db_id, None),
+        (_format_optional_float(cycle.entry_spread), None),
+        (_format_optional_float(cycle.short_center_at_entry), None),
+        (_format_optional_float(cycle.distance_from_short_center), None),
+        (_format_optional_float(cycle.movement_after_5s), None),
+        (_format_optional_float(cycle.movement_after_15s), None),
+        (_format_optional_float(cycle.movement_after_30s), None),
+        (_format_optional_float(cycle.movement_after_60s), None),
+        (_format_optional_bool(cycle.candidate_at_entry), _rich_bool_style(cycle.candidate_at_entry)),
+        (cycle.block_reason_at_entry or "N/A", "yellow"),
+    ] for cycle in report.cycles])
+
+
+def _render_hf_post_exit_observer_result_rich(profile: str, result) -> bool:
+    console = _rich_console()
+    if console is None:
+        _render_hf_post_exit_observer_result_ansi(profile, result)
+        return True
+
+    console.print(Panel.fit(
+        f"[bold cyan]HF Post Exit Observer[/bold cyan]\n[dim]{profile} | real_cycle_id={result.real_cycle_id}[/dim]",
+        border_style=_rich_status_style(result.status),
+    ))
+    overview = _rich_table("Observer Result")
+    overview.add_row("Status", _rich_cell(result.status, _rich_status_style(result.status)))
+    overview.add_row("Expected snapshots", str(result.expected_snapshots_count or "N/A"))
+    overview.add_row("Actual snapshots", _rich_cell(result.snapshots_count, "green" if result.snapshots_count else "yellow"))
+    overview.add_row("Effective avg interval", _format_optional_seconds(result.effective_average_interval_seconds))
+    overview.add_row("Target before exit", _rich_cell(_format_optional_bool(result.target_was_reached_before_exit), _rich_bool_style(result.target_was_reached_before_exit)))
+    overview.add_row("Target at observer start", _rich_cell(_format_optional_bool(result.target_satisfied_at_observer_start), _rich_bool_style(result.target_satisfied_at_observer_start)))
+    overview.add_row("Post target touched", _rich_cell(_format_optional_bool(result.post_exit_target_touched), _rich_bool_style(result.post_exit_target_touched)))
+    overview.add_row("Target revisited", _rich_cell(_format_optional_bool(result.target_revisited_after_exit), _rich_bool_style(result.target_revisited_after_exit)))
+    if result.error:
+        overview.add_row("Error", _rich_cell(result.error, "bold red"))
+    console.print(overview)
+
+    metrics = _rich_table("Post Exit Metrics")
+    metrics.add_row("Post Exit MFE", _rich_cell(_format_optional_float(result.post_exit_mfe), _rich_pnl_style(result.post_exit_mfe)))
+    metrics.add_row("Post Exit MAE", _rich_cell(_format_optional_float(result.post_exit_mae), _rich_pnl_style(result.post_exit_mae)))
+    metrics.add_row("Max price", _format_optional_float(result.max_price))
+    metrics.add_row("Min price", _format_optional_float(result.min_price))
+    metrics.add_row("Closest distance after exit", _format_optional_float(result.closest_distance_after_exit))
+    metrics.add_row("Time to post target", _format_optional_seconds(result.time_to_post_target))
+    metrics.add_row("Time to target revisit", _format_optional_seconds(result.time_to_target_revisit))
+    console.print(metrics)
+    return True
+
+
+def _render_hf_post_exit_observer_result_ansi(profile: str, result) -> None:
+    _ansi_title(
+        "HF Post Exit Observer",
+        f"{profile} | real_cycle_id={result.real_cycle_id}",
+        style=_rich_status_style(result.status),
+    )
+    _ansi_kv_table("Observer Result", [
+        ("Status", result.status, _rich_status_style(result.status)),
+        ("Expected snapshots", result.expected_snapshots_count or "N/A", None),
+        ("Actual snapshots", result.snapshots_count, "green" if result.snapshots_count else "yellow"),
+        ("Effective avg interval", _format_optional_seconds(result.effective_average_interval_seconds), None),
+        ("Target before exit", _format_optional_bool(result.target_was_reached_before_exit), _rich_bool_style(result.target_was_reached_before_exit)),
+        ("Target at observer start", _format_optional_bool(result.target_satisfied_at_observer_start), _rich_bool_style(result.target_satisfied_at_observer_start)),
+        ("Post target touched", _format_optional_bool(result.post_exit_target_touched), _rich_bool_style(result.post_exit_target_touched)),
+        ("Target revisited", _format_optional_bool(result.target_revisited_after_exit), _rich_bool_style(result.target_revisited_after_exit)),
+        ("Error", result.error or "N/A", "bold red" if result.error else None),
+    ])
+    _ansi_kv_table("Post Exit Metrics", [
+        ("Post Exit MFE", _format_optional_float(result.post_exit_mfe), _rich_pnl_style(result.post_exit_mfe)),
+        ("Post Exit MAE", _format_optional_float(result.post_exit_mae), _rich_pnl_style(result.post_exit_mae)),
+        ("Max price", _format_optional_float(result.max_price), None),
+        ("Min price", _format_optional_float(result.min_price), None),
+        ("Closest distance after exit", _format_optional_float(result.closest_distance_after_exit), None),
+        ("Time to post target", _format_optional_seconds(result.time_to_post_target), None),
+        ("Time to target revisit", _format_optional_seconds(result.time_to_target_revisit), None),
+    ])
+
+
+def _render_hf_post_exit_observer_report_rich(
+    *,
+    profile: str,
+    cycle: dict | None,
+    real_cycle_id: int,
+    target_price,
+    summary: dict | None,
+    recalculated,
+    snapshots_count: int,
+) -> bool:
+    console = _rich_console()
+    status = "NOT_FOUND" if cycle is None else (summary["status"] if summary is not None else "NO_POST_EXIT_DATA")
+    if console is None:
+        _render_hf_post_exit_observer_report_ansi(
+            profile=profile,
+            cycle=cycle,
+            real_cycle_id=real_cycle_id,
+            target_price=target_price,
+            summary=summary,
+            recalculated=recalculated,
+            snapshots_count=snapshots_count,
+        )
+        return True
+
+    console.print(Panel.fit(
+        f"[bold cyan]HF Post Exit Observer Report[/bold cyan]\n[dim]{profile} | real_cycle_id={real_cycle_id}[/dim]",
+        border_style=_rich_status_style(status),
+    ))
+    if cycle is None:
+        console.print("[bold red]Cycle not found.[/bold red]")
+        return True
+
+    cycle_table = _rich_table("Real Cycle")
+    cycle_table.add_row("Direction", cycle["direction"])
+    cycle_table.add_row("Status", _rich_cell(cycle["status"], _rich_status_style(cycle["status"])))
+    cycle_table.add_row("Open price", f"{cycle['open_price']:.8f}")
+    cycle_table.add_row("Close price", _format_optional_float(cycle["close_price"]))
+    cycle_table.add_row("Target price", f"{float(target_price):.8f}")
+    cycle_table.add_row("Close reason", _rich_cell(cycle["close_reason"] or "N/A", _rich_status_style(cycle["close_reason"])))
+    cycle_table.add_row("Net profit", _rich_cell(f"{cycle['net_profit']:+.8f}", _rich_pnl_style(cycle["net_profit"])))
+    console.print(cycle_table)
+
+    if summary is None:
+        empty_table = _rich_table("Post Exit Observer")
+        empty_table.add_row("Status", _rich_cell("no post-exit observer summary", "yellow"))
+        empty_table.add_row("Snapshots", str(snapshots_count))
+        console.print(empty_table)
+        return True
+
+    result = recalculated
+    observer_table = _rich_table("Observer Timing")
+    observer_table.add_row("Status", _rich_cell(summary["status"], _rich_status_style(summary["status"])))
+    observer_table.add_row("Started at", summary["started_at"])
+    observer_table.add_row("Finished at", summary["finished_at"] or "N/A")
+    observer_table.add_row("Duration", f"{summary['duration_seconds']:.2f}s")
+    observer_table.add_row("Interval", f"{summary['interval_seconds']:.2f}s")
+    observer_table.add_row("Expected snapshots", str(summary.get("expected_snapshots_count") or (result.expected_snapshots_count if result else "N/A")))
+    observer_table.add_row("Actual snapshots", _rich_cell(summary["snapshots_count"], "green" if summary["snapshots_count"] else "yellow"))
+    observer_table.add_row("Effective avg interval", _format_optional_seconds(result.effective_average_interval_seconds if result else summary.get("effective_average_interval_seconds")))
+    console.print(observer_table)
+
+    metrics = _rich_table("Research Answer")
+    metrics.add_row("Target reached before exit", _rich_cell(_format_optional_bool(result.target_was_reached_before_exit if result else summary.get("target_was_reached_before_exit")), _rich_bool_style(result.target_was_reached_before_exit if result else summary.get("target_was_reached_before_exit"))))
+    metrics.add_row("Target satisfied at observer start", _rich_cell(_format_optional_bool(result.target_satisfied_at_observer_start if result else summary.get("target_satisfied_at_observer_start")), _rich_bool_style(result.target_satisfied_at_observer_start if result else summary.get("target_satisfied_at_observer_start"))))
+    if cycle["close_reason"] == "real_pilot_target":
+        metrics.add_row("Target revisited after exit", _rich_cell(_format_optional_bool(result.target_revisited_after_exit if result else summary.get("target_revisited_after_exit")), _rich_bool_style(result.target_revisited_after_exit if result else summary.get("target_revisited_after_exit"))))
+        metrics.add_row("Time to target revisit", _format_optional_seconds(result.time_to_target_revisit if result else summary.get("time_to_target_revisit")))
+    else:
+        metrics.add_row("Post-exit target touched", _rich_cell(_format_optional_bool(result.post_exit_target_touched if result else summary["post_exit_target_touched"]), _rich_bool_style(result.post_exit_target_touched if result else summary["post_exit_target_touched"])))
+        metrics.add_row("Time to post target", _format_optional_seconds(result.time_to_post_target if result else summary["time_to_post_target"]))
+    metrics.add_row("Closest distance after exit", _format_optional_float(result.closest_distance_after_exit if result else summary["closest_distance_after_exit"]))
+    metrics.add_row("Post Exit MFE", _rich_cell(_format_optional_float(result.post_exit_mfe if result else summary["post_exit_mfe"]), _rich_pnl_style(result.post_exit_mfe if result else summary["post_exit_mfe"])))
+    metrics.add_row("Post Exit MAE", _rich_cell(_format_optional_float(result.post_exit_mae if result else summary["post_exit_mae"]), _rich_pnl_style(result.post_exit_mae if result else summary["post_exit_mae"])))
+    metrics.add_row("Max price", _format_optional_float(result.max_price if result else summary["max_price"]))
+    metrics.add_row("Min price", _format_optional_float(result.min_price if result else summary["min_price"]))
+    if summary.get("error"):
+        metrics.add_row("Error", _rich_cell(summary["error"], "bold red"))
+    console.print(metrics)
+    return True
+
+
+def _render_hf_post_exit_observer_report_ansi(
+    *,
+    profile: str,
+    cycle: dict | None,
+    real_cycle_id: int,
+    target_price,
+    summary: dict | None,
+    recalculated,
+    snapshots_count: int,
+) -> None:
+    status = "NOT_FOUND" if cycle is None else (summary["status"] if summary is not None else "NO_POST_EXIT_DATA")
+    _ansi_title("HF Post Exit Observer Report", f"{profile} | real_cycle_id={real_cycle_id}", style=_rich_status_style(status))
+    if cycle is None:
+        print(_ansi("Cycle not found.", "bold red"))
+        return
+
+    _ansi_kv_table("Real Cycle", [
+        ("Direction", cycle["direction"], None),
+        ("Status", cycle["status"], _rich_status_style(cycle["status"])),
+        ("Open price", f"{cycle['open_price']:.8f}", None),
+        ("Close price", _format_optional_float(cycle["close_price"]), None),
+        ("Target price", f"{float(target_price):.8f}", None),
+        ("Close reason", cycle["close_reason"] or "N/A", _rich_status_style(cycle["close_reason"])),
+        ("Net profit", f"{cycle['net_profit']:+.8f}", _rich_pnl_style(cycle["net_profit"])),
+    ])
+    if summary is None:
+        _ansi_kv_table("Post Exit Observer", [
+            ("Status", "no post-exit observer summary", "yellow"),
+            ("Snapshots", snapshots_count, None),
+        ])
+        return
+
+    result = recalculated
+    _ansi_kv_table("Observer Timing", [
+        ("Status", summary["status"], _rich_status_style(summary["status"])),
+        ("Started at", summary["started_at"], None),
+        ("Finished at", summary["finished_at"] or "N/A", None),
+        ("Duration", f"{summary['duration_seconds']:.2f}s", None),
+        ("Interval", f"{summary['interval_seconds']:.2f}s", None),
+        ("Expected snapshots", summary.get("expected_snapshots_count") or (result.expected_snapshots_count if result else "N/A"), None),
+        ("Actual snapshots", summary["snapshots_count"], "green" if summary["snapshots_count"] else "yellow"),
+        ("Effective avg interval", _format_optional_seconds(result.effective_average_interval_seconds if result else summary.get("effective_average_interval_seconds")), None),
+    ])
+    if cycle["close_reason"] == "real_pilot_target":
+        target_rows = [
+            ("Target revisited after exit", _format_optional_bool(result.target_revisited_after_exit if result else summary.get("target_revisited_after_exit")), _rich_bool_style(result.target_revisited_after_exit if result else summary.get("target_revisited_after_exit"))),
+            ("Time to target revisit", _format_optional_seconds(result.time_to_target_revisit if result else summary.get("time_to_target_revisit")), None),
+        ]
+    else:
+        target_rows = [
+            ("Post-exit target touched", _format_optional_bool(result.post_exit_target_touched if result else summary["post_exit_target_touched"]), _rich_bool_style(result.post_exit_target_touched if result else summary["post_exit_target_touched"])),
+            ("Time to post target", _format_optional_seconds(result.time_to_post_target if result else summary["time_to_post_target"]), None),
+        ]
+    _ansi_kv_table("Research Answer", [
+        ("Target reached before exit", _format_optional_bool(result.target_was_reached_before_exit if result else summary.get("target_was_reached_before_exit")), _rich_bool_style(result.target_was_reached_before_exit if result else summary.get("target_was_reached_before_exit"))),
+        ("Target at observer start", _format_optional_bool(result.target_satisfied_at_observer_start if result else summary.get("target_satisfied_at_observer_start")), _rich_bool_style(result.target_satisfied_at_observer_start if result else summary.get("target_satisfied_at_observer_start"))),
+        *target_rows,
+        ("Closest distance after exit", _format_optional_float(result.closest_distance_after_exit if result else summary["closest_distance_after_exit"]), None),
+        ("Post Exit MFE", _format_optional_float(result.post_exit_mfe if result else summary["post_exit_mfe"]), _rich_pnl_style(result.post_exit_mfe if result else summary["post_exit_mfe"])),
+        ("Post Exit MAE", _format_optional_float(result.post_exit_mae if result else summary["post_exit_mae"]), _rich_pnl_style(result.post_exit_mae if result else summary["post_exit_mae"])),
+        ("Max price", _format_optional_float(result.max_price if result else summary["max_price"]), None),
+        ("Min price", _format_optional_float(result.min_price if result else summary["min_price"]), None),
+        ("Error", summary.get("error") or "N/A", "bold red" if summary.get("error") else None),
+    ])
+
+
+def _render_hf_post_exit_observer_statistics_rich(report) -> bool:
+    console = _rich_console()
+    if console is None:
+        _render_hf_post_exit_observer_statistics_ansi(report)
+        return True
+
+    console.print(Panel.fit(
+        f"[bold cyan]HF Post Exit Observer Statistics[/bold cyan]\n[dim]{report.profile}[/dim]",
+        border_style=_rich_status_style(report.recommendation),
+    ))
+    summary = _rich_table("Summary")
+    summary.add_row("Completed observer records", str(report.completed_observer_records))
+    summary.add_row("Timeout cycles", str(report.timeout_cycles))
+    summary.add_row("Target cycles", str(report.target_cycles))
+    summary.add_row("Reached target after timeout", _rich_cell(report.timeout_reached_after_exit, "green" if report.timeout_reached_after_exit else "yellow"))
+    summary.add_row("Never reached after timeout", _rich_cell(report.timeout_never_reached, "red" if report.timeout_never_reached else "green"))
+    summary.add_row("Late target touch rate", _rich_cell(f"{report.late_target_touch_rate:.2%}", "green" if report.late_target_touch_rate < 0.3 else "yellow"))
+    summary.add_row("Recommendation", _rich_cell(report.recommendation, _rich_status_style(report.recommendation)))
+    summary.add_row("Conclusion", report.conclusion)
+    console.print(summary)
+
+    timing = _rich_table("Time To Post Target")
+    timing.add_row("Average", _format_optional_seconds(report.time_to_target_stats.average))
+    timing.add_row("Median", _format_optional_seconds(report.time_to_target_stats.median))
+    timing.add_row("Min", _format_optional_seconds(report.time_to_target_stats.minimum))
+    timing.add_row("Max", _format_optional_seconds(report.time_to_target_stats.maximum))
+    console.print(timing)
+
+    buckets = _rich_table("Reached Within", [("Window", "cyan"), ("Cycles", "white")])
+    for bucket, count in report.time_buckets.items():
+        buckets.add_row(f"{bucket}s", str(count))
+    console.print(buckets)
+
+    metrics = _rich_table("Post Exit Distributions", [
+        ("Metric", "cyan"), ("Average", "white"), ("Median", "white"), ("Min", "white"), ("Max", "white"),
+    ])
+    for label, stats in (
+        ("MFE", report.mfe_stats),
+        ("MAE", report.mae_stats),
+        ("Closest distance", report.closest_distance_stats),
+    ):
+        metrics.add_row(
+            label,
+            _format_optional_float(stats.average),
+            _format_optional_float(stats.median),
+            _format_optional_float(stats.minimum),
+            _format_optional_float(stats.maximum),
+        )
+    console.print(metrics)
+
+    directions = _rich_table("Direction Breakdown", [
+        ("Direction", "cyan"), ("Timeout", "white"), ("Late touch", "green"), ("Never", "red"), ("Rate", "white"), ("Avg time", "white"),
+    ])
+    for row in report.direction_stats:
+        directions.add_row(
+            row.direction,
+            str(row.timeout_cycles),
+            str(row.late_target_touch_count),
+            str(row.never_reached_count),
+            f"{row.late_target_touch_rate:.2%}",
+            _format_optional_seconds(row.average_time_to_target),
+        )
+    console.print(directions)
+
+    categories = _rich_table("Entry Quality Categories", [
+        ("Category", "cyan"), ("Cycles", "white"), ("Post target touch", "green"), ("Avg MFE", "white"), ("Avg MAE", "white"),
+    ])
+    for row in report.category_stats:
+        categories.add_row(
+            row.category,
+            str(row.cycles_count),
+            str(row.post_exit_target_touch_count),
+            _format_optional_float(row.average_mfe),
+            _format_optional_float(row.average_mae),
+        )
+    console.print(categories)
+    return True
+
+
+def _render_hf_post_exit_observer_statistics_ansi(report) -> None:
+    _ansi_title("HF Post Exit Observer Statistics", report.profile, style=_rich_status_style(report.recommendation))
+    _ansi_kv_table("Summary", [
+        ("Completed observer records", report.completed_observer_records, None),
+        ("Timeout cycles", report.timeout_cycles, None),
+        ("Target cycles", report.target_cycles, None),
+        ("Reached target after timeout", report.timeout_reached_after_exit, "green" if report.timeout_reached_after_exit else "yellow"),
+        ("Never reached after timeout", report.timeout_never_reached, "red" if report.timeout_never_reached else "green"),
+        ("Late target touch rate", f"{report.late_target_touch_rate:.2%}", "green" if report.late_target_touch_rate < 0.3 else "yellow"),
+        ("Recommendation", report.recommendation, _rich_status_style(report.recommendation)),
+        ("Conclusion", report.conclusion, None),
+    ])
+    _ansi_kv_table("Time To Post Target", [
+        ("Average", _format_optional_seconds(report.time_to_target_stats.average), None),
+        ("Median", _format_optional_seconds(report.time_to_target_stats.median), None),
+        ("Min", _format_optional_seconds(report.time_to_target_stats.minimum), None),
+        ("Max", _format_optional_seconds(report.time_to_target_stats.maximum), None),
+    ])
+    _ansi_table("Reached Within", ["Window", "Cycles"], [
+        [(f"{bucket}s", None), (count, None)]
+        for bucket, count in report.time_buckets.items()
+    ])
+    _ansi_table("Post Exit Distributions", ["Metric", "Average", "Median", "Min", "Max"], [
+        [
+            (label, None),
+            (_format_optional_float(stats.average), None),
+            (_format_optional_float(stats.median), None),
+            (_format_optional_float(stats.minimum), None),
+            (_format_optional_float(stats.maximum), None),
+        ]
+        for label, stats in (
+            ("MFE", report.mfe_stats),
+            ("MAE", report.mae_stats),
+            ("Closest distance", report.closest_distance_stats),
+        )
+    ])
+    _ansi_table("Direction Breakdown", ["Direction", "Timeout", "Late touch", "Never", "Rate", "Avg time"], [
+        [
+            (row.direction, None),
+            (row.timeout_cycles, None),
+            (row.late_target_touch_count, "green" if row.late_target_touch_count else "yellow"),
+            (row.never_reached_count, "red" if row.never_reached_count else "green"),
+            (f"{row.late_target_touch_rate:.2%}", None),
+            (_format_optional_seconds(row.average_time_to_target), None),
+        ]
+        for row in report.direction_stats
+    ])
+    _ansi_table("Entry Quality Categories", ["Category", "Cycles", "Post target touch", "Avg MFE", "Avg MAE"], [
+        [
+            (row.category, None),
+            (row.cycles_count, None),
+            (row.post_exit_target_touch_count, "green" if row.post_exit_target_touch_count else "yellow"),
+            (_format_optional_float(row.average_mfe), None),
+            (_format_optional_float(row.average_mae), None),
+        ]
+        for row in report.category_stats
+    ])
+
+
 def command_hf_small_real_pilot_watch(args) -> None:
     config, _logger, database = build_context()
     profile = args.profile
@@ -4139,6 +4978,9 @@ def command_hf_small_real_pilot_watch(args) -> None:
 def command_hf_real_pilot_status(args) -> None:
     config, _logger, database = build_context()
     report = HFRealPilotEngine(database, config).build_status(args.profile)
+
+    if _render_hf_real_pilot_status_rich(report):
+        return
 
     print("=== HF v1 Real Pilot Status ===")
     print(f"Profile: {report.profile}")
@@ -4337,6 +5179,9 @@ def command_hf_real_vs_paper_diagnostics(args) -> None:
     _config, _logger, database = build_context()
     report = HFRealVsPaperDiagnosticsEngine(database).build_report(args.profile)
 
+    if _render_hf_real_vs_paper_rich(report):
+        return
+
     print("=== HF Real vs Paper Execution Diagnostics ===")
     print(f"Profile: {report.profile}")
     print(f"Total real cycles: {report.total_real_cycles}")
@@ -4478,9 +5323,169 @@ def command_hf_real_cycle_blackbox(args) -> None:
     print(f"Recommendation: {report.recommendation}")
 
 
+def command_hf_post_exit_observer_run(args) -> None:
+    config, _logger, database = build_context()
+    result = HFPostExitObserver(database, config).observe(
+        profile=args.profile,
+        real_cycle_id=args.real_cycle_id,
+        duration_seconds=args.duration_seconds,
+        interval_seconds=args.interval_seconds,
+    )
+
+    if _render_hf_post_exit_observer_result_rich(args.profile, result):
+        return
+
+    print("=== HF Post Exit Observer ===")
+    print(f"Profile: {args.profile}")
+    print(f"Real cycle db_id: {result.real_cycle_id}")
+    print(f"Status: {result.status}")
+    print(f"Expected Snapshots: {result.expected_snapshots_count or 'N/A'}")
+    print(f"Actual Snapshots: {result.snapshots_count}")
+    print(f"Effective Avg Interval: {_format_optional_seconds(result.effective_average_interval_seconds)}")
+    print(f"Post Exit MFE: {_format_optional_float(result.post_exit_mfe)}")
+    print(f"Post Exit MAE: {_format_optional_float(result.post_exit_mae)}")
+    print(f"Max Price: {_format_optional_float(result.max_price)}")
+    print(f"Min Price: {_format_optional_float(result.min_price)}")
+    print(f"Closest Distance After Exit: {_format_optional_float(result.closest_distance_after_exit)}")
+    print(f"Target Was Reached Before Exit: {_format_optional_bool(result.target_was_reached_before_exit)}")
+    print(f"Target Satisfied At Observer Start: {_format_optional_bool(result.target_satisfied_at_observer_start)}")
+    print(f"Post Exit Target Touched: {_format_optional_bool(result.post_exit_target_touched)}")
+    print(f"Time To Post Target: {_format_optional_seconds(result.time_to_post_target)}")
+    print(f"Target Revisited After Exit: {_format_optional_bool(result.target_revisited_after_exit)}")
+    print(f"Time To Target Revisit: {_format_optional_seconds(result.time_to_target_revisit)}")
+    if result.error:
+        print(f"Error: {result.error}")
+
+
+def command_hf_post_exit_observer_report(args) -> None:
+    config, _logger, database = build_context()
+    cycle = database.load_real_pilot_cycle_by_id(args.real_cycle_id, args.profile)
+    summary = database.load_real_pilot_post_exit_summary(args.real_cycle_id)
+    snapshots = database.load_real_pilot_post_exit_snapshots(args.real_cycle_id)
+    observer = HFPostExitObserver(database, config)
+    target_price = observer.target_price(cycle["direction"], cycle["open_price"]) if cycle is not None else None
+
+    if cycle is None:
+        if _render_hf_post_exit_observer_report_rich(
+            profile=args.profile,
+            cycle=None,
+            real_cycle_id=args.real_cycle_id,
+            target_price=None,
+            summary=None,
+            recalculated=None,
+            snapshots_count=len(snapshots),
+        ):
+            return
+        print("=== HF Post Exit Observer Report ===")
+        print(f"Profile: {args.profile}")
+        print(f"Real cycle db_id: {args.real_cycle_id}")
+        print("Cycle: not found")
+        return
+
+    if summary is None:
+        if _render_hf_post_exit_observer_report_rich(
+            profile=args.profile,
+            cycle=cycle,
+            real_cycle_id=args.real_cycle_id,
+            target_price=target_price,
+            summary=summary,
+            recalculated=None,
+            snapshots_count=len(snapshots),
+        ):
+            return
+        print("=== HF Post Exit Observer Report ===")
+        print(f"Profile: {args.profile}")
+        print(f"Real cycle db_id: {args.real_cycle_id}")
+        print("Cycle:")
+        print(f"- direction: {cycle['direction']}")
+        print(f"- status: {cycle['status']}")
+        print(f"- open_price: {cycle['open_price']:.8f}")
+        print(f"- close_price: {_format_optional_float(cycle['close_price'])}")
+        print(f"- target_price: {float(target_price):.8f}")
+        print(f"- close_reason: {cycle['close_reason'] or 'N/A'}")
+        print(f"- net_profit: {cycle['net_profit']:+.8f}")
+        print("")
+        print("Post Exit Observer:")
+        print("- status: no post-exit observer summary")
+        print(f"- snapshots: {len(snapshots)}")
+        return
+    recalculated = None
+    if snapshots:
+        recalculated = observer.calculate_result(
+            cycle,
+            snapshots,
+            duration_seconds=summary.get("duration_seconds"),
+            interval_seconds=summary.get("interval_seconds"),
+            status=summary["status"],
+            error=summary.get("error"),
+        )
+
+    if _render_hf_post_exit_observer_report_rich(
+        profile=args.profile,
+        cycle=cycle,
+        real_cycle_id=args.real_cycle_id,
+        target_price=target_price,
+        summary=summary,
+        recalculated=recalculated,
+        snapshots_count=len(snapshots),
+    ):
+        return
+
+    print(f"- status: {summary['status']}")
+    print(f"- started_at: {summary['started_at']}")
+    print(f"- finished_at: {summary['finished_at'] or 'N/A'}")
+    print(f"- duration_seconds: {summary['duration_seconds']:.2f}")
+    print(f"- interval_seconds: {summary['interval_seconds']:.2f}")
+    print(f"- expected_snapshots_count: {summary.get('expected_snapshots_count') or (recalculated.expected_snapshots_count if recalculated else 'N/A')}")
+    print(f"- actual_snapshots_count: {summary['snapshots_count']}")
+    effective_interval = (
+        recalculated.effective_average_interval_seconds
+        if recalculated is not None
+        else summary.get("effective_average_interval_seconds")
+    )
+    print(f"- effective_average_interval_seconds: {_format_optional_seconds(effective_interval)}")
+    print(f"- post_exit_MFE: {_format_optional_float(recalculated.post_exit_mfe if recalculated else summary['post_exit_mfe'])}")
+    print(f"- post_exit_MAE: {_format_optional_float(recalculated.post_exit_mae if recalculated else summary['post_exit_mae'])}")
+    print(f"- max_price: {_format_optional_float(recalculated.max_price if recalculated else summary['max_price'])}")
+    print(f"- min_price: {_format_optional_float(recalculated.min_price if recalculated else summary['min_price'])}")
+    print(f"- closest_distance_after_exit: {_format_optional_float(recalculated.closest_distance_after_exit if recalculated else summary['closest_distance_after_exit'])}")
+    print(f"- target_was_reached_before_exit: {_format_optional_bool(recalculated.target_was_reached_before_exit if recalculated else summary.get('target_was_reached_before_exit'))}")
+    print(f"- target_satisfied_at_observer_start: {_format_optional_bool(recalculated.target_satisfied_at_observer_start if recalculated else summary.get('target_satisfied_at_observer_start'))}")
+    if cycle["close_reason"] == "real_pilot_target":
+        print(f"- target_revisited_after_exit: {_format_optional_bool(recalculated.target_revisited_after_exit if recalculated else summary.get('target_revisited_after_exit'))}")
+        print(f"- time_to_target_revisit: {_format_optional_seconds(recalculated.time_to_target_revisit if recalculated else summary.get('time_to_target_revisit'))}")
+    else:
+        print(f"- post_exit_target_touched: {_format_optional_bool(recalculated.post_exit_target_touched if recalculated else summary['post_exit_target_touched'])}")
+        print(f"- time_to_post_target: {_format_optional_seconds(recalculated.time_to_post_target if recalculated else summary['time_to_post_target'])}")
+    if summary.get("error"):
+        print(f"- error: {summary['error']}")
+
+
+def command_hf_post_exit_observer_statistics(args) -> None:
+    config, _logger, database = build_context()
+    report = HFPostExitObserverStatisticsEngine(database, config).build_report(args.profile)
+
+    if _render_hf_post_exit_observer_statistics_rich(report):
+        return
+
+    print("=== HF Post Exit Observer Statistics ===")
+    print(f"Profile: {report.profile}")
+    print(f"Completed observer records: {report.completed_observer_records}")
+    print(f"Timeout cycles: {report.timeout_cycles}")
+    print(f"Target cycles: {report.target_cycles}")
+    print(f"Reached target after exit: {report.timeout_reached_after_exit}")
+    print(f"Never reached: {report.timeout_never_reached}")
+    print(f"Late target touch rate: {report.late_target_touch_rate:.2%}")
+    print(f"Recommendation: {report.recommendation}")
+    print(f"Conclusion: {report.conclusion}")
+
+
 def command_hf_real_entry_quality_diagnostics(args) -> None:
     _config, _logger, database = build_context()
     report = HFRealEntryQualityDiagnosticsEngine(database).build_report(args.profile)
+
+    if _render_hf_real_entry_quality_rich(report):
+        return
 
     print("=== HF Real Entry Quality Diagnostics ===")
     print(f"Profile: {report.profile}")
@@ -7025,6 +8030,43 @@ def build_parser() -> argparse.ArgumentParser:
     )
     hf_real_cycle_blackbox_parser.add_argument("--real-cycle-id", type=_positive_int, required=True)
     hf_real_cycle_blackbox_parser.set_defaults(func=command_hf_real_cycle_blackbox)
+
+    hf_post_exit_observer_run_parser = subparsers.add_parser(
+        "hf-post-exit-observer-run",
+        help="Internal/research runner that records post-exit market snapshots for one HF real cycle",
+    )
+    hf_post_exit_observer_run_parser.add_argument(
+        "--profile",
+        choices=SUPPORTED_RUNTIME_STRATEGY_PROFILES,
+        default="mean_reversion_hf_micro_v1",
+    )
+    hf_post_exit_observer_run_parser.add_argument("--real-cycle-id", type=_positive_int, required=True)
+    hf_post_exit_observer_run_parser.add_argument("--duration-seconds", type=_decimal_float, default=None)
+    hf_post_exit_observer_run_parser.add_argument("--interval-seconds", type=_positive_decimal_float, default=None)
+    hf_post_exit_observer_run_parser.set_defaults(func=command_hf_post_exit_observer_run)
+
+    hf_post_exit_observer_report_parser = subparsers.add_parser(
+        "hf-post-exit-observer-report",
+        help="Show post-exit observer research metrics for one HF real cycle",
+    )
+    hf_post_exit_observer_report_parser.add_argument(
+        "--profile",
+        choices=SUPPORTED_RUNTIME_STRATEGY_PROFILES,
+        default="mean_reversion_hf_micro_v1",
+    )
+    hf_post_exit_observer_report_parser.add_argument("--real-cycle-id", type=_positive_int, required=True)
+    hf_post_exit_observer_report_parser.set_defaults(func=command_hf_post_exit_observer_report)
+
+    hf_post_exit_observer_statistics_parser = subparsers.add_parser(
+        "hf-post-exit-observer-statistics",
+        help="Aggregate research-only Post Exit Observer statistics across completed real cycles",
+    )
+    hf_post_exit_observer_statistics_parser.add_argument(
+        "--profile",
+        choices=SUPPORTED_RUNTIME_STRATEGY_PROFILES,
+        default="mean_reversion_hf_micro_v1",
+    )
+    hf_post_exit_observer_statistics_parser.set_defaults(func=command_hf_post_exit_observer_statistics)
 
     hf_real_entry_quality_parser = subparsers.add_parser(
         "hf-real-entry-quality-diagnostics",

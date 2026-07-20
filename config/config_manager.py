@@ -61,6 +61,10 @@ class BotConfig:
 
     strategy_profile: str = "strict_current"
 
+    post_exit_observer_enabled: bool = True
+    post_exit_observer_duration_seconds: int = 300
+    post_exit_observer_interval_seconds: int = 5
+
 
 class ConfigManager:
     DEFAULT_PATH = Path("config/settings.json")
@@ -119,6 +123,18 @@ class ConfigManager:
             paper_max_losing_cycles=int(data.get("paper_max_losing_cycles", BotConfig.paper_max_losing_cycles)),
             paper_min_portfolio_value=float(data.get("paper_min_portfolio_value", BotConfig.paper_min_portfolio_value)),
             strategy_profile=str(data.get("strategy_profile", BotConfig.strategy_profile)),
+            post_exit_observer_enabled=bool(data.get(
+                "post_exit_observer_enabled",
+                BotConfig.post_exit_observer_enabled,
+            )),
+            post_exit_observer_duration_seconds=int(data.get(
+                "post_exit_observer_duration_seconds",
+                BotConfig.post_exit_observer_duration_seconds,
+            )),
+            post_exit_observer_interval_seconds=int(data.get(
+                "post_exit_observer_interval_seconds",
+                BotConfig.post_exit_observer_interval_seconds,
+            )),
         )
 
     @staticmethod

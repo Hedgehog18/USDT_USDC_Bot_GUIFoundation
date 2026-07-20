@@ -497,6 +497,70 @@ class DatabaseManager:
                 )
             """)
             conn.execute("""
+                CREATE TABLE IF NOT EXISTS real_pilot_post_exit_observer_snapshots (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    real_cycle_id INTEGER NOT NULL,
+                    campaign_id TEXT,
+                    timestamp TEXT NOT NULL,
+                    seconds_after_exit REAL NOT NULL,
+                    symbol TEXT NOT NULL,
+                    price REAL,
+                    bid REAL,
+                    ask REAL,
+                    mid REAL,
+                    spread REAL,
+                    entry_price REAL NOT NULL,
+                    target_price REAL NOT NULL,
+                    distance_from_entry REAL,
+                    distance_to_target REAL,
+                    distance_to_center REAL,
+                    source TEXT,
+                    raw_payload_json TEXT
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS real_pilot_post_exit_observer_summaries (
+                    real_cycle_id INTEGER PRIMARY KEY,
+                    campaign_id TEXT,
+                    started_at TEXT NOT NULL,
+                    finished_at TEXT,
+                    duration_seconds REAL NOT NULL,
+                    interval_seconds REAL NOT NULL,
+                    snapshots_count INTEGER NOT NULL DEFAULT 0,
+                    post_exit_mfe REAL,
+                    post_exit_mae REAL,
+                    max_price REAL,
+                    min_price REAL,
+                    post_exit_target_touched INTEGER,
+                    time_to_post_target REAL,
+                    closest_distance_after_exit REAL,
+                    target_was_reached_before_exit INTEGER,
+                    target_satisfied_at_observer_start INTEGER,
+                    target_revisited_after_exit INTEGER,
+                    time_to_target_revisit REAL,
+                    expected_snapshots_count INTEGER,
+                    effective_average_interval_seconds REAL,
+                    status TEXT NOT NULL,
+                    error TEXT
+                )
+            """)
+            existing_columns = {
+                row[1]
+                for row in conn.execute("PRAGMA table_info(real_pilot_post_exit_observer_summaries)").fetchall()
+            }
+            for column_name, column_type in {
+                "target_was_reached_before_exit": "INTEGER",
+                "target_satisfied_at_observer_start": "INTEGER",
+                "target_revisited_after_exit": "INTEGER",
+                "time_to_target_revisit": "REAL",
+                "expected_snapshots_count": "INTEGER",
+                "effective_average_interval_seconds": "REAL",
+            }.items():
+                if column_name not in existing_columns:
+                    conn.execute(
+                        f"ALTER TABLE real_pilot_post_exit_observer_summaries ADD COLUMN {column_name} {column_type}"
+                    )
+            conn.execute("""
                 CREATE TABLE IF NOT EXISTS real_pilot_safety_resets (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     timestamp TEXT NOT NULL,
@@ -509,6 +573,8 @@ class DatabaseManager:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_real_pilot_campaigns_profile_status ON real_pilot_campaigns(strategy_profile, status)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_real_pilot_market_snapshots_cycle ON real_pilot_market_snapshots(real_cycle_id, timestamp)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_real_pilot_market_snapshots_campaign ON real_pilot_market_snapshots(campaign_id, timestamp)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_post_exit_observer_cycle ON real_pilot_post_exit_observer_snapshots(real_cycle_id, timestamp)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_post_exit_observer_campaign ON real_pilot_post_exit_observer_snapshots(campaign_id, timestamp)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_real_pilot_safety_resets_profile_timestamp ON real_pilot_safety_resets(strategy_profile, timestamp)")
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS system_events (
@@ -2182,7 +2248,7 @@ class DatabaseManager:
         symbol: str,
         side: str,
         quantity: float,
-        status: str,
+        status: str = "",
         request_payload: str,
         response_payload: str,
         error: str | None = None,
@@ -2634,6 +2700,213 @@ class DatabaseManager:
             "source", "raw_payload_json",
         ]
         return [dict(zip(keys, row)) for row in rows]
+
+    def save_real_pilot_post_exit_snapshot(
+        self,
+        *,
+        real_cycle_id: int,
+        campaign_id: str | None,
+        timestamp: str,
+        seconds_after_exit: float,
+        symbol: str,
+        price: float | None,
+        bid: float | None,
+        ask: float | None,
+        mid: float | None,
+        spread: float | None,
+        entry_price: float,
+        target_price: float,
+        distance_from_entry: float | None,
+        distance_to_target: float | None,
+        distance_to_center: float | None,
+        source: str | None,
+        raw_payload_json: str | None = None,
+    ) -> int:
+        with self.connect() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO real_pilot_post_exit_observer_snapshots (
+                    real_cycle_id, campaign_id, timestamp, seconds_after_exit,
+                    symbol, price, bid, ask, mid, spread, entry_price,
+                    target_price, distance_from_entry, distance_to_target,
+                    distance_to_center, source, raw_payload_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    real_cycle_id,
+                    campaign_id,
+                    timestamp,
+                    seconds_after_exit,
+                    symbol,
+                    price,
+                    bid,
+                    ask,
+                    mid,
+                    spread,
+                    entry_price,
+                    target_price,
+                    distance_from_entry,
+                    distance_to_target,
+                    distance_to_center,
+                    source,
+                    raw_payload_json,
+                ),
+            )
+            conn.commit()
+            return int(cursor.lastrowid)
+
+    def save_real_pilot_post_exit_summary(
+        self,
+        *,
+        real_cycle_id: int,
+        campaign_id: str | None,
+        started_at: str,
+        finished_at: str | None,
+        duration_seconds: float,
+        interval_seconds: float,
+        snapshots_count: int,
+        post_exit_mfe: float | None,
+        post_exit_mae: float | None,
+        max_price: float | None,
+        min_price: float | None,
+        post_exit_target_touched: bool | None,
+        time_to_post_target: float | None,
+        closest_distance_after_exit: float | None,
+        target_was_reached_before_exit: bool | None = None,
+        target_satisfied_at_observer_start: bool | None = None,
+        target_revisited_after_exit: bool | None = None,
+        time_to_target_revisit: float | None = None,
+        expected_snapshots_count: int | None = None,
+        effective_average_interval_seconds: float | None = None,
+        status: str,
+        error: str | None = None,
+    ) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO real_pilot_post_exit_observer_summaries (
+                    real_cycle_id, campaign_id, started_at, finished_at,
+                    duration_seconds, interval_seconds, snapshots_count,
+                    post_exit_mfe, post_exit_mae, max_price, min_price,
+                    post_exit_target_touched, time_to_post_target,
+                    closest_distance_after_exit, target_was_reached_before_exit,
+                    target_satisfied_at_observer_start, target_revisited_after_exit,
+                    time_to_target_revisit, expected_snapshots_count,
+                    effective_average_interval_seconds, status, error
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(real_cycle_id) DO UPDATE SET
+                    campaign_id = excluded.campaign_id,
+                    started_at = excluded.started_at,
+                    finished_at = excluded.finished_at,
+                    duration_seconds = excluded.duration_seconds,
+                    interval_seconds = excluded.interval_seconds,
+                    snapshots_count = excluded.snapshots_count,
+                    post_exit_mfe = excluded.post_exit_mfe,
+                    post_exit_mae = excluded.post_exit_mae,
+                    max_price = excluded.max_price,
+                    min_price = excluded.min_price,
+                    post_exit_target_touched = excluded.post_exit_target_touched,
+                    time_to_post_target = excluded.time_to_post_target,
+                    closest_distance_after_exit = excluded.closest_distance_after_exit,
+                    target_was_reached_before_exit = excluded.target_was_reached_before_exit,
+                    target_satisfied_at_observer_start = excluded.target_satisfied_at_observer_start,
+                    target_revisited_after_exit = excluded.target_revisited_after_exit,
+                    time_to_target_revisit = excluded.time_to_target_revisit,
+                    expected_snapshots_count = excluded.expected_snapshots_count,
+                    effective_average_interval_seconds = excluded.effective_average_interval_seconds,
+                    status = excluded.status,
+                    error = excluded.error
+                """,
+                (
+                    real_cycle_id,
+                    campaign_id,
+                    started_at,
+                    finished_at,
+                    duration_seconds,
+                    interval_seconds,
+                    snapshots_count,
+                    post_exit_mfe,
+                    post_exit_mae,
+                    max_price,
+                    min_price,
+                    None if post_exit_target_touched is None else int(post_exit_target_touched),
+                    time_to_post_target,
+                    closest_distance_after_exit,
+                    None if target_was_reached_before_exit is None else int(target_was_reached_before_exit),
+                    None if target_satisfied_at_observer_start is None else int(target_satisfied_at_observer_start),
+                    None if target_revisited_after_exit is None else int(target_revisited_after_exit),
+                    time_to_target_revisit,
+                    expected_snapshots_count,
+                    effective_average_interval_seconds,
+                    status,
+                    error,
+                ),
+            )
+            conn.commit()
+
+    def load_real_pilot_post_exit_snapshots(self, real_cycle_id: int) -> list[dict]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    id, real_cycle_id, campaign_id, timestamp, seconds_after_exit,
+                    symbol, price, bid, ask, mid, spread, entry_price,
+                    target_price, distance_from_entry, distance_to_target,
+                    distance_to_center, source, raw_payload_json
+                FROM real_pilot_post_exit_observer_snapshots
+                WHERE real_cycle_id = ?
+                ORDER BY timestamp ASC, id ASC
+                """,
+                (real_cycle_id,),
+            ).fetchall()
+        keys = [
+            "id", "real_cycle_id", "campaign_id", "timestamp", "seconds_after_exit",
+            "symbol", "price", "bid", "ask", "mid", "spread", "entry_price",
+            "target_price", "distance_from_entry", "distance_to_target",
+            "distance_to_center", "source", "raw_payload_json",
+        ]
+        return [dict(zip(keys, row)) for row in rows]
+
+    def load_real_pilot_post_exit_summary(self, real_cycle_id: int) -> dict | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT
+                    real_cycle_id, campaign_id, started_at, finished_at,
+                    duration_seconds, interval_seconds, snapshots_count,
+                    post_exit_mfe, post_exit_mae, max_price, min_price,
+                    post_exit_target_touched, time_to_post_target,
+                    closest_distance_after_exit, target_was_reached_before_exit,
+                    target_satisfied_at_observer_start, target_revisited_after_exit,
+                    time_to_target_revisit, expected_snapshots_count,
+                    effective_average_interval_seconds, status, error
+                FROM real_pilot_post_exit_observer_summaries
+                WHERE real_cycle_id = ?
+                """,
+                (real_cycle_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        keys = [
+            "real_cycle_id", "campaign_id", "started_at", "finished_at",
+            "duration_seconds", "interval_seconds", "snapshots_count",
+            "post_exit_mfe", "post_exit_mae", "max_price", "min_price",
+            "post_exit_target_touched", "time_to_post_target",
+            "closest_distance_after_exit", "target_was_reached_before_exit",
+            "target_satisfied_at_observer_start", "target_revisited_after_exit",
+            "time_to_target_revisit", "expected_snapshots_count",
+            "effective_average_interval_seconds", "status", "error",
+        ]
+        result = dict(zip(keys, row))
+        for bool_key in (
+            "post_exit_target_touched",
+            "target_was_reached_before_exit",
+            "target_satisfied_at_observer_start",
+            "target_revisited_after_exit",
+        ):
+            if result[bool_key] is not None:
+                result[bool_key] = bool(result[bool_key])
+        return result
 
     def load_real_pilot_cycle_by_id(self, real_cycle_id: int, strategy_profile: str | None = None) -> dict | None:
         with self.connect() as conn:

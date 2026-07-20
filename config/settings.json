@@ -54,5 +54,9 @@
   "paper_max_losing_cycles": 3,
   "paper_min_portfolio_value": 80.0,
 
-  "strategy_profile": "strict_current"
+  "strategy_profile": "strict_current",
+
+  "post_exit_observer_enabled": true,
+  "post_exit_observer_duration_seconds": 300,
+  "post_exit_observer_interval_seconds": 5
 }

@@ -20,6 +20,7 @@ from analytics.hf_real_dry_run_engine import (
     HFRealDryRunEngine,
     RealDryRunProvider,
 )
+from analytics.hf_post_exit_observer import HFPostExitObserverLauncher
 from config.config_manager import BotConfig
 from market.binance_market_data_provider import BinanceMarketDataError
 from strategy.profile_decision_engine import HF_MICRO_TARGET_PROFIT
@@ -328,11 +329,13 @@ class HFRealPilotEngine:
         config: BotConfig,
         order_client: RealPilotOrderClient | None = None,
         emergency_stop_path: str | Path = "EMERGENCY_STOP",
+        post_exit_observer_launcher: HFPostExitObserverLauncher | None = None,
     ) -> None:
         self.database = database
         self.config = config
         self.order_client = order_client or BinanceRealPilotOrderClient(base_url=config.binance_base_url)
         self.emergency_stop_path = Path(emergency_stop_path)
+        self.post_exit_observer_launcher = post_exit_observer_launcher or HFPostExitObserverLauncher(config)
 
     def run_once(
         self,
@@ -1195,6 +1198,16 @@ class HFRealPilotEngine:
             net_profit=float(pnl),
             close_reason=close_reason,
         )
+        observer_message = ""
+        try:
+            observer_started = self.post_exit_observer_launcher.start(
+                profile=profile,
+                real_cycle_id=int(cycle["id"]),
+            )
+            if observer_started:
+                observer_message = " Post exit observer started."
+        except Exception as exc:
+            observer_message = f" Post exit observer failed to start: {exc}"
         return HFRealPilotCloseWatchReport(
             profile=profile,
             status=REAL_PILOT_CLOSE_ORDER_PLACED,
@@ -1203,7 +1216,7 @@ class HFRealPilotEngine:
             order_status=result.status,
             real_cycle_id=int(cycle["id"]),
             close_reason=close_reason,
-            message="Real pilot close order filled and cycle closed separately from paper cycles.",
+            message="Real pilot close order filled and cycle closed separately from paper cycles." + observer_message,
             checks=checks,
             updates=updates,
         )
