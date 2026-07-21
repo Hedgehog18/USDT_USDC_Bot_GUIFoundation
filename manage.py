@@ -91,6 +91,13 @@ from analytics.high_frequency_dataset_summary_engine import HighFrequencyDataset
 from analytics.high_frequency_diagnostics_engine import HighFrequencyDiagnosticsEngine
 from analytics.high_frequency_snapshot_collector import HighFrequencySnapshotCollector
 from analytics.hf_collection_extreme_metrics import HFCollectionExtremeMetricsEngine
+from analytics.hf_entry_outcome_comparison_engine import (
+    OUTCOME_EXECUTABLE_TARGET_TOUCH,
+    OUTCOME_TIMEOUT_NO_TOUCH,
+    HFEntryOutcomeComparisonEngine,
+    HFEntryOutcomeGroupStats,
+    report_to_json,
+)
 from analytics.hf_extreme_price import is_extreme_close_price
 from analytics.hf_losing_cycle_diagnostics_engine import HFLosingCycleDiagnosticsEngine
 from analytics.hf_micro_grid_guard_sweep_engine import HFMicroGridGuardSweepEngine
@@ -5775,6 +5782,148 @@ def _print_real_entry_group_metrics(metrics: HFRealEntryGroupMetrics) -> None:
     print(f"- BUY / SELL: {metrics.buy_count} / {metrics.sell_count}")
 
 
+def command_hf_entry_outcome_comparison(args) -> None:
+    _config, _logger, database = build_context()
+    report = HFEntryOutcomeComparisonEngine(database).build_report(
+        args.profile,
+        direction=args.direction,
+    )
+    if args.format == "json":
+        print(report_to_json(report))
+        return
+
+    print("=== HF Entry Outcome Comparative Diagnostics ===")
+    print(f"Profile: {report.profile}")
+    print("Mode: research-only, stored data only, no Binance API calls")
+    print("")
+    print("1. Summary")
+    print(f"- cycles analyzed: {report.cycles_analyzed}")
+    print(f"- cycles without blackbox: {report.cycles_without_blackbox}")
+    print(f"- cycles excluded incomplete: {report.cycles_excluded_incomplete}")
+    print(f"- historical anomalies: {len(report.historical_anomalies)}")
+    print("")
+    print("2. Outcome Groups")
+    _print_entry_outcome_group(report.target_touch_group)
+    _print_entry_outcome_group(report.timeout_no_touch_group)
+    print("")
+    print("3. Target Touch vs Timeout Comparison")
+    for comparison in report.comparisons:
+        print(
+            f"- {comparison.label}: samples {comparison.left_sample_size}/{comparison.right_sample_size} | "
+            f"avg_net_delta={_format_optional_float(comparison.average_net_difference)} | "
+            f"median_MFE_delta={_format_optional_float(comparison.median_mfe_difference)} | "
+            f"median_MAE_delta={_format_optional_float(comparison.median_mae_difference)} | "
+            f"adverse_rate_delta={_format_percent(comparison.immediate_adverse_rate_difference)} | "
+            f"effect={comparison.effect_direction}"
+        )
+    print("")
+    print("4. Early Movement Comparison")
+    for bucket in report.early_movement:
+        print(
+            f"- {bucket.group_name} {bucket.interval_seconds}s | n={bucket.sample_size} | "
+            f"toward={bucket.toward_target} ({_format_percent(bucket.toward_rate)}) | "
+            f"neutral={bucket.neutral} ({_format_percent(bucket.neutral_rate)}) | "
+            f"against={bucket.against_target} ({_format_percent(bucket.against_rate)})"
+        )
+    print("")
+    print("5. Direction Breakdown")
+    for outcome, by_direction in report.direction_group_stats.items():
+        print(f"- {outcome}")
+        for direction, metrics in by_direction.items():
+            print(
+                f"  - {direction}: n={metrics.sample_size} | avg_net={_format_optional_float(metrics.average_net_result)} | "
+                f"avg_MFE={_format_optional_float(metrics.average_mfe)} | avg_MAE={_format_optional_float(metrics.average_mae)} | "
+                f"immediate_adverse={_format_percent(metrics.immediate_adverse_rate)}"
+            )
+    print("")
+    print("6. Repeated Entry Clusters")
+    if report.repeated_entry_clusters:
+        for cluster in report.repeated_entry_clusters:
+            print(
+                f"- cluster {cluster.cluster_id}: direction={cluster.direction} | cycles={cluster.cycle_ids} | "
+                f"first={cluster.first_outcome} | repeated={cluster.repeated_outcomes} | "
+                f"repeated_timeout_rate={_format_percent(cluster.repeated_timeout_rate)}"
+            )
+    else:
+        print("- none")
+    print("")
+    print("7. Post Exit Outcomes")
+    post_exit = report.post_exit_outcomes
+    print(f"- timeout cycles with observer: {post_exit.timeout_cycles_with_observer}")
+    print(f"- target reached after timeout: {post_exit.target_reached_after_timeout}")
+    print(f"- never reached after timeout: {post_exit.never_reached_after_timeout}")
+    print(f"- average time to post target: {_format_optional_seconds(post_exit.average_time_to_post_target)}")
+    print(f"- BUY reached/observed: {post_exit.buy_target_reached_after_timeout}/{post_exit.buy_timeout_cycles_with_observer}")
+    print(f"- SELL reached/observed: {post_exit.sell_target_reached_after_timeout}/{post_exit.sell_timeout_cycles_with_observer}")
+    print("")
+    print("8. Historical Anomalies")
+    if report.historical_anomalies:
+        for cycle in report.historical_anomalies:
+            print(
+                f"- db_id={cycle.db_id} | {cycle.direction} | group={cycle.outcome_group} | "
+                f"reason={cycle.close_reason or 'N/A'} | executable_touch={_format_optional_bool(cycle.executable_target_touched)} | "
+                f"real_target_close_triggered={_format_optional_bool(cycle.real_target_close_triggered)}"
+            )
+    else:
+        print("- none")
+    print("")
+    print("9. Warnings")
+    if report.warnings:
+        for warning in report.warnings:
+            print(f"- {warning}")
+    else:
+        print("- none")
+    print("")
+    print("10. Recommendation")
+    print(report.recommendation)
+    print("")
+    print("11. Research Conclusion")
+    print(report.research_conclusion)
+
+    if args.include_cycle_table:
+        print("")
+        print("Cycle Table")
+        for cycle in report.cycle_table:
+            print(
+                f"- db_id={cycle.db_id} | {cycle.outcome_group} | {cycle.direction} | "
+                f"open={_format_optional_float(cycle.open_price)} | target={_format_optional_float(cycle.target_price)} | "
+                f"close={_format_optional_float(cycle.close_price)} | net={_format_optional_float(cycle.net_profit)} | "
+                f"MFE={_format_optional_float(cycle.mfe)} | MAE={_format_optional_float(cycle.mae)} | "
+                f"5s={_format_optional_float(cycle.movement_5s)} | 15s={_format_optional_float(cycle.movement_15s)} | "
+                f"reason={cycle.close_reason or 'N/A'}"
+            )
+
+
+def _print_entry_outcome_group(metrics: HFEntryOutcomeGroupStats) -> None:
+    print(f"- {metrics.name}")
+    print(f"  sample size: {metrics.sample_size}")
+    print(f"  BUY / SELL: {metrics.buy_count} / {metrics.sell_count}")
+    print(f"  spread avg/median: {_format_optional_float(metrics.average_spread)} / {_format_optional_float(metrics.median_spread)}")
+    print(
+        "  distance from center avg/median: "
+        f"{_format_optional_float(metrics.average_distance_from_center)} / "
+        f"{_format_optional_float(metrics.median_distance_from_center)}"
+    )
+    print(f"  MFE avg/median: {_format_optional_float(metrics.average_mfe)} / {_format_optional_float(metrics.median_mfe)}")
+    print(f"  MAE avg/median: {_format_optional_float(metrics.average_mae)} / {_format_optional_float(metrics.median_mae)}")
+    print(
+        "  movement avg 5/15/30/60s: "
+        f"{_format_optional_float(metrics.average_movement_5s)} / "
+        f"{_format_optional_float(metrics.average_movement_15s)} / "
+        f"{_format_optional_float(metrics.average_movement_30s)} / "
+        f"{_format_optional_float(metrics.average_movement_60s)}"
+    )
+    print(f"  immediate adverse rate: {_format_percent(metrics.immediate_adverse_rate)}")
+    print(f"  avg holding: {_format_optional_seconds(metrics.average_holding_seconds)}")
+    print(f"  avg net: {_format_optional_float(metrics.average_net_result)}")
+
+
+def _format_percent(value) -> str:
+    if value is None:
+        return "N/A"
+    return f"{float(value) * 100:.2f}%"
+
+
 def _format_optional_float(value) -> str:
     if value is None:
         return "N/A"
@@ -8290,6 +8439,20 @@ def build_parser() -> argparse.ArgumentParser:
         default="mean_reversion_hf_micro_v1",
     )
     hf_real_entry_quality_parser.set_defaults(func=command_hf_real_entry_quality_diagnostics)
+
+    hf_entry_outcome_comparison_parser = subparsers.add_parser(
+        "hf-entry-outcome-comparison",
+        help="Research-only comparison of executable target-touch and timeout-no-touch HF real cycles",
+    )
+    hf_entry_outcome_comparison_parser.add_argument(
+        "--profile",
+        choices=SUPPORTED_RUNTIME_STRATEGY_PROFILES,
+        default="mean_reversion_hf_micro_v1",
+    )
+    hf_entry_outcome_comparison_parser.add_argument("--format", choices=["text", "json"], default="text")
+    hf_entry_outcome_comparison_parser.add_argument("--include-cycle-table", action="store_true")
+    hf_entry_outcome_comparison_parser.add_argument("--direction", choices=["BUY_USDC", "SELL_USDC"], default=None)
+    hf_entry_outcome_comparison_parser.set_defaults(func=command_hf_entry_outcome_comparison)
 
     extreme_market_discovery_parser = subparsers.add_parser(
         "extreme-market-discovery",

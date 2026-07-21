@@ -312,6 +312,7 @@ def test_manage_cli_accepts_hf_micro_profile_for_paper_workflow_commands():
         ["hf-post-exit-observer-report", "--profile", "mean_reversion_hf_micro_v1", "--real-cycle-id", "1"],
         ["hf-post-exit-observer-statistics", "--profile", "mean_reversion_hf_micro_v1"],
         ["hf-real-entry-quality-diagnostics", "--profile", "mean_reversion_hf_micro_v1"],
+        ["hf-entry-outcome-comparison", "--profile", "mean_reversion_hf_micro_v1"],
         ["extreme-market-discovery", "--profile", "mean_reversion_hf_micro_v1"],
         ["extreme-replay", "--profile", "mean_reversion_hf_micro_v1"],
         ["extreme-replay-ranking", "--profile", "mean_reversion_hf_micro_v1"],
@@ -434,6 +435,26 @@ def test_manage_cli_hf_velocity_filter_sim_accepts_thresholds_and_confirmation()
     assert args.drift_threshold == pytest.approx(0.000025)
     assert args.require_direction_confirmed is True
     assert args.limit == 100
+
+
+def test_manage_cli_hf_entry_outcome_comparison_accepts_format_cycle_table_and_direction():
+    parser = build_parser()
+    args = parser.parse_args([
+        "hf-entry-outcome-comparison",
+        "--profile",
+        "mean_reversion_hf_micro_v1",
+        "--format",
+        "json",
+        "--include-cycle-table",
+        "--direction",
+        "BUY_USDC",
+    ])
+
+    assert args.command == "hf-entry-outcome-comparison"
+    assert args.profile == "mean_reversion_hf_micro_v1"
+    assert args.format == "json"
+    assert args.include_cycle_table is True
+    assert args.direction == "BUY_USDC"
 
 
 def test_manage_cli_hf_regime_filter_sim_accepts_since_id_limit_and_threshold():
