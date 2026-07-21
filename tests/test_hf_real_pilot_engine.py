@@ -1,8 +1,14 @@
+import json
 from dataclasses import replace
 from decimal import Decimal
 
 from analytics.hf_real_dry_run_engine import AccountBalances, ExchangeSymbolRules
-from analytics.hf_real_pilot_engine import HFRealPilotEngine, HFRealPilotSignalSnapshot, RealOrderResult
+from analytics.hf_real_pilot_engine import (
+    HFRealPilotEngine,
+    HFRealPilotSignalSnapshot,
+    RealOrderResult,
+    evaluate_real_target_condition,
+)
 from market.binance_market_data_provider import BidAsk
 from storage.database_manager import DatabaseManager
 
@@ -21,6 +27,7 @@ class FakeRealPilotClient:
         bid: float = 1.00068,
         ask: float = 1.00069,
         order_avg_price: Decimal = Decimal("1.00069"),
+        order_avg_prices: list[Decimal] | None = None,
     ) -> None:
         self.usdt = usdt
         self.usdc = usdc
@@ -29,6 +36,8 @@ class FakeRealPilotClient:
         self.bid = bid
         self.ask = ask
         self.order_avg_price = order_avg_price
+        self.order_avg_prices = list(order_avg_prices or [])
+        self.order_sides: list[str] = []
         self.permissions = permissions or {
             "canTrade": True,
             "canWithdraw": False,
@@ -61,11 +70,13 @@ class FakeRealPilotClient:
 
     def create_market_order(self, *, symbol: str, side: str, quantity: Decimal) -> RealOrderResult:
         self.orders_created += 1
+        self.order_sides.append(side)
+        avg_price = self.order_avg_prices.pop(0) if self.order_avg_prices else self.order_avg_price
         return RealOrderResult(
             order_id="mock-order-1",
             status=self.order_status,
             executed_qty=quantity if self.order_status == "FILLED" else Decimal("0"),
-            avg_price=self.order_avg_price if self.order_status == "FILLED" else Decimal("0"),
+            avg_price=avg_price if self.order_status == "FILLED" else Decimal("0"),
             raw_response={"orderId": "mock-order-1", "status": self.order_status, "side": side},
         )
 
@@ -366,6 +377,177 @@ def test_real_pilot_order_client_mocked_and_no_paper_contamination(test_config, 
     assert paper_count == 0
 
 
+def test_real_target_condition_uses_decimal_boundary_for_buy_and_sell():
+    buy_below = evaluate_real_target_condition(
+        direction="BUY_USDC",
+        target_price=Decimal("1.00068500"),
+        bid=Decimal("1.00068499"),
+        ask=Decimal("1.00069500"),
+    )
+    buy_equal = evaluate_real_target_condition(
+        direction="BUY_USDC",
+        target_price=Decimal("1.00068500"),
+        bid=Decimal("1.00068500"),
+        ask=Decimal("1.00069500"),
+    )
+    sell_above = evaluate_real_target_condition(
+        direction="SELL_USDC",
+        target_price=Decimal("1.00067500"),
+        bid=Decimal("1.00066500"),
+        ask=Decimal("1.00067501"),
+    )
+    sell_equal = evaluate_real_target_condition(
+        direction="SELL_USDC",
+        target_price=Decimal("1.00067500"),
+        bid=Decimal("1.00066500"),
+        ask=Decimal("1.00067500"),
+    )
+
+    assert buy_below.executable_price == Decimal("1.00068499")
+    assert buy_below.target_condition_result is False
+    assert buy_equal.target_condition_result is True
+    assert sell_above.executable_price == Decimal("1.00067501")
+    assert sell_above.target_condition_result is False
+    assert sell_equal.target_condition_result is True
+
+
+def test_real_pilot_immediate_post_fill_buy_target_closes_standard_flow(test_config, tmp_path):
+    client = FakeRealPilotClient(
+        bid=1.00069,
+        ask=1.00070,
+        order_avg_prices=[Decimal("1.00068000"), Decimal("1.00069000")],
+    )
+    engine, database = _engine(tmp_path, test_config, client)
+
+    report = engine.run_once(
+        profile=PROFILE,
+        pilot_stake=Decimal("6"),
+        confirmed=True,
+        entry_signal="BUY_USDC",
+    )
+
+    assert report.status == "CLOSE_ORDER_PLACED"
+    assert report.real_cycle_id is not None
+    assert client.orders_created == 2
+    assert client.order_sides == ["BUY", "SELL"]
+    assert database.count_open_real_pilot_cycles(PROFILE) == 0
+    cycle = database.load_real_pilot_cycle_by_id(report.real_cycle_id, PROFILE)
+    assert cycle["status"] == "CLOSED"
+    assert cycle["close_reason"] == "real_pilot_target"
+    with database.connect() as conn:
+        close_attempts = conn.execute(
+            "SELECT COUNT(*) FROM real_pilot_order_events WHERE status = 'ATTEMPTED_CLOSE'",
+        ).fetchone()[0]
+        raw = conn.execute(
+            """
+            SELECT raw_payload_json
+            FROM real_pilot_market_snapshots
+            WHERE real_cycle_id = ?
+              AND source = 'real_pilot_close_watch'
+            ORDER BY id ASC
+            LIMIT 1
+            """,
+            (report.real_cycle_id,),
+        ).fetchone()[0]
+    payload = json.loads(raw)
+    assert close_attempts == 1
+    assert payload["close_trigger_source"] == "immediate_post_fill"
+    assert payload["immediate_target_condition_result"] is True
+    assert Decimal(payload["immediate_target_check_bid"]) == Decimal("1.00069000")
+
+
+def test_real_pilot_immediate_post_fill_sell_target_closes_standard_flow(test_config, tmp_path):
+    client = FakeRealPilotClient(
+        bid=1.00066,
+        ask=1.00067,
+        order_avg_prices=[Decimal("1.00068000"), Decimal("1.00067000")],
+    )
+    engine, database = _engine(tmp_path, test_config, client)
+
+    report = engine.run_once(
+        profile=PROFILE,
+        pilot_stake=Decimal("6"),
+        confirmed=True,
+        entry_signal="SELL_USDC",
+    )
+
+    assert report.status == "CLOSE_ORDER_PLACED"
+    assert report.real_cycle_id is not None
+    assert client.orders_created == 2
+    assert client.order_sides == ["SELL", "BUY"]
+    cycle = database.load_real_pilot_cycle_by_id(report.real_cycle_id, PROFILE)
+    assert cycle["status"] == "CLOSED"
+    assert cycle["close_reason"] == "real_pilot_target"
+
+
+def test_real_pilot_immediate_false_leaves_cycle_for_regular_watcher(test_config, tmp_path):
+    client = FakeRealPilotClient(
+        bid=1.00067,
+        ask=1.00068,
+        order_avg_price=Decimal("1.00068000"),
+    )
+    engine, database = _engine(tmp_path, test_config, client)
+
+    report = engine.run_once(
+        profile=PROFILE,
+        pilot_stake=Decimal("6"),
+        confirmed=True,
+        entry_signal="BUY_USDC",
+    )
+
+    assert report.status == "ORDER_PLACED"
+    assert report.real_cycle_id is not None
+    assert client.orders_created == 1
+    assert database.count_open_real_pilot_cycles(PROFILE) == 1
+    with database.connect() as conn:
+        raw = conn.execute(
+            """
+            SELECT raw_payload_json
+            FROM real_pilot_market_snapshots
+            WHERE real_cycle_id = ?
+              AND source = 'real_pilot_close_watch'
+            ORDER BY id ASC
+            LIMIT 1
+            """,
+            (report.real_cycle_id,),
+        ).fetchone()[0]
+    payload = json.loads(raw)
+    assert payload["close_trigger_source"] == "immediate_post_fill"
+    assert payload["immediate_target_condition_result"] is False
+
+
+def test_real_pilot_regular_watcher_does_not_duplicate_immediate_close(test_config, tmp_path):
+    client = FakeRealPilotClient(
+        bid=1.00069,
+        ask=1.00070,
+        order_avg_prices=[Decimal("1.00068000"), Decimal("1.00069000")],
+    )
+    engine, database = _engine(tmp_path, test_config, client)
+    entry = engine.run_once(
+        profile=PROFILE,
+        pilot_stake=Decimal("6"),
+        confirmed=True,
+        entry_signal="BUY_USDC",
+    )
+
+    close = engine.close_watch(
+        profile=PROFILE,
+        confirmed=True,
+        max_iterations=1,
+        interval_seconds=0,
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert entry.status == "CLOSE_ORDER_PLACED"
+    assert close.status == "NO_OPEN_REAL_CYCLE"
+    assert client.orders_created == 2
+    with database.connect() as conn:
+        close_attempts = conn.execute(
+            "SELECT COUNT(*) FROM real_pilot_order_events WHERE status = 'ATTEMPTED_CLOSE'",
+        ).fetchone()[0]
+    assert close_attempts == 1
+
+
 def test_real_pilot_does_not_block_on_account_level_can_withdraw(test_config, tmp_path):
     client = FakeRealPilotClient(permissions={
         "canTrade": True,
@@ -613,6 +795,56 @@ def test_real_pilot_close_watch_closes_target_hit(test_config, tmp_path):
     assert paper_count == 0
     assert post_exit_launcher.calls == [(PROFILE, cycle_id)]
     assert "Post exit observer started." in report.message
+
+
+def test_real_pilot_close_watch_records_target_check_instrumentation(test_config, tmp_path):
+    client = FakeRealPilotClient(
+        bid=1.00069,
+        ask=1.00070,
+        order_avg_price=Decimal("1.00069"),
+    )
+    engine, database = _engine(tmp_path, test_config, client)
+    cycle_id = database.save_real_pilot_cycle(
+        run_id="open",
+        strategy_profile=PROFILE,
+        symbol="USDCUSDT",
+        direction="BUY_USDC",
+        status="OPEN",
+        open_price=1.00068,
+        quantity=6,
+        stake_usdt=6,
+    )
+
+    report = engine.close_watch(
+        profile=PROFILE,
+        confirmed=True,
+        max_iterations=1,
+        interval_seconds=0,
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert report.status == "CLOSE_ORDER_PLACED"
+    with database.connect() as conn:
+        row = conn.execute(
+            """
+            SELECT raw_payload_json
+            FROM real_pilot_market_snapshots
+            WHERE real_cycle_id = ?
+              AND source = 'real_pilot_close_watch'
+            ORDER BY id ASC
+            LIMIT 1
+            """,
+            (cycle_id,),
+        ).fetchone()
+    assert row is not None
+    payload = json.loads(row[0])
+    assert payload["close_watcher_started_at"]
+    assert payload["target_check_at"]
+    assert payload["iteration"] == 1
+    assert payload["target_check_bid"] == "1.00069"
+    assert Decimal(payload["target_check_ask"]) == Decimal("1.00070")
+    assert payload["target_condition_result"] is True
+    assert payload["seconds_since_entry_fill"] is not None
 
 
 def test_real_pilot_close_watch_does_not_open_new_entry(test_config, tmp_path):

@@ -60,6 +60,40 @@ class RealOrderResult:
     raw_response: dict[str, Any]
 
 
+@dataclass(frozen=True)
+class RealTargetCondition:
+    direction: str
+    target_price: Decimal
+    bid: Decimal | None
+    ask: Decimal | None
+    executable_price: Decimal | None
+    target_condition_result: bool
+
+
+def evaluate_real_target_condition(
+    *,
+    direction: str,
+    target_price: Decimal,
+    bid: Decimal | None,
+    ask: Decimal | None,
+) -> RealTargetCondition:
+    executable_price = bid if direction == "BUY_USDC" else ask
+    if executable_price is None:
+        condition = False
+    elif direction == "BUY_USDC":
+        condition = executable_price >= target_price
+    else:
+        condition = executable_price <= target_price
+    return RealTargetCondition(
+        direction=direction,
+        target_price=target_price,
+        bid=bid,
+        ask=ask,
+        executable_price=executable_price,
+        target_condition_result=condition,
+    )
+
+
 class RealPilotOrderClient(RealDryRunProvider, Protocol):
     def create_market_order(self, *, symbol: str, side: str, quantity: Decimal) -> RealOrderResult:
         ...
@@ -182,6 +216,10 @@ class HFRealPilotCloseUpdate:
     ask: Decimal | None = None
     mid: Decimal | None = None
     spread: Decimal | None = None
+    close_watcher_started_at: str | None = None
+    target_check_at: str | None = None
+    seconds_since_entry_fill: float | None = None
+    close_trigger_source: str | None = None
 
 
 @dataclass(frozen=True)
@@ -345,6 +383,7 @@ class HFRealPilotEngine:
         confirmed: bool,
         max_cycles_per_run: int = REAL_PILOT_DEFAULT_MAX_CYCLES_PER_RUN,
         entry_signal: str | None = None,
+        campaign_id: str | None = None,
     ) -> HFRealPilotReport:
         run_id = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
         early_checks = [
@@ -411,6 +450,8 @@ class HFRealPilotEngine:
             direction=entry_signal,
             checks=checks,
             dry_run_status=dry_run_status,
+            confirmed=confirmed,
+            campaign_id=campaign_id,
         )
 
     def watch(
@@ -464,6 +505,7 @@ class HFRealPilotEngine:
                 pilot_stake=pilot_stake,
                 confirmed=confirmed,
                 entry_signal=entry_signal,
+                campaign_id=campaign_id,
             )
             update = HFRealPilotWatchUpdate(
                 update_number=index,
@@ -561,6 +603,7 @@ class HFRealPilotEngine:
 
         updates: list[HFRealPilotCloseUpdate] = []
         recorder = HFRealBlackboxRecorder(self.database, self.config.symbol)
+        close_watcher_started_at = datetime.now(timezone.utc).isoformat()
         for index in range(1, max_iterations + 1):
             cycle = self.database.load_open_real_pilot_cycle(profile)
             if cycle is None:
@@ -577,7 +620,12 @@ class HFRealPilotEngine:
                     updates=updates,
                 )
 
-            update = self._build_close_update(index, cycle)
+            update = self._build_close_update(
+                index,
+                cycle,
+                close_watcher_started_at=close_watcher_started_at,
+                close_trigger_source="regular_watcher",
+            )
             updates.append(update)
             recorder.record_close_snapshot(
                 phase="exit" if update.close_reason is not None else "tracking",
@@ -586,6 +634,7 @@ class HFRealPilotEngine:
                 campaign_id=campaign_id,
                 direction=str(cycle["direction"]),
                 open_real_cycles=self.database.count_open_real_pilot_cycles(profile),
+                raw_payload_json=self._close_update_payload(update),
             )
             if update_callback is not None:
                 update_callback(update)
@@ -691,7 +740,7 @@ class HFRealPilotEngine:
                 update_callback=entry_update_callback,
                 campaign_id=campaign_id,
             )
-            if entry.status != REAL_PILOT_ORDER_PLACED:
+            if entry.status not in {REAL_PILOT_ORDER_PLACED, REAL_PILOT_CLOSE_ORDER_PLACED}:
                 status = "STOPPED"
                 stop_reason = self._campaign_stop_reason(entry.status)
                 diagnostic_checks = entry.final_pilot_report.checks if entry.final_pilot_report is not None else []
@@ -717,6 +766,50 @@ class HFRealPilotEngine:
                 current_signal=last_signal,
                 safety_status=entry.status,
             ))
+
+            if entry.status == REAL_PILOT_CLOSE_ORDER_PLACED:
+                completed += 1
+                emit(HFRealPilotCampaignUpdate(
+                    phase="EXIT",
+                    cycle_number=cycle_number,
+                    target_cycles=target_cycles,
+                    status=entry.status,
+                    message=(
+                        "Closed immediately after fill by real_pilot_target "
+                        f"for real_cycle_id={entry.final_pilot_report.real_cycle_id if entry.final_pilot_report else 'N/A'}."
+                    ),
+                    current_signal=last_signal,
+                    safety_status=entry.status,
+                ))
+                audit_checks = self._campaign_audit_checks(profile=profile, pilot_stake=pilot_stake)
+                audit_ok = all(check.ok for check in audit_checks)
+                emit(HFRealPilotCampaignUpdate(
+                    phase="AUDIT",
+                    cycle_number=cycle_number,
+                    target_cycles=target_cycles,
+                    status="PASS" if audit_ok else "FAIL",
+                    message="; ".join(f"{check.name}={'PASS' if check.ok else 'FAIL'}" for check in audit_checks),
+                    current_signal=last_signal,
+                    safety_status="PASS" if audit_ok else "FAIL",
+                ))
+                stats = self.database.load_real_pilot_campaign_cycle_stats(profile, baseline_cycle_id)
+                self.database.update_real_pilot_campaign(
+                    campaign_id,
+                    status="RUNNING" if audit_ok and completed < target_cycles else "COMPLETED",
+                    completed_cycles=completed,
+                    net_profit=float(stats["net_profit"]),
+                    stop_reason="target_cycles_reached" if completed >= target_cycles else "running",
+                    orders_sent=int(stats["orders_sent"]),
+                    orders_filled=int(stats["orders_filled"]),
+                    finished=completed >= target_cycles,
+                )
+                if not audit_ok:
+                    status = "STOPPED"
+                    stop_reason = self._failed_audit_reason(audit_checks)
+                    diagnostic_checks = audit_checks
+                    safety_interruptions += 1
+                    break
+                continue
 
             def close_update_callback(update: HFRealPilotCloseUpdate) -> None:
                 emit(HFRealPilotCampaignUpdate(
@@ -1059,19 +1152,33 @@ class HFRealPilotEngine:
             target_touched=target_touched,
         )
 
-    def _build_close_update(self, update_number: int, cycle: dict) -> HFRealPilotCloseUpdate:
+    def _build_close_update(
+        self,
+        update_number: int,
+        cycle: dict,
+        *,
+        close_watcher_started_at: str | None = None,
+        close_trigger_source: str | None = None,
+    ) -> HFRealPilotCloseUpdate:
         target_price = self._target_price(cycle)
         age_seconds = self._cycle_age_seconds(cycle)
+        target_check_at = datetime.now(timezone.utc).isoformat()
         try:
             bid_ask = self.order_client.get_bid_ask(self.config.symbol)
             bid = Decimal(str(bid_ask.bid))
             ask = Decimal(str(bid_ask.ask))
             mid = (bid + ask) / Decimal("2")
             spread = ask - bid
-            current_price = self._executable_close_price(cycle["direction"], bid_ask)
+            condition = evaluate_real_target_condition(
+                direction=str(cycle["direction"]),
+                target_price=target_price,
+                bid=bid,
+                ask=ask,
+            )
+            current_price = condition.executable_price
             unrealized = self._profit_for_cycle(cycle, current_price)
             distance = self._distance_to_target(cycle["direction"], current_price, target_price)
-            close_condition_met = self._close_condition_met(cycle["direction"], current_price, target_price)
+            close_condition_met = condition.target_condition_result
         except Exception:
             current_price = None
             unrealized = None
@@ -1107,7 +1214,34 @@ class HFRealPilotEngine:
             ask=ask,
             mid=mid,
             spread=spread,
+            close_watcher_started_at=close_watcher_started_at,
+            target_check_at=target_check_at,
+            seconds_since_entry_fill=self._seconds_since_opened(cycle, target_check_at),
+            close_trigger_source=close_trigger_source,
         )
+
+    @staticmethod
+    def _close_update_payload(update: HFRealPilotCloseUpdate) -> str:
+        payload = {
+            "close_watcher_started_at": update.close_watcher_started_at,
+            "target_check_at": update.target_check_at,
+            "iteration": update.update_number,
+            "seconds_since_entry_fill": update.seconds_since_entry_fill,
+            "target_check_price": f"{update.current_price:f}" if update.current_price is not None else None,
+            "target_check_bid": f"{update.bid:f}" if update.bid is not None else None,
+            "target_check_ask": f"{update.ask:f}" if update.ask is not None else None,
+            "target_condition_result": update.close_condition_met,
+            "close_trigger_source": update.close_trigger_source,
+        }
+        if update.close_trigger_source == "immediate_post_fill":
+            payload.update({
+                "immediate_target_check_at": update.target_check_at,
+                "immediate_target_check_bid": f"{update.bid:f}" if update.bid is not None else None,
+                "immediate_target_check_ask": f"{update.ask:f}" if update.ask is not None else None,
+                "immediate_target_check_price": f"{update.current_price:f}" if update.current_price is not None else None,
+                "immediate_target_condition_result": update.close_condition_met,
+            })
+        return json.dumps(payload, sort_keys=True)
 
     def _place_close_order(
         self,
@@ -1118,6 +1252,34 @@ class HFRealPilotEngine:
         checks: list[RealPilotCheck],
         updates: list[HFRealPilotCloseUpdate],
     ) -> HFRealPilotCloseWatchReport:
+        fresh_cycle = self.database.load_real_pilot_cycle_by_id(int(cycle["id"]), profile)
+        if fresh_cycle is None or fresh_cycle.get("status") != "OPEN":
+            return HFRealPilotCloseWatchReport(
+                profile=profile,
+                status=REAL_PILOT_NO_OPEN_CYCLE,
+                iterations=len(updates),
+                order_attempted=False,
+                order_status=None,
+                real_cycle_id=int(cycle["id"]),
+                close_reason=close_reason,
+                message="Close order was skipped; real cycle is no longer OPEN.",
+                checks=checks,
+                updates=updates,
+            )
+        if self._close_order_exists(int(cycle["id"])):
+            return HFRealPilotCloseWatchReport(
+                profile=profile,
+                status=REAL_PILOT_HALTED,
+                iterations=len(updates),
+                order_attempted=False,
+                order_status="DUPLICATE_CLOSE_BLOCKED",
+                real_cycle_id=int(cycle["id"]),
+                close_reason=close_reason,
+                message="Close order was skipped; an existing close order event is already recorded for this cycle.",
+                checks=checks,
+                updates=updates,
+            )
+        cycle = fresh_cycle
         run_id = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
         quantity = Decimal(str(cycle["quantity"]))
         side = "SELL" if cycle["direction"] == "BUY_USDC" else "BUY"
@@ -1220,6 +1382,25 @@ class HFRealPilotEngine:
             checks=checks,
             updates=updates,
         )
+
+    def _close_order_exists(self, cycle_id: int) -> bool:
+        with self.database.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT request_payload
+                FROM real_pilot_order_events
+                WHERE status IN ('ATTEMPTED_CLOSE', 'FILLED', 'FAILED_CLOSE')
+                ORDER BY id ASC
+                """,
+            ).fetchall()
+        for row in rows:
+            try:
+                payload = json.loads(row[0] or "{}")
+            except json.JSONDecodeError:
+                continue
+            if int(payload.get("close_cycle_id", -1)) == cycle_id:
+                return True
+        return False
 
     def _preflight_checks(
         self,
@@ -1357,6 +1538,19 @@ class HFRealPilotEngine:
             opened = opened.replace(tzinfo=timezone.utc)
         return max(0.0, (datetime.now(timezone.utc) - opened.astimezone(timezone.utc)).total_seconds())
 
+    @staticmethod
+    def _seconds_since_opened(cycle: dict, timestamp: str) -> float | None:
+        try:
+            opened = datetime.fromisoformat(str(cycle["opened_at"]))
+            current = datetime.fromisoformat(timestamp)
+        except (KeyError, ValueError):
+            return None
+        if opened.tzinfo is None:
+            opened = opened.replace(tzinfo=timezone.utc)
+        if current.tzinfo is None:
+            current = current.replace(tzinfo=timezone.utc)
+        return max(0.0, (current.astimezone(timezone.utc) - opened.astimezone(timezone.utc)).total_seconds())
+
     def _place_entry_order(
         self,
         *,
@@ -1366,6 +1560,8 @@ class HFRealPilotEngine:
         direction: str,
         checks: list[RealPilotCheck],
         dry_run_status: str,
+        confirmed: bool,
+        campaign_id: str | None = None,
     ) -> HFRealPilotReport:
         dry_run = HFRealDryRunEngine(self.config, self.order_client).build_report_with_stake(
             profile=profile,
@@ -1449,6 +1645,24 @@ class HFRealPilotEngine:
             stake_usdt=float(pilot_stake),
             exchange_order_id=result.order_id,
         )
+        immediate_close = self._immediate_post_fill_target_check(
+            profile=profile,
+            cycle_id=cycle_id,
+            confirmed=confirmed,
+            campaign_id=campaign_id,
+        )
+        if immediate_close is not None:
+            return HFRealPilotReport(
+                profile=profile,
+                status=immediate_close.status,
+                run_id=run_id,
+                checks=immediate_close.checks,
+                dry_run_status=dry_run_status,
+                order_attempted=True,
+                order_status=immediate_close.order_status,
+                real_cycle_id=cycle_id,
+                message="Real pilot entry filled. Immediate post-fill target check triggered standard close flow.",
+            )
         return HFRealPilotReport(
             profile=profile,
             status=REAL_PILOT_ORDER_PLACED,
@@ -1459,4 +1673,56 @@ class HFRealPilotEngine:
             order_status=result.status,
             real_cycle_id=cycle_id,
             message="Real pilot entry order filled and tracked separately from paper cycles.",
+        )
+
+    def _immediate_post_fill_target_check(
+        self,
+        *,
+        profile: str,
+        cycle_id: int,
+        confirmed: bool,
+        campaign_id: str | None,
+    ) -> HFRealPilotCloseWatchReport | None:
+        cycle = self.database.load_real_pilot_cycle_by_id(cycle_id, profile)
+        if cycle is None or cycle.get("status") != "OPEN":
+            return None
+        checks = self._close_preflight_checks(profile=profile, confirmed=confirmed)
+        recorder = HFRealBlackboxRecorder(self.database, self.config.symbol)
+        started_at = datetime.now(timezone.utc).isoformat()
+        update = self._build_close_update(
+            0,
+            cycle,
+            close_watcher_started_at=started_at,
+            close_trigger_source="immediate_post_fill",
+        )
+        recorder.record_close_snapshot(
+            phase="exit" if update.close_reason == "real_pilot_target" else "tracking",
+            update=update,
+            real_cycle_id=cycle_id,
+            campaign_id=campaign_id,
+            direction=str(cycle["direction"]),
+            open_real_cycles=self.database.count_open_real_pilot_cycles(profile),
+            raw_payload_json=self._close_update_payload(update),
+        )
+        if not all(check.ok for check in checks):
+            return HFRealPilotCloseWatchReport(
+                profile=profile,
+                status=REAL_PILOT_NOT_READY,
+                iterations=1,
+                order_attempted=False,
+                order_status=None,
+                real_cycle_id=cycle_id,
+                close_reason=None,
+                message="Immediate post-fill target check recorded; close safety gates failed.",
+                checks=checks,
+                updates=[update],
+            )
+        if update.close_reason != "real_pilot_target":
+            return None
+        return self._place_close_order(
+            profile=profile,
+            cycle=cycle,
+            close_reason="real_pilot_target",
+            checks=checks,
+            updates=[update],
         )

@@ -19,7 +19,11 @@ class HFRealBlackboxMetrics:
     max_favorable_excursion: float | None
     max_adverse_excursion: float | None
     target_touched: bool
+    reference_target_touched: bool
+    executable_target_touched: bool
+    real_target_close_triggered: bool
     first_target_touch_seconds: float | None
+    first_executable_target_touch_seconds: float | None
     nearest_target_distance: float | None
     nearest_target_seconds: float | None
     max_favorable_price: float | None
@@ -199,9 +203,14 @@ class HFRealBlackboxDiagnosticsEngine:
         spreads = [_float(row.get("spread")) for row in snapshots]
         spreads = [spread for spread in spreads if spread is not None]
         phase_counts = {phase: sum(1 for row in snapshots if row.get("phase") == phase) for phase in ("pre_entry", "tracking", "exit", "post_exit")}
-        target_rows = [
+        reference_target_rows = [
             row for row in path_snapshots
             if _float(row.get("price")) is not None and cls.target_hit(direction, float(row["price"]), target_price)
+        ]
+        executable_target_rows = [
+            row for row in path_snapshots
+            if cls._executable_close_reference(direction, row) is not None
+            and cls.target_hit(direction, cls._executable_close_reference(direction, row), target_price)
         ]
         nearest_row = None
         if prices:
@@ -211,7 +220,10 @@ class HFRealBlackboxDiagnosticsEngine:
             )
         nearest_distance = abs((_float(nearest_row.get("price")) or target_price) - target_price) if nearest_row else None
         nearest_seconds = cls._seconds_from_open(opened_at, nearest_row) if nearest_row else None
-        first_touch_seconds = cls._seconds_from_open(opened_at, target_rows[0]) if target_rows else None
+        first_touch_seconds = cls._seconds_from_open(opened_at, reference_target_rows[0]) if reference_target_rows else None
+        first_executable_touch_seconds = (
+            cls._seconds_from_open(opened_at, executable_target_rows[0]) if executable_target_rows else None
+        )
         max_favorable_price = cls._best_price(direction, prices)
         max_adverse_price = cls._worst_price(direction, prices)
         mfe = cls._pnl_per_unit(direction, open_price, max_favorable_price) if max_favorable_price is not None else None
@@ -221,7 +233,9 @@ class HFRealBlackboxDiagnosticsEngine:
         if exit_market_price is None:
             exit_market_price = _float((path_snapshots[-1] if path_snapshots else snapshots[-1]).get("price"))
         suspected_reason = cls._suspected_reason(
-            target_touched=bool(target_rows),
+            reference_target_touched=bool(reference_target_rows),
+            executable_target_touched=bool(executable_target_rows),
+            real_target_close_triggered=str(cycle.get("close_reason") or "") == "real_pilot_target",
             close_reason=str(cycle.get("close_reason") or ""),
             close_price=close_price,
             exit_market_price=exit_market_price,
@@ -236,8 +250,12 @@ class HFRealBlackboxDiagnosticsEngine:
             post_exit_count=phase_counts["post_exit"],
             max_favorable_excursion=mfe,
             max_adverse_excursion=mae,
-            target_touched=bool(target_rows),
+            target_touched=bool(reference_target_rows),
+            reference_target_touched=bool(reference_target_rows),
+            executable_target_touched=bool(executable_target_rows),
+            real_target_close_triggered=str(cycle.get("close_reason") or "") == "real_pilot_target",
             first_target_touch_seconds=first_touch_seconds,
+            first_executable_target_touch_seconds=first_executable_touch_seconds,
             nearest_target_distance=nearest_distance,
             nearest_target_seconds=nearest_seconds,
             max_favorable_price=max_favorable_price,
@@ -264,6 +282,19 @@ class HFRealBlackboxDiagnosticsEngine:
         if direction == "BUY_USDC":
             return price >= target_price
         return price <= target_price
+
+    @staticmethod
+    def executable_target_hit(direction: str, snapshot: dict[str, Any], target_price: float) -> bool | None:
+        reference = HFRealBlackboxDiagnosticsEngine._executable_close_reference(direction, snapshot)
+        if reference is None:
+            return None
+        return HFRealBlackboxDiagnosticsEngine.target_hit(direction, reference, target_price)
+
+    @staticmethod
+    def _executable_close_reference(direction: str, snapshot: dict[str, Any]) -> float | None:
+        if direction == "BUY_USDC":
+            return _float(snapshot.get("bid"))
+        return _float(snapshot.get("ask"))
 
     @staticmethod
     def _pnl_per_unit(direction: str, open_price: float, price: float | None) -> float | None:
@@ -297,7 +328,9 @@ class HFRealBlackboxDiagnosticsEngine:
     @staticmethod
     def _suspected_reason(
         *,
-        target_touched: bool,
+        reference_target_touched: bool,
+        executable_target_touched: bool,
+        real_target_close_triggered: bool,
         close_reason: str,
         close_price: float | None,
         exit_market_price: float | None,
@@ -306,9 +339,11 @@ class HFRealBlackboxDiagnosticsEngine:
     ) -> str:
         if not snapshots:
             return "data_insufficient"
-        if target_touched and "target" not in close_reason:
+        if executable_target_touched and not real_target_close_triggered:
             return "target_touched_but_not_executed"
-        if (not target_touched) and ("holding" in close_reason or "timeout" in close_reason):
+        if reference_target_touched and not executable_target_touched and "target" not in close_reason:
+            return "reference_touch_only"
+        if (not reference_target_touched) and ("holding" in close_reason or "timeout" in close_reason):
             return "target_not_touched"
         if nearest_distance is not None and nearest_distance <= 0.000005 and ("holding" in close_reason or "timeout" in close_reason):
             return "timeout_before_recovery"

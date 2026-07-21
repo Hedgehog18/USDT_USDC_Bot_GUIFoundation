@@ -33,6 +33,11 @@ class HFRealCycleExecutionDiagnostics:
     max_favorable_excursion: float | None
     max_adverse_excursion: float | None
     target_touched: bool
+    reference_target_touched: bool
+    executable_target_touched: bool
+    real_target_close_triggered: bool
+    target_close_order_sent: bool
+    target_close_order_filled: bool
     nearest_target_seconds: float | None
     missed_target_distance: float | None
     paper_would_open: bool
@@ -109,10 +114,19 @@ class HFRealVsPaperDiagnosticsEngine:
         }
         mfe = self._max_favorable(row["direction"], row["open_price"], prices)
         mae = self._max_adverse(row["direction"], row["open_price"], prices)
-        target_touched = any(self._target_hit(row["direction"], price, target_price) for price in prices)
+        reference_target_touched = any(self._target_hit(row["direction"], price, target_price) for price in prices)
+        executable_target_touched = any(
+            self._target_hit(row["direction"], reference, target_price)
+            for reference in (
+                self._executable_reference(row["direction"], snapshot, role="close")
+                for snapshot in snapshots
+            )
+            if reference is not None
+        )
+        close_order_sent, close_order_filled = self._target_close_order_state(row)
         nearest_seconds, missed_distance = self._nearest_target_distance(snapshots, opened_at, row["direction"], target_price)
         paper_would_open = self._paper_would_open(row["direction"], entry_snapshot)
-        paper_target_hit = target_touched
+        paper_target_hit = reference_target_touched
         paper_timeout = (not paper_target_hit) and self._is_timeout_reason(row["close_reason"])
         paper_net = self._paper_equivalent_net(row, snapshots, target_price)
         entry_exec = self._execution_for_cycle(row, role="entry")
@@ -140,7 +154,12 @@ class HFRealVsPaperDiagnosticsEngine:
             price_after_270s=offsets[270],
             max_favorable_excursion=mfe,
             max_adverse_excursion=mae,
-            target_touched=target_touched,
+            target_touched=reference_target_touched,
+            reference_target_touched=reference_target_touched,
+            executable_target_touched=executable_target_touched,
+            real_target_close_triggered=row["close_reason"] == "real_pilot_target",
+            target_close_order_sent=close_order_sent,
+            target_close_order_filled=close_order_filled,
             nearest_target_seconds=nearest_seconds,
             missed_target_distance=missed_distance,
             paper_would_open=paper_would_open,
@@ -275,6 +294,30 @@ class HFRealVsPaperDiagnosticsEngine:
                 continue
             return self._parse_execution(row[0], row[1], row[5])
         return {"timestamp": None, "executed_qty": None, "quote_amount": None, "commission": None, "role": "N/A"}
+
+    def _target_close_order_state(self, cycle: dict[str, Any]) -> tuple[bool, bool]:
+        with self.database.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT status, request_payload
+                FROM real_pilot_order_events
+                WHERE strategy_profile = ?
+                ORDER BY id ASC
+                """,
+                (cycle["strategy_profile"],),
+            ).fetchall()
+        sent = False
+        filled = False
+        for row in rows:
+            request = self._json(row[1])
+            if int(request.get("close_cycle_id", -1)) != int(cycle["id"]):
+                continue
+            if request.get("close_reason") != "real_pilot_target":
+                continue
+            sent = True
+            if str(row[0]) == "FILLED":
+                filled = True
+        return sent, filled
 
     def _parse_execution(self, timestamp: str, side: str, payload: str) -> dict[str, float | str | None]:
         data = self._json(payload)

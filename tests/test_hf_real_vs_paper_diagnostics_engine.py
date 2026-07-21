@@ -253,3 +253,74 @@ def test_real_vs_paper_uses_blackbox_snapshots_when_available(tmp_path):
     assert report.cycles[0].target_touched is True
     assert report.cycles[0].paper_target_hit is True
     assert report.cycles[0].paper_equivalent_net > 0
+
+
+def test_real_vs_paper_distinguishes_touch_semantics_for_timeout_cycle(tmp_path):
+    database = DatabaseManager(str(tmp_path / "bot.sqlite"))
+    start = datetime(2026, 7, 20, 18, 20, 16)
+    _real_cycle(
+        database,
+        db_id=25,
+        open_price=1.00068,
+        close_price=1.00064,
+        quantity=5,
+        net_profit=-0.0002,
+        close_reason="max_holding_270s",
+        opened_at=start,
+        closed_at=start + timedelta(seconds=270),
+        run_id="run-25",
+    )
+    database.save_real_pilot_market_snapshot(
+        real_cycle_id=25,
+        campaign_id="campaign-25",
+        timestamp=(start + timedelta(milliseconds=24)).isoformat(),
+        phase="entry",
+        symbol="USDCUSDT",
+        price=1.000695,
+        bid=1.000690,
+        ask=1.000700,
+        mid=1.000695,
+        spread=0.00001,
+        short_center=1.000715,
+        hf_entry_mode="short_center",
+        candidate=True,
+        block_reason="N/A",
+        direction="BUY_USDC",
+        target_price=1.0006850034,
+        distance_to_target=None,
+        unrealized_pnl=None,
+        open_real_cycles=1,
+        source="TEST",
+    )
+    database.save_real_pilot_market_snapshot(
+        real_cycle_id=25,
+        campaign_id="campaign-25",
+        timestamp=(start + timedelta(seconds=270)).isoformat(),
+        phase="exit",
+        symbol="USDCUSDT",
+        price=1.000640,
+        bid=1.000640,
+        ask=1.000650,
+        mid=1.000645,
+        spread=0.00001,
+        short_center=None,
+        hf_entry_mode=None,
+        candidate=None,
+        block_reason=None,
+        direction="BUY_USDC",
+        target_price=1.0006850034,
+        distance_to_target=0.0000450034,
+        unrealized_pnl=-0.0002,
+        open_real_cycles=1,
+        source="TEST",
+    )
+
+    report = HFRealVsPaperDiagnosticsEngine(database).build_report(PROFILE)
+    cycle = report.cycles[0]
+
+    assert cycle.reference_target_touched is True
+    assert cycle.executable_target_touched is True
+    assert cycle.real_target_close_triggered is False
+    assert cycle.target_close_order_sent is False
+    assert cycle.target_close_order_filled is False
+    assert cycle.close_reason == "max_holding_270s"

@@ -134,7 +134,86 @@ def test_blackbox_cli_metrics_calculate_mfe_mae_and_target_touch(tmp_path):
     assert report.metrics.max_favorable_excursion == pytest.approx(0.000006)
     assert report.metrics.max_adverse_excursion == pytest.approx(-0.00001)
     assert report.metrics.target_touched is True
+    assert report.metrics.reference_target_touched is True
+    assert report.metrics.executable_target_touched is False
+    assert report.metrics.real_target_close_triggered is False
     assert report.metrics.first_target_touch_seconds == pytest.approx(10)
+    assert report.metrics.first_executable_target_touch_seconds is None
+    assert report.metrics.suspected_reason == "reference_touch_only"
+
+
+def test_blackbox_distinguishes_reference_touch_from_real_target_close_for_db25_shape(tmp_path):
+    database = DatabaseManager(str(tmp_path / "bot.sqlite"))
+    opened = datetime(2026, 7, 20, 18, 20, 16)
+    closed = opened + timedelta(seconds=270)
+    with database.connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO real_pilot_cycles (
+                id, timestamp, strategy_profile, symbol, direction, status,
+                open_price, close_price, quantity, stake_usdt, gross_profit,
+                net_profit, opened_at, closed_at, close_reason, exchange_order_id, run_id
+            ) VALUES (25, ?, ?, 'USDCUSDT', 'BUY_USDC', 'CLOSED',
+                1.00068000, 1.00064000, 5, 6, -0.0002, -0.0002,
+                ?, ?, 'max_holding_270s', 'entry-25', 'run-25')
+            """,
+            (opened.isoformat(), PROFILE, opened.isoformat(), closed.isoformat()),
+        )
+        conn.commit()
+    database.save_real_pilot_market_snapshot(
+        real_cycle_id=25,
+        campaign_id="campaign-25",
+        timestamp=(opened + timedelta(milliseconds=24)).isoformat(),
+        phase="entry",
+        symbol="USDCUSDT",
+        price=1.00069500,
+        bid=1.00069000,
+        ask=1.00070000,
+        mid=1.00069500,
+        spread=0.00001,
+        short_center=1.00071500,
+        hf_entry_mode="short_center",
+        candidate=True,
+        block_reason="N/A",
+        direction="BUY_USDC",
+        target_price=1.0006850034,
+        distance_to_target=None,
+        unrealized_pnl=None,
+        open_real_cycles=1,
+        source="TEST",
+    )
+    database.save_real_pilot_market_snapshot(
+        real_cycle_id=25,
+        campaign_id="campaign-25",
+        timestamp=closed.isoformat(),
+        phase="exit",
+        symbol="USDCUSDT",
+        price=1.00064000,
+        bid=1.00064000,
+        ask=1.00065000,
+        mid=1.00064500,
+        spread=0.00001,
+        short_center=None,
+        hf_entry_mode=None,
+        candidate=None,
+        block_reason=None,
+        direction="BUY_USDC",
+        target_price=1.0006850034,
+        distance_to_target=0.0000450034,
+        unrealized_pnl=-0.0002,
+        open_real_cycles=1,
+        source="TEST",
+    )
+
+    report = HFRealBlackboxDiagnosticsEngine(database).build_report(profile=PROFILE, real_cycle_id=25)
+
+    assert report.metrics is not None
+    assert report.metrics.reference_target_touched is True
+    assert report.metrics.executable_target_touched is True
+    assert report.metrics.real_target_close_triggered is False
+    assert report.metrics.target_touched is True
+    assert report.metrics.first_target_touch_seconds == pytest.approx(0.024)
+    assert report.metrics.first_executable_target_touch_seconds == pytest.approx(0.024)
     assert report.metrics.suspected_reason == "target_touched_but_not_executed"
 
 

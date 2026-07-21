@@ -306,6 +306,7 @@ def test_manage_cli_accepts_hf_micro_profile_for_paper_workflow_commands():
         ["hf-real-pilot-close-watch", "--profile", "mean_reversion_hf_micro_v1", "--confirm-real-pilot", "--max-iterations", "5", "--interval", "1"],
         ["hf-real-pilot-campaign", "--profile", "mean_reversion_hf_micro_v1", "--pilot-stake", "6", "--target-cycles", "2", "--confirm-real-pilot"],
         ["hf-real-vs-paper-diagnostics", "--profile", "mean_reversion_hf_micro_v1"],
+        ["hf-real-close-watcher-gap-diagnostics", "--profile", "mean_reversion_hf_micro_v1", "--real-cycle-id", "25"],
         ["hf-real-cycle-blackbox", "--profile", "mean_reversion_hf_micro_v1", "--real-cycle-id", "1"],
         ["hf-post-exit-observer-run", "--profile", "mean_reversion_hf_micro_v1", "--real-cycle-id", "1", "--duration-seconds", "1", "--interval-seconds", "1"],
         ["hf-post-exit-observer-report", "--profile", "mean_reversion_hf_micro_v1", "--real-cycle-id", "1"],

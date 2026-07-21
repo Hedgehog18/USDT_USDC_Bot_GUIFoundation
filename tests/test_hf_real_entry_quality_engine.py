@@ -126,10 +126,14 @@ def test_entry_quality_target_cycle_categorized_as_good_follow_through(tmp_path)
 
     cycle = report.cycles[0]
     assert cycle.target_touched is True
+    assert cycle.reference_target_touched is True
+    assert cycle.executable_target_touched is True
+    assert cycle.real_target_close_triggered is True
     assert cycle.entry_quality_category == "good_entry_follow_through"
     assert cycle.movement_after_5s == pytest.approx(0.000002)
     assert report.target_metrics.count == 1
     assert report.target_metrics.target_touch_rate == pytest.approx(1.0)
+    assert report.executable_target_touched_count == 1
 
 
 def test_entry_quality_timeout_no_touch_categorized(tmp_path):

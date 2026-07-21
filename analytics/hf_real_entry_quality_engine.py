@@ -20,6 +20,9 @@ class HFRealEntryCycleQuality:
     net_profit: float
     close_reason: str | None
     target_touched: bool
+    reference_target_touched: bool
+    executable_target_touched: bool
+    real_target_close_triggered: bool
     max_favorable_excursion: float | None
     max_adverse_excursion: float | None
     nearest_target_distance: float | None
@@ -68,6 +71,7 @@ class HFRealEntryQualityReport:
     total_analyzed_cycles: int
     cycles_with_blackbox: int
     target_touched_count: int
+    executable_target_touched_count: int
     timeout_no_touch_count: int
     timeout_loss_count: int
     breakeven_count: int
@@ -96,8 +100,9 @@ class HFRealEntryQualityDiagnosticsEngine:
 
         target_cycles = [cycle for cycle in cycles if str(cycle.close_reason or "") == "real_pilot_target"]
         timeout_cycles = [cycle for cycle in cycles if self._is_timeout_reason(cycle.close_reason)]
-        target_touched_count = sum(1 for cycle in cycles if cycle.target_touched)
-        timeout_no_touch_count = sum(1 for cycle in timeout_cycles if not cycle.target_touched)
+        target_touched_count = sum(1 for cycle in cycles if cycle.reference_target_touched)
+        executable_target_touched_count = sum(1 for cycle in cycles if cycle.executable_target_touched)
+        timeout_no_touch_count = sum(1 for cycle in timeout_cycles if not cycle.reference_target_touched)
         timeout_loss_count = sum(1 for cycle in timeout_cycles if cycle.net_profit < 0)
         breakeven_count = sum(1 for cycle in cycles if abs(cycle.net_profit) <= 1e-12)
         category_counts: dict[str, int] = {}
@@ -111,6 +116,7 @@ class HFRealEntryQualityDiagnosticsEngine:
             total_analyzed_cycles=len(cycles) + cycles_without_blackbox,
             cycles_with_blackbox=len(cycles),
             target_touched_count=target_touched_count,
+            executable_target_touched_count=executable_target_touched_count,
             timeout_no_touch_count=timeout_no_touch_count,
             timeout_loss_count=timeout_loss_count,
             breakeven_count=breakeven_count,
@@ -151,6 +157,9 @@ class HFRealEntryQualityDiagnosticsEngine:
             net_profit=float(cycle.get("net_profit") or 0.0),
             close_reason=cycle.get("close_reason"),
             target_touched=metrics.target_touched,
+            reference_target_touched=metrics.reference_target_touched,
+            executable_target_touched=metrics.executable_target_touched,
+            real_target_close_triggered=metrics.real_target_close_triggered,
             max_favorable_excursion=metrics.max_favorable_excursion,
             max_adverse_excursion=metrics.max_adverse_excursion,
             nearest_target_distance=metrics.nearest_target_distance,
@@ -290,7 +299,7 @@ class HFRealEntryQualityDiagnosticsEngine:
             average_movement_15s=_avg([cycle.movement_after_15s for cycle in cycles if cycle.movement_after_15s is not None]),
             average_movement_30s=_avg([cycle.movement_after_30s for cycle in cycles if cycle.movement_after_30s is not None]),
             average_movement_60s=_avg([cycle.movement_after_60s for cycle in cycles if cycle.movement_after_60s is not None]),
-            target_touch_rate=(sum(1 for cycle in cycles if cycle.target_touched) / len(cycles)) if cycles else 0.0,
+            target_touch_rate=(sum(1 for cycle in cycles if cycle.reference_target_touched) / len(cycles)) if cycles else 0.0,
             timeout_loss_rate=(sum(1 for cycle in cycles if HFRealEntryQualityDiagnosticsEngine._is_timeout_reason(cycle.close_reason) and cycle.net_profit < 0) / len(cycles)) if cycles else 0.0,
             buy_count=sum(1 for cycle in cycles if cycle.direction == "BUY_USDC"),
             sell_count=sum(1 for cycle in cycles if cycle.direction == "SELL_USDC"),

@@ -108,6 +108,7 @@ from analytics.hf_extreme_move_diagnostics_engine import HFExtremeMoveDiagnostic
 from analytics.hf_profit_audit_engine import HFProfitAuditEngine
 from analytics.hf_production_readiness_engine import HFProductionReadinessEngine
 from analytics.hf_real_blackbox_engine import HFRealBlackboxDiagnosticsEngine
+from analytics.hf_real_close_watcher_gap_diagnostics_engine import HFRealCloseWatcherGapDiagnosticsEngine
 from analytics.hf_real_dry_run_engine import HFRealDryRunEngine
 from analytics.hf_real_entry_quality_engine import (
     HFRealEntryGroupMetrics,
@@ -4336,7 +4337,10 @@ def _render_hf_real_vs_paper_rich(report) -> bool:
         ("Target", "white"),
         ("Reason", "yellow"),
         ("Net", "white"),
-        ("Touched", "white"),
+        ("Ref touch", "white"),
+        ("Exec touch", "white"),
+        ("Close trig", "white"),
+        ("Target order", "white"),
         ("Paper delta", "white"),
     ])
     for cycle in report.cycles:
@@ -4348,7 +4352,10 @@ def _render_hf_real_vs_paper_rich(report) -> bool:
             f"{cycle.target_price:.8f}",
             cycle.close_reason or "N/A",
             _rich_cell(f"{cycle.net_profit:+.8f}", _rich_pnl_style(cycle.net_profit)),
-            _rich_cell("yes" if cycle.target_touched else "no", _rich_bool_style(cycle.target_touched)),
+            _rich_cell("yes" if cycle.reference_target_touched else "no", _rich_bool_style(cycle.reference_target_touched)),
+            _rich_cell("yes" if cycle.executable_target_touched else "no", _rich_bool_style(cycle.executable_target_touched)),
+            _rich_cell("yes" if cycle.real_target_close_triggered else "no", _rich_bool_style(cycle.real_target_close_triggered)),
+            _rich_cell("filled" if cycle.target_close_order_filled else ("sent" if cycle.target_close_order_sent else "no"), "green" if cycle.target_close_order_filled else ("yellow" if cycle.target_close_order_sent else "red")),
             _rich_cell(f"{cycle.real_minus_paper_delta:+.8f}", _rich_pnl_style(cycle.real_minus_paper_delta)),
         )
     console.print(cycles)
@@ -4400,7 +4407,7 @@ def _render_hf_real_vs_paper_ansi(report) -> None:
         ("Recommendation", report.recommendation, _rich_status_style(report.recommendation)),
     ])
     _ansi_table("Real Cycles", [
-        "ID", "Dir", "Open", "Close", "Target", "Reason", "Net", "Touched", "Paper delta",
+        "ID", "Dir", "Open", "Close", "Target", "Reason", "Net", "Ref touch", "Exec touch", "Close trig", "Target order", "Paper delta",
     ], [[
         (cycle.db_id, None),
         (cycle.direction, None),
@@ -4409,7 +4416,10 @@ def _render_hf_real_vs_paper_ansi(report) -> None:
         (f"{cycle.target_price:.8f}", None),
         (cycle.close_reason or "N/A", "yellow"),
         (f"{cycle.net_profit:+.8f}", _rich_pnl_style(cycle.net_profit)),
-        ("yes" if cycle.target_touched else "no", _rich_bool_style(cycle.target_touched)),
+        ("yes" if cycle.reference_target_touched else "no", _rich_bool_style(cycle.reference_target_touched)),
+        ("yes" if cycle.executable_target_touched else "no", _rich_bool_style(cycle.executable_target_touched)),
+        ("yes" if cycle.real_target_close_triggered else "no", _rich_bool_style(cycle.real_target_close_triggered)),
+        ("filled" if cycle.target_close_order_filled else ("sent" if cycle.target_close_order_sent else "no"), "green" if cycle.target_close_order_filled else ("yellow" if cycle.target_close_order_sent else "red")),
         (f"{cycle.real_minus_paper_delta:+.8f}", _rich_pnl_style(cycle.real_minus_paper_delta)),
     ] for cycle in report.cycles])
     _ansi_table("Path / Execution", [
@@ -4442,7 +4452,8 @@ def _render_hf_real_entry_quality_rich(report) -> bool:
     summary.add_row("Total analyzed cycles", str(report.total_analyzed_cycles))
     summary.add_row("Cycles with blackbox", str(report.cycles_with_blackbox))
     summary.add_row("Cycles without blackbox", str(report.cycles_without_blackbox))
-    summary.add_row("Target touched count", _rich_cell(report.target_touched_count, "green" if report.target_touched_count else "yellow"))
+    summary.add_row("Reference target touched", _rich_cell(report.target_touched_count, "green" if report.target_touched_count else "yellow"))
+    summary.add_row("Executable target touched", _rich_cell(report.executable_target_touched_count, "green" if report.executable_target_touched_count else "yellow"))
     summary.add_row("Timeout no-touch count", _rich_cell(report.timeout_no_touch_count, "red" if report.timeout_no_touch_count else "green"))
     summary.add_row("Timeout loss count", _rich_cell(report.timeout_loss_count, "red" if report.timeout_loss_count else "green"))
     summary.add_row("Breakeven count", str(report.breakeven_count))
@@ -4459,7 +4470,9 @@ def _render_hf_real_entry_quality_rich(report) -> bool:
         ("Target", "white"),
         ("Close", "white"),
         ("Net", "white"),
-        ("Touched", "white"),
+        ("Ref touch", "white"),
+        ("Exec touch", "white"),
+        ("Close trig", "white"),
         ("Category", "yellow"),
         ("MFE", "green"),
         ("MAE", "red"),
@@ -4472,7 +4485,9 @@ def _render_hf_real_entry_quality_rich(report) -> bool:
             f"{cycle.target_price:.8f}",
             _format_optional_float(cycle.close_price),
             _rich_cell(f"{cycle.net_profit:+.8f}", _rich_pnl_style(cycle.net_profit)),
-            _rich_cell("yes" if cycle.target_touched else "no", _rich_bool_style(cycle.target_touched)),
+            _rich_cell("yes" if cycle.reference_target_touched else "no", _rich_bool_style(cycle.reference_target_touched)),
+            _rich_cell("yes" if cycle.executable_target_touched else "no", _rich_bool_style(cycle.executable_target_touched)),
+            _rich_cell("yes" if cycle.real_target_close_triggered else "no", _rich_bool_style(cycle.real_target_close_triggered)),
             cycle.entry_quality_category,
             _format_optional_float(cycle.max_favorable_excursion),
             _format_optional_float(cycle.max_adverse_excursion),
@@ -4514,7 +4529,8 @@ def _render_hf_real_entry_quality_ansi(report) -> None:
         ("Total analyzed cycles", report.total_analyzed_cycles, None),
         ("Cycles with blackbox", report.cycles_with_blackbox, None),
         ("Cycles without blackbox", report.cycles_without_blackbox, None),
-        ("Target touched count", report.target_touched_count, "green" if report.target_touched_count else "yellow"),
+        ("Reference target touched", report.target_touched_count, "green" if report.target_touched_count else "yellow"),
+        ("Executable target touched", report.executable_target_touched_count, "green" if report.executable_target_touched_count else "yellow"),
         ("Timeout no-touch count", report.timeout_no_touch_count, "red" if report.timeout_no_touch_count else "green"),
         ("Timeout loss count", report.timeout_loss_count, "red" if report.timeout_loss_count else "green"),
         ("Breakeven count", report.breakeven_count, None),
@@ -4524,7 +4540,7 @@ def _render_hf_real_entry_quality_ansi(report) -> None:
     if not report.cycles:
         return
     _ansi_table("Entry Quality By Cycle", [
-        "ID", "Dir", "Open", "Target", "Close", "Net", "Touched", "Category", "MFE", "MAE",
+        "ID", "Dir", "Open", "Target", "Close", "Net", "Ref touch", "Exec touch", "Close trig", "Category", "MFE", "MAE",
     ], [[
         (cycle.db_id, None),
         (cycle.direction, None),
@@ -4532,7 +4548,9 @@ def _render_hf_real_entry_quality_ansi(report) -> None:
         (f"{cycle.target_price:.8f}", None),
         (_format_optional_float(cycle.close_price), None),
         (f"{cycle.net_profit:+.8f}", _rich_pnl_style(cycle.net_profit)),
-        ("yes" if cycle.target_touched else "no", _rich_bool_style(cycle.target_touched)),
+        ("yes" if cycle.reference_target_touched else "no", _rich_bool_style(cycle.reference_target_touched)),
+        ("yes" if cycle.executable_target_touched else "no", _rich_bool_style(cycle.executable_target_touched)),
+        ("yes" if cycle.real_target_close_triggered else "no", _rich_bool_style(cycle.real_target_close_triggered)),
         (cycle.entry_quality_category, "yellow"),
         (_format_optional_float(cycle.max_favorable_excursion), "green"),
         (_format_optional_float(cycle.max_adverse_excursion), "red"),
@@ -4568,7 +4586,7 @@ def _render_hf_post_exit_observer_result_rich(profile: str, result) -> bool:
     overview.add_row("Expected snapshots", str(result.expected_snapshots_count or "N/A"))
     overview.add_row("Actual snapshots", _rich_cell(result.snapshots_count, "green" if result.snapshots_count else "yellow"))
     overview.add_row("Effective avg interval", _format_optional_seconds(result.effective_average_interval_seconds))
-    overview.add_row("Target before exit", _rich_cell(_format_optional_bool(result.target_was_reached_before_exit), _rich_bool_style(result.target_was_reached_before_exit)))
+    overview.add_row("Cycle closed/close price target", _rich_cell(_format_optional_bool(result.target_was_reached_before_exit), _rich_bool_style(result.target_was_reached_before_exit)))
     overview.add_row("Target at observer start", _rich_cell(_format_optional_bool(result.target_satisfied_at_observer_start), _rich_bool_style(result.target_satisfied_at_observer_start)))
     overview.add_row("Post target touched", _rich_cell(_format_optional_bool(result.post_exit_target_touched), _rich_bool_style(result.post_exit_target_touched)))
     overview.add_row("Target revisited", _rich_cell(_format_optional_bool(result.target_revisited_after_exit), _rich_bool_style(result.target_revisited_after_exit)))
@@ -4599,7 +4617,7 @@ def _render_hf_post_exit_observer_result_ansi(profile: str, result) -> None:
         ("Expected snapshots", result.expected_snapshots_count or "N/A", None),
         ("Actual snapshots", result.snapshots_count, "green" if result.snapshots_count else "yellow"),
         ("Effective avg interval", _format_optional_seconds(result.effective_average_interval_seconds), None),
-        ("Target before exit", _format_optional_bool(result.target_was_reached_before_exit), _rich_bool_style(result.target_was_reached_before_exit)),
+        ("Cycle closed/close price target", _format_optional_bool(result.target_was_reached_before_exit), _rich_bool_style(result.target_was_reached_before_exit)),
         ("Target at observer start", _format_optional_bool(result.target_satisfied_at_observer_start), _rich_bool_style(result.target_satisfied_at_observer_start)),
         ("Post target touched", _format_optional_bool(result.post_exit_target_touched), _rich_bool_style(result.post_exit_target_touched)),
         ("Target revisited", _format_optional_bool(result.target_revisited_after_exit), _rich_bool_style(result.target_revisited_after_exit)),
@@ -4678,7 +4696,7 @@ def _render_hf_post_exit_observer_report_rich(
     console.print(observer_table)
 
     metrics = _rich_table("Research Answer")
-    metrics.add_row("Target reached before exit", _rich_cell(_format_optional_bool(result.target_was_reached_before_exit if result else summary.get("target_was_reached_before_exit")), _rich_bool_style(result.target_was_reached_before_exit if result else summary.get("target_was_reached_before_exit"))))
+    metrics.add_row("Cycle closed/close price target", _rich_cell(_format_optional_bool(result.target_was_reached_before_exit if result else summary.get("target_was_reached_before_exit")), _rich_bool_style(result.target_was_reached_before_exit if result else summary.get("target_was_reached_before_exit"))))
     metrics.add_row("Target satisfied at observer start", _rich_cell(_format_optional_bool(result.target_satisfied_at_observer_start if result else summary.get("target_satisfied_at_observer_start")), _rich_bool_style(result.target_satisfied_at_observer_start if result else summary.get("target_satisfied_at_observer_start"))))
     if cycle["close_reason"] == "real_pilot_target":
         metrics.add_row("Target revisited after exit", _rich_cell(_format_optional_bool(result.target_revisited_after_exit if result else summary.get("target_revisited_after_exit")), _rich_bool_style(result.target_revisited_after_exit if result else summary.get("target_revisited_after_exit"))))
@@ -4751,7 +4769,7 @@ def _render_hf_post_exit_observer_report_ansi(
             ("Time to post target", _format_optional_seconds(result.time_to_post_target if result else summary["time_to_post_target"]), None),
         ]
     _ansi_kv_table("Research Answer", [
-        ("Target reached before exit", _format_optional_bool(result.target_was_reached_before_exit if result else summary.get("target_was_reached_before_exit")), _rich_bool_style(result.target_was_reached_before_exit if result else summary.get("target_was_reached_before_exit"))),
+        ("Cycle closed/close price target", _format_optional_bool(result.target_was_reached_before_exit if result else summary.get("target_was_reached_before_exit")), _rich_bool_style(result.target_was_reached_before_exit if result else summary.get("target_was_reached_before_exit"))),
         ("Target at observer start", _format_optional_bool(result.target_satisfied_at_observer_start if result else summary.get("target_satisfied_at_observer_start")), _rich_bool_style(result.target_satisfied_at_observer_start if result else summary.get("target_satisfied_at_observer_start"))),
         *target_rows,
         ("Closest distance after exit", _format_optional_float(result.closest_distance_after_exit if result else summary["closest_distance_after_exit"]), None),
@@ -5214,7 +5232,10 @@ def command_hf_real_vs_paper_diagnostics(args) -> None:
             "  excursion: "
             f"MFE={_format_optional_float(cycle.max_favorable_excursion)} | "
             f"MAE={_format_optional_float(cycle.max_adverse_excursion)} | "
-            f"target_touched={'yes' if cycle.target_touched else 'no'} | "
+            f"reference_target_touched={'yes' if cycle.reference_target_touched else 'no'} | "
+            f"executable_target_touched={'yes' if cycle.executable_target_touched else 'no'} | "
+            f"real_target_close_triggered={'yes' if cycle.real_target_close_triggered else 'no'} | "
+            f"target_close_order={'filled' if cycle.target_close_order_filled else ('sent' if cycle.target_close_order_sent else 'no')} | "
             f"nearest_target_at={_format_optional_seconds(cycle.nearest_target_seconds)} | "
             f"missed_distance={_format_optional_float(cycle.missed_target_distance)}"
         )
@@ -5251,6 +5272,177 @@ def command_hf_real_vs_paper_diagnostics(args) -> None:
     print(f"- recommendation: {report.recommendation}")
 
 
+def command_hf_real_close_watcher_gap_diagnostics(args) -> None:
+    _config, _logger, database = build_context()
+    report = HFRealCloseWatcherGapDiagnosticsEngine(database).build_report(
+        args.profile,
+        real_cycle_id=args.real_cycle_id,
+    )
+
+    console = _rich_console()
+    if console is not None:
+        console.print(Panel.fit(
+            f"[bold cyan]HF Real Close Watcher Gap Diagnostics[/bold cyan]\n[dim]{report.profile}[/dim]",
+            border_style=_rich_status_style(report.recommendation),
+        ))
+        summary = _rich_table("Summary")
+        summary.add_row("Cycles analyzed", str(report.cycles_analyzed))
+        summary.add_row("Executable touches", _rich_cell(report.executable_touches, "green" if report.executable_touches else "yellow"))
+        summary.add_row("Immediate checks performed", str(report.immediate_checks_performed))
+        summary.add_row("Immediate target triggers", _rich_cell(report.immediate_target_triggers, "green" if report.immediate_target_triggers else "yellow"))
+        summary.add_row("Regular watcher triggers", _rich_cell(report.regular_watcher_triggers, "green" if report.regular_watcher_triggers else "yellow"))
+        summary.add_row("Missed executable touches", _rich_cell(report.missed_executable_touches, "red" if report.missed_executable_touches else "green"))
+        summary.add_row("Missed-touch rate", f"{report.missed_touch_rate:.2%}")
+        summary.add_row("Avg fill to first check", _format_optional_seconds(report.average_fill_to_first_check_delay))
+        summary.add_row("Max fill to first check", _format_optional_seconds(report.maximum_fill_to_first_check_delay))
+        summary.add_row("Recommendation", _rich_cell(report.recommendation, _rich_status_style(report.recommendation)))
+        console.print(summary)
+        if report.affected_cycles:
+            affected = _rich_table("Affected Cycles", [
+                ("ID", "cyan"), ("Dir", "white"), ("Target", "white"), ("Touch at", "white"),
+                ("First check", "white"), ("Fill->check", "yellow"), ("Entry snap->check", "yellow"),
+                ("MFE", "green"), ("MAE", "red"), ("Net", "white"),
+            ])
+            for cycle in report.affected_cycles:
+                affected.add_row(
+                    str(cycle.db_id),
+                    cycle.direction,
+                    f"{cycle.target_price:.8f}",
+                    cycle.executable_touch_timestamp or "N/A",
+                    cycle.first_watcher_check_timestamp or "N/A",
+                    _format_optional_seconds(cycle.fill_to_first_check_seconds),
+                    _format_optional_seconds(cycle.entry_snapshot_to_first_check_seconds),
+                    _format_optional_float(cycle.max_favorable_excursion),
+                    _format_optional_float(cycle.max_adverse_excursion),
+                    _rich_cell(f"{cycle.net_profit:+.8f}", _rich_pnl_style(cycle.net_profit)),
+                )
+            console.print(affected)
+        if report.cycle_report is not None:
+            _print_close_watcher_gap_cycle_report_rich(console, report.cycle_report)
+        return
+
+    print("=== HF Real Close Watcher Gap Diagnostics ===")
+    print(f"Profile: {report.profile}")
+    print(f"Cycles analyzed: {report.cycles_analyzed}")
+    print(f"Executable touches: {report.executable_touches}")
+    print(f"Immediate checks performed: {report.immediate_checks_performed}")
+    print(f"Immediate target triggers: {report.immediate_target_triggers}")
+    print(f"Regular watcher triggers: {report.regular_watcher_triggers}")
+    print(f"Missed executable touches: {report.missed_executable_touches}")
+    print(f"Missed-touch rate: {report.missed_touch_rate:.2%}")
+    print(f"Average fill-to-first-check delay: {_format_optional_seconds(report.average_fill_to_first_check_delay)}")
+    print(f"Maximum fill-to-first-check delay: {_format_optional_seconds(report.maximum_fill_to_first_check_delay)}")
+    print(f"Recommendation: {report.recommendation}")
+    if report.affected_cycles:
+        print("")
+        print("Affected cycles:")
+        for cycle in report.affected_cycles:
+            print(
+                f"- db_id={cycle.db_id} | {cycle.direction} | target={cycle.target_price:.8f} | "
+                f"touch_at={cycle.executable_touch_timestamp or 'N/A'} | "
+                f"first_check={cycle.first_watcher_check_timestamp or 'N/A'} | "
+                f"fill_to_check={_format_optional_seconds(cycle.fill_to_first_check_seconds)} | "
+                f"entry_snapshot_to_check={_format_optional_seconds(cycle.entry_snapshot_to_first_check_seconds)} | "
+                f"MFE={_format_optional_float(cycle.max_favorable_excursion)} | "
+                f"MAE={_format_optional_float(cycle.max_adverse_excursion)} | "
+                f"net={cycle.net_profit:+.8f}"
+            )
+    if report.cycle_report is not None:
+        _print_close_watcher_gap_cycle_report_plain(report.cycle_report)
+
+
+def _print_close_watcher_gap_cycle_report_rich(console, cycle_report) -> None:
+    title = f"Cycle Timeline db_id={cycle_report.db_id}"
+    if cycle_report.cycle is None:
+        console.print(_rich_cell(f"{title}: cycle not found", "bold red"))
+        return
+    details = _rich_table("Cycle Gap Details")
+    details.add_row("Direction", str(cycle_report.cycle["direction"]))
+    details.add_row("Target", _format_optional_float(cycle_report.target_price))
+    details.add_row("Executable touched", _rich_cell(_format_optional_bool(cycle_report.executable_target_touched), _rich_bool_style(cycle_report.executable_target_touched)))
+    details.add_row("Real close triggered", _rich_cell(_format_optional_bool(cycle_report.real_target_close_triggered), _rich_bool_style(cycle_report.real_target_close_triggered)))
+    details.add_row("Target order sent", _rich_cell(_format_optional_bool(cycle_report.target_close_order_sent), _rich_bool_style(cycle_report.target_close_order_sent)))
+    details.add_row("Target order filled", _rich_cell(_format_optional_bool(cycle_report.target_close_order_filled), _rich_bool_style(cycle_report.target_close_order_filled)))
+    details.add_row("Fill to watcher start", _format_optional_seconds(cycle_report.fill_to_close_watcher_start_seconds))
+    details.add_row("Fill to first check", _format_optional_seconds(cycle_report.fill_to_first_target_check_seconds))
+    details.add_row("Entry snapshot to first check", _format_optional_seconds(cycle_report.entry_snapshot_to_first_check_seconds))
+    immediate = next((check for check in cycle_report.target_checks if check.close_trigger_source == "immediate_post_fill"), None)
+    details.add_row("Immediate check at", immediate.timestamp if immediate else "N/A")
+    details.add_row("Immediate check bid", _format_optional_float(immediate.bid if immediate else None))
+    details.add_row("Immediate check ask", _format_optional_float(immediate.ask if immediate else None))
+    details.add_row("Immediate check price", _format_optional_float(immediate.executable_price if immediate else None))
+    details.add_row("Immediate condition", _rich_cell(_format_optional_bool(immediate.condition_met if immediate else None), _rich_bool_style(immediate.condition_met if immediate else None)))
+    details.add_row("Immediate source", immediate.close_trigger_source if immediate else "N/A")
+    console.print(details)
+    timeline = _rich_table(title, [
+        ("Event", "cyan"), ("Timestamp", "white"), ("From fill", "yellow"), ("Details", "white"),
+    ])
+    for event in cycle_report.timeline:
+        timeline.add_row(
+            event.name,
+            event.timestamp or "N/A",
+            _format_optional_seconds(event.seconds_from_entry_fill),
+            event.details,
+        )
+    console.print(timeline)
+    checks = _rich_table("Target Checks", [
+        ("#", "cyan"), ("Timestamp", "white"), ("Exec price", "white"),
+        ("Bid", "white"), ("Ask", "white"), ("Met", "white"), ("Source", "cyan"), ("From fill", "yellow"),
+    ])
+    for index, check in enumerate(cycle_report.target_checks[:25], start=1):
+        checks.add_row(
+            str(check.iteration or index),
+            check.timestamp,
+            _format_optional_float(check.executable_price),
+            _format_optional_float(check.bid),
+            _format_optional_float(check.ask),
+            _rich_cell(_format_optional_bool(check.condition_met), _rich_bool_style(check.condition_met)),
+            check.close_trigger_source or check.source or "N/A",
+            _format_optional_seconds(check.seconds_from_entry_fill),
+        )
+    console.print(checks)
+
+
+def _print_close_watcher_gap_cycle_report_plain(cycle_report) -> None:
+    print("")
+    print(f"Cycle timeline db_id={cycle_report.db_id}:")
+    if cycle_report.cycle is None:
+        print("- cycle not found")
+        return
+    print(f"- direction: {cycle_report.cycle['direction']}")
+    print(f"- target: {_format_optional_float(cycle_report.target_price)}")
+    print(f"- executable_target_touched: {_format_optional_bool(cycle_report.executable_target_touched)}")
+    print(f"- real_target_close_triggered: {_format_optional_bool(cycle_report.real_target_close_triggered)}")
+    print(f"- target_close_order_sent: {_format_optional_bool(cycle_report.target_close_order_sent)}")
+    print(f"- target_close_order_filled: {_format_optional_bool(cycle_report.target_close_order_filled)}")
+    print(f"- fill_to_close_watcher_start: {_format_optional_seconds(cycle_report.fill_to_close_watcher_start_seconds)}")
+    print(f"- fill_to_first_target_check: {_format_optional_seconds(cycle_report.fill_to_first_target_check_seconds)}")
+    print(f"- entry_snapshot_to_first_check: {_format_optional_seconds(cycle_report.entry_snapshot_to_first_check_seconds)}")
+    immediate = next((check for check in cycle_report.target_checks if check.close_trigger_source == "immediate_post_fill"), None)
+    print(f"- immediate_target_check_at: {immediate.timestamp if immediate else 'N/A'}")
+    print(f"- immediate_target_check_bid: {_format_optional_float(immediate.bid if immediate else None)}")
+    print(f"- immediate_target_check_ask: {_format_optional_float(immediate.ask if immediate else None)}")
+    print(f"- immediate_target_check_price: {_format_optional_float(immediate.executable_price if immediate else None)}")
+    print(f"- immediate_target_condition_result: {_format_optional_bool(immediate.condition_met if immediate else None)}")
+    print(f"- close_trigger_source: {immediate.close_trigger_source if immediate else 'N/A'}")
+    print("Timeline:")
+    for event in cycle_report.timeline:
+        print(
+            f"- {event.name}: {event.timestamp or 'N/A'} | "
+            f"from_fill={_format_optional_seconds(event.seconds_from_entry_fill)} | {event.details}"
+        )
+    print("Target checks:")
+    for index, check in enumerate(cycle_report.target_checks[:25], start=1):
+        print(
+            f"- #{check.iteration or index} {check.timestamp} | "
+            f"exec={_format_optional_float(check.executable_price)} | "
+            f"bid={_format_optional_float(check.bid)} | ask={_format_optional_float(check.ask)} | "
+            f"met={_format_optional_bool(check.condition_met)} | "
+            f"source={check.close_trigger_source or check.source or 'N/A'} | "
+            f"from_fill={_format_optional_seconds(check.seconds_from_entry_fill)}"
+        )
+
+
 def command_hf_real_cycle_blackbox(args) -> None:
     _config, _logger, database = build_context()
     report = HFRealBlackboxDiagnosticsEngine(database).build_report(
@@ -5285,7 +5477,9 @@ def command_hf_real_cycle_blackbox(args) -> None:
         print("Blackbox snapshots: 0")
         print("MFE: N/A")
         print("MAE: N/A")
-        print("Target touched: N/A")
+        print("Reference target touched: N/A")
+        print("Executable target touched: N/A")
+        print("Real close triggered: N/A")
         print("Suspected reason: data_insufficient")
         print(f"Recommendation: {report.recommendation}")
         return
@@ -5302,8 +5496,11 @@ def command_hf_real_cycle_blackbox(args) -> None:
     print("Path metrics:")
     print(f"- MFE: {_format_optional_float(metrics.max_favorable_excursion)}")
     print(f"- MAE: {_format_optional_float(metrics.max_adverse_excursion)}")
-    print(f"- target_touched: {'yes' if metrics.target_touched else 'no'}")
-    print(f"- first_target_touch: {_format_optional_seconds(metrics.first_target_touch_seconds)}")
+    print(f"- reference_target_touched: {'yes' if metrics.reference_target_touched else 'no'}")
+    print(f"- executable_target_touched: {'yes' if metrics.executable_target_touched else 'no'}")
+    print(f"- real_target_close_triggered: {'yes' if metrics.real_target_close_triggered else 'no'}")
+    print(f"- first_reference_target_touch: {_format_optional_seconds(metrics.first_target_touch_seconds)}")
+    print(f"- first_executable_target_touch: {_format_optional_seconds(metrics.first_executable_target_touch_seconds)}")
     print(f"- nearest_target_distance: {_format_optional_float(metrics.nearest_target_distance)}")
     print(f"- nearest_target_time: {_format_optional_seconds(metrics.nearest_target_seconds)}")
     print(f"- max_favorable_price: {_format_optional_float(metrics.max_favorable_price)}")
@@ -5506,7 +5703,9 @@ def command_hf_real_entry_quality_diagnostics(args) -> None:
             f"open={cycle.open_price:.8f} | target={cycle.target_price:.8f} | "
             f"close={_format_optional_float(cycle.close_price)} | net={cycle.net_profit:+.8f} | "
             f"reason={cycle.close_reason or 'N/A'} | "
-            f"target_touched={'yes' if cycle.target_touched else 'no'} | "
+            f"reference_target_touched={'yes' if cycle.reference_target_touched else 'no'} | "
+            f"executable_target_touched={'yes' if cycle.executable_target_touched else 'no'} | "
+            f"real_target_close_triggered={'yes' if cycle.real_target_close_triggered else 'no'} | "
             f"category={cycle.entry_quality_category}"
         )
         print(
@@ -5546,7 +5745,8 @@ def command_hf_real_entry_quality_diagnostics(args) -> None:
     _print_real_entry_group_metrics(report.timeout_metrics)
     print("")
     print("Summary:")
-    print(f"- target touched count: {report.target_touched_count}")
+    print(f"- reference target touched count: {report.target_touched_count}")
+    print(f"- executable target touched count: {report.executable_target_touched_count}")
     print(f"- timeout no-touch count: {report.timeout_no_touch_count}")
     print(f"- timeout loss count: {report.timeout_loss_count}")
     print(f"- breakeven count: {report.breakeven_count}")
@@ -8018,6 +8218,18 @@ def build_parser() -> argparse.ArgumentParser:
         default="mean_reversion_hf_micro_v1",
     )
     hf_real_vs_paper_diagnostics_parser.set_defaults(func=command_hf_real_vs_paper_diagnostics)
+
+    hf_real_close_gap_parser = subparsers.add_parser(
+        "hf-real-close-watcher-gap-diagnostics",
+        help="Read-only diagnostics for gaps between real entry fill and close watcher target checks",
+    )
+    hf_real_close_gap_parser.add_argument(
+        "--profile",
+        choices=SUPPORTED_RUNTIME_STRATEGY_PROFILES,
+        default="mean_reversion_hf_micro_v1",
+    )
+    hf_real_close_gap_parser.add_argument("--real-cycle-id", type=_positive_int, default=None)
+    hf_real_close_gap_parser.set_defaults(func=command_hf_real_close_watcher_gap_diagnostics)
 
     hf_real_cycle_blackbox_parser = subparsers.add_parser(
         "hf-real-cycle-blackbox",
